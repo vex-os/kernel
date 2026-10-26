@@ -2,6 +2,7 @@
 #include <vex/atomic.h>
 #include <vex/errno.h>
 #include <vex/event.h>
+#include <vex/fcntl.h>
 #include <vex/file.h>
 #include <vex/kmalloc.h>
 #include <vex/kprintf.h>
@@ -54,14 +55,15 @@ static int grow_fds_locked(process_t* process, size_t fd)
         new_max = CONFIG_MAX_FDS;
     }
 
-    file_t** grown = krealloc(process->fds, new_max * sizeof(file_t*));
+    fd_slot_t* grown = krealloc(process->fds, new_max * sizeof(fd_slot_t));
 
     if(grown == nullptr) {
         return -ENOMEM;
     }
 
     for(size_t i = process->max_fds; i < new_max; ++i) {
-        grown[i] = nullptr;
+        grown[i].file = nullptr;
+        grown[i].flags = 0;
     }
 
     process->fds = grown;
@@ -183,7 +185,7 @@ static void release_files(process_t* restrict process)
 
     spinlock_acquire(&process->fd_lock);
 
-    file_t** fds = process->fds;
+    fd_slot_t* fds = process->fds;
     size_t max_fds = process->max_fds;
 
     process->fds = nullptr;
@@ -193,7 +195,7 @@ static void release_files(process_t* restrict process)
     spinlock_release(&process->fd_lock);
 
     for(size_t i = 0; i < max_fds; ++i) {
-        file_close(fds[i]);
+        file_close(fds[i].file);
     }
 
     kfree(fds);
@@ -656,7 +658,7 @@ file_t* process_fd_get(process_t* process, int fd)
     file_t* file = nullptr;
 
     if(fd >= 0 && (size_t)(fd) < process->max_fds) {
-        file = file_dupe(process->fds[fd]);
+        file = file_dupe(process->fds[fd].file);
     }
 
     spinlock_release(&process->fd_lock);
@@ -664,13 +666,18 @@ file_t* process_fd_get(process_t* process, int fd)
     return file;
 }
 
-int process_fd_alloc(process_t* process, file_t* file)
+int process_fd_alloc(process_t* process, file_t* file, int min_fd, uint32_t fd_flags)
 {
+    if(min_fd < 0 || min_fd >= CONFIG_MAX_FDS) {
+        return -EINVAL;
+    }
+
     spinlock_acquire(&process->fd_lock);
 
-    for(size_t fd = 0; fd < process->max_fds; ++fd) {
-        if(process->fds[fd] == nullptr) {
-            process->fds[fd] = file;
+    for(size_t fd = min_fd; fd < process->max_fds; ++fd) {
+        if(process->fds[fd].file == nullptr) {
+            process->fds[fd].file = file;
+            process->fds[fd].flags = fd_flags;
             process->num_fds += 1;
             spinlock_release(&process->fd_lock);
             return fd;
@@ -678,6 +685,11 @@ int process_fd_alloc(process_t* process, file_t* file)
     }
 
     int fd = process->max_fds;
+
+    if(fd < min_fd) {
+        fd = min_fd;
+    }
+
     int retval = grow_fds_locked(process, fd);
 
     if(retval < 0) {
@@ -685,7 +697,8 @@ int process_fd_alloc(process_t* process, file_t* file)
         return retval;
     }
 
-    process->fds[fd] = file;
+    process->fds[fd].file = file;
+    process->fds[fd].flags = fd_flags;
     process->num_fds += 1;
 
     spinlock_release(&process->fd_lock);
@@ -693,7 +706,7 @@ int process_fd_alloc(process_t* process, file_t* file)
     return fd;
 }
 
-int process_fd_dup(process_t* process, int old_fd, int new_fd)
+int process_fd_dup(process_t* process, int old_fd, int new_fd, uint32_t fd_flags)
 {
     file_t* copy = process_fd_get(process, old_fd);
 
@@ -707,7 +720,7 @@ int process_fd_dup(process_t* process, int old_fd, int new_fd)
     }
 
     if(new_fd < 0) {
-        int fd = process_fd_alloc(process, copy);
+        int fd = process_fd_alloc(process, copy, 0, fd_flags);
 
         if(fd < 0) {
             file_close(copy);
@@ -733,8 +746,9 @@ int process_fd_dup(process_t* process, int old_fd, int new_fd)
         return retval;
     }
 
-    file_t* replaced = process->fds[new_fd];
-    process->fds[new_fd] = copy;
+    file_t* replaced = process->fds[new_fd].file;
+    process->fds[new_fd].file = copy;
+    process->fds[new_fd].flags = fd_flags;
 
     if(replaced == nullptr) {
         process->num_fds += 1;
@@ -753,13 +767,14 @@ int process_fd_release(process_t* process, int fd)
 {
     spinlock_acquire(&process->fd_lock);
 
-    if(fd < 0 || (size_t)(fd) >= process->max_fds || process->fds[fd] == nullptr) {
+    if(fd < 0 || (size_t)(fd) >= process->max_fds || process->fds[fd].file == nullptr) {
         spinlock_release(&process->fd_lock);
         return -EBADF;
     }
 
-    file_t* file = process->fds[fd];
-    process->fds[fd] = nullptr;
+    file_t* file = process->fds[fd].file;
+    process->fds[fd].file = nullptr;
+    process->fds[fd].flags = 0;
     process->num_fds -= 1;
 
     spinlock_release(&process->fd_lock);
@@ -769,14 +784,79 @@ int process_fd_release(process_t* process, int fd)
     return 0;
 }
 
+int process_fd_get_flags(process_t* process, int fd)
+{
+    spinlock_acquire(&process->fd_lock);
+
+    int retval = -EBADF;
+
+    if(fd >= 0 && (size_t)(fd) < process->max_fds && process->fds[fd].file) {
+        retval = process->fds[fd].flags;
+    }
+
+    spinlock_release(&process->fd_lock);
+
+    return retval;
+}
+
+int process_fd_set_flags(process_t* process, int fd, uint32_t fd_flags)
+{
+    spinlock_acquire(&process->fd_lock);
+
+    int retval = -EBADF;
+
+    if(fd >= 0 && (size_t)(fd) < process->max_fds && process->fds[fd].file) {
+        process->fds[fd].flags = fd_flags;
+        retval = 0;
+    }
+
+    spinlock_release(&process->fd_lock);
+
+    return retval;
+}
+
+void process_fds_close_on_exec(process_t* process)
+{
+    size_t fd = 0;
+
+    // Closing may sleep in the filesystem, so each
+    // descriptor leaves the table under the lock and closes outside it
+    for(;;) {
+        spinlock_acquire(&process->fd_lock);
+
+        file_t* file = nullptr;
+
+        while(fd < process->max_fds && file == nullptr) {
+            fd_slot_t* slot = &process->fds[fd];
+
+            if(slot->file && (slot->flags & FD_CLOEXEC)) {
+                file = slot->file;
+                slot->file = nullptr;
+                slot->flags = 0;
+                process->num_fds -= 1;
+            }
+
+            fd += 1;
+        }
+
+        spinlock_release(&process->fd_lock);
+
+        if(file == nullptr) {
+            return;
+        }
+
+        file_close(file);
+    }
+}
+
 int process_fds_copy(process_t* restrict process, process_t* restrict source)
 {
     spinlock_acquire(&source->fd_lock);
 
-    file_t** fds = nullptr;
+    fd_slot_t* fds = nullptr;
 
     if(source->max_fds) {
-        fds = kmalloc(source->max_fds * sizeof(file_t*));
+        fds = kmalloc(source->max_fds * sizeof(fd_slot_t));
 
         if(fds == nullptr) {
             spinlock_release(&source->fd_lock);
@@ -784,7 +864,8 @@ int process_fds_copy(process_t* restrict process, process_t* restrict source)
         }
 
         for(size_t i = 0; i < source->max_fds; ++i) {
-            fds[i] = file_dupe(source->fds[i]);
+            fds[i].file = file_dupe(source->fds[i].file);
+            fds[i].flags = source->fds[i].flags;
         }
     }
 

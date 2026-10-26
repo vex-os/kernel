@@ -1,4 +1,5 @@
 #include <vex/errno.h>
+#include <vex/fcntl.h>
 #include <vex/syscall.h>
 
 #include "ktest.h"
@@ -6,6 +7,9 @@
 alignas(16) static char spinner_stack[KTEST_THREAD_STACK_SIZE];
 static volatile int spinner_running;
 static char pid_text[24];
+
+#define CLOEXEC_FD 10
+#define KEPT_FD    11
 
 [[noreturn]] static void spinner(long arg)
 {
@@ -52,6 +56,10 @@ static int exec_child(char** argv)
     ktest_expect(pid == parse_number(argv[2]), 1);             // the process is the same
     ktest_expect(ktest_syscall1(__k_SYS_GETTID, 0) == pid, 1); // the surviving thread took the pid as its tid
 
+    // Only the descriptor with the close-on-exec flag went away with the old image
+    ktest_expect(ktest_syscall3(__k_SYS_FCNTL, CLOEXEC_FD, __k_F_GETFD, 0), -__k_EBADF);
+    ktest_expect(ktest_syscall3(__k_SYS_FCNTL, KEPT_FD, __k_F_GETFD, 0), 0);
+
     return 42;
 }
 
@@ -67,6 +75,9 @@ int main(int argc, char** argv)
     long child = ktest_syscall1(__k_SYS_FORK, 0);
 
     if(child == 0) {
+        ktest_assert(ktest_syscall3(__k_SYS_FCNTL, KTEST_STDOUT, __k_F_DUPFD_CLOEXEC, CLOEXEC_FD) == CLOEXEC_FD);
+        ktest_assert(ktest_syscall3(__k_SYS_FCNTL, KTEST_STDOUT, __k_F_DUPFD, KEPT_FD) == KEPT_FD);
+
         ktest_syscall5(__k_SYS_THREAD_CREATE, (long)&spinner, (long)(spinner_stack + KTEST_THREAD_STACK_SIZE - 8), 0, 0, 0);
 
         while(!spinner_running) {

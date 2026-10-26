@@ -65,7 +65,49 @@ int main(void)
     ktest_expect(ktest_syscall3(__k_SYS_FCNTL, fd, __k_F_SETFL, __k_O_NONBLOCK | __k_O_WRONLY), 0);
     ktest_expect(ktest_syscall3(__k_SYS_FCNTL, fd, __k_F_GETFL, 0) == (__k_O_RDONLY | __k_O_NONBLOCK), 1);
     ktest_expect(ktest_syscall3(__k_SYS_FCNTL, fd, 99, 0), -__k_EINVAL);
+
+    // The close-on-exec flag lives on the descriptor, so a duplicate starts without it
+    ktest_expect(ktest_syscall3(__k_SYS_FCNTL, fd, __k_F_GETFD, 0), 0);
+    ktest_expect(ktest_syscall3(__k_SYS_FCNTL, fd, __k_F_SETFD, __k_FD_CLOEXEC), 0);
+    ktest_expect(ktest_syscall3(__k_SYS_FCNTL, fd, __k_F_GETFD, 0), __k_FD_CLOEXEC);
+    long duplicate = ktest_syscall3(__k_SYS_FCNTL, fd, __k_F_DUPFD, 20);
+    ktest_expect(duplicate, 20);
+    ktest_expect(ktest_syscall3(__k_SYS_FCNTL, duplicate, __k_F_GETFD, 0), 0);
+    ktest_close(duplicate);
+    duplicate = ktest_syscall3(__k_SYS_FCNTL, fd, __k_F_DUPFD_CLOEXEC, 20);
+    ktest_expect(duplicate, 20);
+    ktest_expect(ktest_syscall3(__k_SYS_FCNTL, duplicate, __k_F_GETFD, 0), __k_FD_CLOEXEC);
+    ktest_close(duplicate);
+    ktest_expect(ktest_syscall3(__k_SYS_FCNTL, fd, __k_F_DUPFD, -1), -__k_EINVAL);
+
+    // dup3 refuses the same descriptor and flags other than O_CLOEXEC
+    ktest_expect(ktest_syscall3(__k_SYS_DUP3, fd, fd, 0), -__k_EINVAL);
+    ktest_expect(ktest_syscall3(__k_SYS_DUP3, fd, 21, __k_O_APPEND), -__k_EINVAL);
+    ktest_expect(ktest_syscall3(__k_SYS_DUP3, fd, 21, __k_O_CLOEXEC), 21);
+    ktest_expect(ktest_syscall3(__k_SYS_FCNTL, 21, __k_F_GETFD, 0), __k_FD_CLOEXEC);
+    ktest_close(21);
     ktest_close(fd);
+
+    // O_CLOEXEC reaches the descriptor and not the open file
+    fd = ktest_open("filename.txt", __k_O_RDONLY | __k_O_CLOEXEC, 0);
+    ktest_assert(fd >= 0);
+    ktest_expect(ktest_syscall3(__k_SYS_FCNTL, fd, __k_F_GETFD, 0), __k_FD_CLOEXEC);
+    ktest_expect(ktest_syscall3(__k_SYS_FCNTL, fd, __k_F_GETFL, 0), __k_O_RDONLY);
+    ktest_close(fd);
+
+    // O_DIRECTORY wants a directory, and O_NOFOLLOW stops at a symlink
+    make_directory("opendir");
+    ktest_expect(ktest_open("filename.txt", __k_O_RDONLY | __k_O_DIRECTORY, 0), -__k_ENOTDIR);
+    fd = ktest_open("opendir", __k_O_RDONLY | __k_O_DIRECTORY, 0);
+    ktest_expect(fd >= 0, 1);
+    ktest_close(fd);
+    ktest_expect(ktest_syscall3(__k_SYS_SYMLINKAT, (long)("filename.txt"), __k_AT_FDCWD, (long)("opensym")), 0);
+    ktest_expect(ktest_open("opensym", __k_O_RDONLY | __k_O_NOFOLLOW, 0), -__k_ELOOP);
+    fd = ktest_open("opensym", __k_O_RDONLY, 0);
+    ktest_expect(fd >= 0, 1);
+    ktest_close(fd);
+    ktest_expect(unlink_path("opensym", 0), 0);
+    ktest_expect(unlink_path("opendir", __k_AT_REMOVEDIR), 0);
 
     // unlinkat refuses a directory without AT_REMOVEDIR
     make_directory("subdir");

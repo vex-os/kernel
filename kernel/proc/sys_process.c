@@ -247,6 +247,7 @@ static intptr_t exec_image(thread_t* restrict thread, char* restrict path, char*
     thread->sig_altstack_size = 0;
     thread->clear_tid = 0; // An address in the image just left
     atomic_fetch_or(&process->flags, PROCESS_DID_EXEC, ATOMIC_RELEASE);
+    process_fds_close_on_exec(process);
 
     vms_release(old_vms);
 

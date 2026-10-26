@@ -27,6 +27,17 @@ static unsigned access_for(unsigned flags)
 
 int file_open_node(vnode_t* restrict node, unsigned flags, const credentials_t* restrict credentials, file_t** restrict out)
 {
+    if((flags & O_DIRECTORY) && node->type != VNODE_DIRECTORY) {
+        vnode_decref(node);
+        return -ENOTDIR;
+    }
+
+    // A symlink only gets here when the path stopped at it without following
+    if((flags & O_NOFOLLOW) && node->type == VNODE_SYM_LINK) {
+        vnode_decref(node);
+        return -ELOOP;
+    }
+
     if(node->type == VNODE_DIRECTORY && (flags & (O_WRONLY | O_TRUNC))) {
         vnode_decref(node);
         return -EISDIR;
@@ -94,8 +105,14 @@ int file_open(vnode_t* restrict base_dir, const char* restrict path, unsigned fl
     // symlink there counts even when it dangles
     bool exclusive_create = (flags & O_CREAT) && (flags & O_EXCL);
 
+    unsigned resolve_flags = 0;
+
+    if(exclusive_create || (flags & O_NOFOLLOW)) {
+        resolve_flags = PATH_NOFOLLOW;
+    }
+
     vnode_t* node;
-    int retval = path_resolve_at(base_dir, path, exclusive_create ? PATH_NOFOLLOW : 0, credentials, &node);
+    int retval = path_resolve_at(base_dir, path, resolve_flags, credentials, &node);
     bool created = false;
 
     if(retval == 0 && exclusive_create) {
@@ -123,7 +140,7 @@ int file_open(vnode_t* restrict base_dir, const char* restrict path, unsigned fl
         vnode_decref(parent);
 
         if(retval == -EEXIST && !exclusive_create) {
-            retval = path_resolve_at(base_dir, path, 0, credentials, &node); // Lost a race with another creator
+            retval = path_resolve_at(base_dir, path, resolve_flags, credentials, &node); // Lost a race with another creator
         }
 
         if(retval < 0) {

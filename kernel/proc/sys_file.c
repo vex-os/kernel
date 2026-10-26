@@ -191,27 +191,59 @@ static intptr_t fsync_file(file_t* restrict file, const uintptr_t* restrict args
     return retval;
 }
 
-static intptr_t fcntl_file(file_t* restrict file, const uintptr_t* restrict args)
+static intptr_t fcntl_setfl(file_t* restrict file, uintptr_t value)
 {
-    unsigned command = args[1];
     unsigned flags = file_flags(file);
 
-    if(command == F_GETFL) {
-        return flags;
-    }
-
-    if(command != F_SETFL) {
-        return -EINVAL;
-    }
-
     // As in POSIX, the access mode and the creation flags stay as open left them
-    unsigned changed = args[2] & FCNTL_SETTABLE_FLAGS;
+    unsigned changed = value & FCNTL_SETTABLE_FLAGS;
 
     while(!atomic_cmpxchg_weak(&file->flags, &flags, (flags & ~FCNTL_SETTABLE_FLAGS) | changed, ATOMIC_RELAXED, ATOMIC_RELAXED)) {
         // empty
     }
 
     return 0;
+}
+
+static intptr_t fcntl_dupfd(file_t* restrict file, uintptr_t min_fd, uint32_t fd_flags)
+{
+    thread_t* thread = this_thread();
+
+    if(min_fd >= CONFIG_MAX_FDS) {
+        return -EINVAL;
+    }
+
+    file_t* copy = file_dupe(file);
+    int fd = process_fd_alloc(thread->process, copy, min_fd, fd_flags);
+
+    if(fd < 0) {
+        file_close(copy);
+    }
+
+    return fd;
+}
+
+static intptr_t fcntl_file(file_t* restrict file, const uintptr_t* restrict args)
+{
+    thread_t* thread = this_thread();
+    unsigned command = args[1];
+
+    switch(command) {
+        case F_DUPFD:
+            return fcntl_dupfd(file, args[2], 0);
+        case F_DUPFD_CLOEXEC:
+            return fcntl_dupfd(file, args[2], FD_CLOEXEC);
+        case F_GETFD:
+            return process_fd_get_flags(thread->process, args[0]);
+        case F_SETFD:
+            return process_fd_set_flags(thread->process, args[0], args[2] & FD_CLOEXEC);
+        case F_GETFL:
+            return file_flags(file);
+        case F_SETFL:
+            return fcntl_setfl(file, args[2]);
+        default:
+            return -EINVAL;
+    }
 }
 
 static intptr_t sys_openat(const uintptr_t* restrict args)
@@ -240,8 +272,14 @@ static intptr_t sys_openat(const uintptr_t* restrict args)
     const credentials_t* credentials = thread->credentials;
     mode_t umask = atomic_load_n(&process->umask, ATOMIC_RELAXED);
 
+    uint32_t fd_flags = 0;
+
+    if(args[2] & O_CLOEXEC) {
+        fd_flags = FD_CLOEXEC;
+    }
+
     file_t* file;
-    retval = file_open(base_dir, path, args[2], args[3] & ~umask, credentials, &file);
+    retval = file_open(base_dir, path, args[2] & ~(uintptr_t)(O_CLOEXEC), args[3] & ~umask, credentials, &file);
 
     if(base_dir) {
         vnode_decref(base_dir);
@@ -251,7 +289,7 @@ static intptr_t sys_openat(const uintptr_t* restrict args)
         return retval;
     }
 
-    int fd = process_fd_alloc(process, file);
+    int fd = process_fd_alloc(process, file, 0, fd_flags);
 
     if(fd < 0) {
         file_close(file);
@@ -314,7 +352,7 @@ static intptr_t sys_dup(const uintptr_t* restrict args)
         return -ENOSYS;
     }
 
-    return process_fd_dup(process, args[0], -1);
+    return process_fd_dup(process, args[0], -1, 0);
 }
 
 define_syscall(sys_dup, SYS_DUP);
@@ -335,10 +373,48 @@ static intptr_t sys_dup2(const uintptr_t* restrict args)
         return -EBADF;
     }
 
-    return process_fd_dup(process, old_fd, new_fd);
+    return process_fd_dup(process, old_fd, new_fd, 0);
 }
 
 define_syscall(sys_dup2, SYS_DUP2);
+
+static intptr_t sys_dup3(const uintptr_t* restrict args)
+{
+    thread_t* thread = this_thread();
+    process_t* process = thread->process;
+
+    if(process == nullptr) {
+        return -ENOSYS;
+    }
+
+    int old_fd = args[0];
+    int new_fd = args[1];
+    uintptr_t flags = args[2];
+
+    if(flags & ~(uintptr_t)(O_CLOEXEC)) {
+        return -EINVAL;
+    }
+
+    // Unlike dup2, naming the same
+    // descriptor twice is an error
+    if(old_fd == new_fd) {
+        return -EINVAL;
+    }
+
+    if(new_fd < 0) {
+        return -EBADF;
+    }
+
+    uint32_t fd_flags = 0;
+
+    if(flags & O_CLOEXEC) {
+        fd_flags = FD_CLOEXEC;
+    }
+
+    return process_fd_dup(process, old_fd, new_fd, fd_flags);
+}
+
+define_syscall(sys_dup3, SYS_DUP3);
 
 static intptr_t sys_fstat(const uintptr_t* restrict args)
 {

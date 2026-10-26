@@ -3,20 +3,26 @@
 
 #include <vex/types.h>
 
-#define __k_O_RDONLY   ((__k_mode_t)(0x0001))
-#define __k_O_WRONLY   ((__k_mode_t)(0x0002))
-#define __k_O_RDWR     ((__k_mode_t)(0x0003))
-#define __k_O_CREAT    ((__k_mode_t)(0x0004))
-#define __k_O_TRUNC    ((__k_mode_t)(0x0008))
-#define __k_O_APPEND   ((__k_mode_t)(0x0010))
-#define __k_O_EXCL     ((__k_mode_t)(0x0020))
-#define __k_O_NONBLOCK ((__k_mode_t)(0x0040))
+#define __k_O_RDONLY    ((__k_mode_t)(0x0001))
+#define __k_O_WRONLY    ((__k_mode_t)(0x0002))
+#define __k_O_RDWR      ((__k_mode_t)(0x0003))
+#define __k_O_CREAT     ((__k_mode_t)(0x0004))
+#define __k_O_TRUNC     ((__k_mode_t)(0x0008))
+#define __k_O_APPEND    ((__k_mode_t)(0x0010))
+#define __k_O_EXCL      ((__k_mode_t)(0x0020))
+#define __k_O_NONBLOCK  ((__k_mode_t)(0x0040))
+#define __k_O_DIRECTORY ((__k_mode_t)(0x0080))
+#define __k_O_NOFOLLOW  ((__k_mode_t)(0x0100))
+#define __k_O_CLOEXEC   ((__k_mode_t)(0x0200))
 
-#define __k_F_DUPFD 0 /* TODO */
-#define __k_F_GETFD 1 /* TODO */
-#define __k_F_SETFD 2 /* TODO */
-#define __k_F_GETFL 3
-#define __k_F_SETFL 4
+#define __k_F_DUPFD         0
+#define __k_F_GETFD         1
+#define __k_F_SETFD         2
+#define __k_F_GETFL         3
+#define __k_F_SETFL         4
+#define __k_F_DUPFD_CLOEXEC 5
+
+#define __k_FD_CLOEXEC 0x0001
 
 #define __k_SEEK_SET 0
 #define __k_SEEK_CUR 1

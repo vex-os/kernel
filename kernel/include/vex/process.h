@@ -21,7 +21,13 @@ typedef struct vnode_s vnode_t;
 #define PROCESS_COLLECTED 0x04U // A waiter claimed the zombie
 #define PROCESS_DID_EXEC  0x08U // Its parent can no longer move it to another group
 
+typedef struct fd_slot_s fd_slot_t;
 typedef struct process_s process_t;
+
+struct fd_slot_s {
+    file_t* file;
+    uint32_t flags;
+};
 
 struct process_s {
     pid_t pid;
@@ -68,7 +74,7 @@ struct process_s {
     spinlock_t fd_lock;
     uint32_t num_fds;
     uint32_t max_fds;
-    file_t** fds;
+    fd_slot_t* fds;
 };
 
 /// Triggered once init's last thread is reaped; init never exits by design
@@ -113,7 +119,10 @@ vnode_t* process_get_cwd(process_t* process) __nodiscard;
 void process_set_cwd(process_t* process, vnode_t* node);
 
 file_t* process_fd_get(process_t* process, int fd) __nodiscard;
-int process_fd_alloc(process_t* process, file_t* file) __nodiscard;
-int process_fd_dup(process_t* process, int old_fd, int new_fd) __nodiscard;
+int process_fd_alloc(process_t* process, file_t* file, int min_fd, uint32_t fd_flags) __nodiscard;
+int process_fd_dup(process_t* process, int old_fd, int new_fd, uint32_t fd_flags) __nodiscard;
 int process_fd_release(process_t* process, int fd);
+int process_fd_get_flags(process_t* process, int fd) __nodiscard;
+int process_fd_set_flags(process_t* process, int fd, uint32_t fd_flags);
+void process_fds_close_on_exec(process_t* process);
 int process_fds_copy(process_t* restrict process, process_t* restrict source) __nodiscard;
