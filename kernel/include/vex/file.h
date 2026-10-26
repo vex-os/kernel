@@ -40,3 +40,13 @@ static __always_inline unsigned file_flags(const file_t* restrict file)
 {
     return atomic_load(&file->flags, ATOMIC_RELAXED);
 }
+
+static __always_inline bool file_flags_allow_read(unsigned flags)
+{
+    return (flags & O_ACCMODE) != O_WRONLY;
+}
+
+static __always_inline bool file_flags_allow_write(unsigned flags)
+{
+    return (flags & O_ACCMODE) != O_RDONLY;
+}

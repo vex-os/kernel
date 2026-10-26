@@ -36,7 +36,7 @@ static char_interface_t kplog_device;
 static int kplog_open_file(const char_interface_t* restrict interface, unsigned flags, void** restrict file_ctxdata)
 {
     thread_t* thread = this_thread();
-    bool writable = flags & O_WRONLY;
+    bool writable = file_flags_allow_write(flags);
 
     if(writable && !cred_capable(thread->credentials, CAP_SYSLOG)) {
         return -EPERM;

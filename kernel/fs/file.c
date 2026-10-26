@@ -8,17 +8,20 @@
 #include <vex/string.h>
 #include <vex/vnode.h>
 
-// O_RDWR is both bits together, so each one
-// stands for read and write access on its own
+static bool writes_file(unsigned flags)
+{
+    return file_flags_allow_write(flags) || (flags & O_TRUNC);
+}
+
 static unsigned access_for(unsigned flags)
 {
     unsigned mask = 0;
 
-    if(flags & O_RDONLY) {
+    if(file_flags_allow_read(flags)) {
         mask |= R_OK;
     }
 
-    if(flags & (O_WRONLY | O_TRUNC)) {
+    if(writes_file(flags)) {
         mask |= W_OK;
     }
 
@@ -38,13 +41,13 @@ int file_open_node(vnode_t* restrict node, unsigned flags, const credentials_t* 
         return -ELOOP;
     }
 
-    if(node->type == VNODE_DIRECTORY && (flags & (O_WRONLY | O_TRUNC))) {
+    if(node->type == VNODE_DIRECTORY && writes_file(flags)) {
         vnode_decref(node);
         return -EISDIR;
     }
 
     // Device nodes stay writable, the device isn't the filesystem they live on
-    if(node->type == VNODE_FILE && (flags & (O_WRONLY | O_TRUNC)) && node->fs->readonly) {
+    if(node->type == VNODE_FILE && writes_file(flags) && node->fs->readonly) {
         vnode_decref(node);
         return -EROFS;
     }
@@ -97,7 +100,8 @@ int file_open_node(vnode_t* restrict node, unsigned flags, const credentials_t* 
 int file_open(vnode_t* restrict base_dir, const char* restrict path, unsigned flags, mode_t mode, const credentials_t* restrict credentials,
     file_t** restrict out)
 {
-    if(path == nullptr) {
+    // Both access mode bits set stand for no mode at all
+    if(path == nullptr || (flags & O_ACCMODE) == O_ACCMODE) {
         return -EINVAL;
     }
 
@@ -197,7 +201,7 @@ ssize_t file_read(file_t* restrict file, void* restrict buffer, size_t size)
         return -EINVAL;
     }
 
-    if(0 == (file->flags & O_RDONLY)) {
+    if(!file_flags_allow_read(file->flags)) {
         return -EBADF;
     }
 
@@ -216,7 +220,7 @@ ssize_t file_write(file_t* restrict file, const credentials_t* restrict credenti
         return -EINVAL;
     }
 
-    if(0 == (file->flags & O_WRONLY)) {
+    if(!file_flags_allow_write(file->flags)) {
         return -EBADF;
     }
 
@@ -258,7 +262,7 @@ int file_truncate(file_t* restrict file, const credentials_t* restrict credentia
         return -EINVAL;
     }
 
-    if(0 == (file->flags & O_WRONLY)) {
+    if(!file_flags_allow_write(file->flags)) {
         return -EBADF;
     }
 

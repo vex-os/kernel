@@ -571,7 +571,7 @@ static int resnapshot(hwtree_file_t* restrict file)
 static int hwtree_open_file(const char_interface_t* restrict interface, unsigned flags, void** restrict file_ctxdata)
 {
     thread_t* thread = this_thread();
-    bool writable = flags & O_WRONLY;
+    bool writable = file_flags_allow_write(flags);
 
     if(writable && !cred_capable(thread->credentials, CAP_DEVICE)) {
         return -EPERM;
@@ -590,7 +590,7 @@ static int hwtree_open_file(const char_interface_t* restrict interface, unsigned
     file->lost = 0;
     file->writable = writable;
 
-    if((flags & O_RDONLY) && take_snapshot(file) < 0) {
+    if(file_flags_allow_read(flags) && take_snapshot(file) < 0) {
         mutex_deinit(&file->lock);
         slab_free(file);
         return -ENOMEM;

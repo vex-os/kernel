@@ -127,7 +127,7 @@ static intptr_t sys_mmap(const uintptr_t* restrict args)
     bool device = file->node->ops->resolve_page;
     bool shared = sharing == MAP_SHARED;
     bool readonly = !device && file->node->fs->readonly; // A device node stays writable on a read-only filesystem
-    bool may_write = !shared || ((file->flags & O_WRONLY) && !readonly);
+    bool may_write = !shared || (file_flags_allow_write(file->flags) && !readonly);
     intptr_t retval;
 
     if(file->node->type != VNODE_FILE && !device) {
@@ -136,7 +136,7 @@ static intptr_t sys_mmap(const uintptr_t* restrict args)
     else if(device && !shared) {
         retval = -EINVAL; // Device memory has no pages of its own to copy on write
     }
-    else if(0 == (file->flags & O_RDONLY)) {
+    else if(!file_flags_allow_read(file->flags)) {
         retval = -EACCES;
     }
     else if((prot & PROT_WRITE) && !may_write) {

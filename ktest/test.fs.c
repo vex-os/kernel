@@ -65,6 +65,18 @@ int main(void)
     ktest_expect(ktest_syscall3(__k_SYS_FCNTL, fd, __k_F_SETFL, __k_O_NONBLOCK | __k_O_WRONLY), 0);
     ktest_expect(ktest_syscall3(__k_SYS_FCNTL, fd, __k_F_GETFL, 0) == (__k_O_RDONLY | __k_O_NONBLOCK), 1);
     ktest_expect(ktest_syscall3(__k_SYS_FCNTL, fd, 99, 0), -__k_EINVAL);
+    ktest_close(fd);
+
+    // Zero is read only, and both access mode bits together are no mode
+    char byte;
+    fd = ktest_open("filename.txt", 0, 0);
+    ktest_assert(fd >= 0);
+    ktest_expect(ktest_syscall3(__k_SYS_READ, fd, (long)(&byte), 1), 1);
+    ktest_expect(ktest_syscall3(__k_SYS_WRITE, fd, (long)(&byte), 1), -__k_EBADF);
+    ktest_close(fd);
+    ktest_expect(ktest_open("filename.txt", __k_O_ACCMODE, 0), -__k_EINVAL);
+    fd = ktest_open("filename.txt", __k_O_RDONLY, 0);
+    ktest_assert(fd >= 0);
 
     // The close-on-exec flag lives on the descriptor, so a duplicate starts without it
     ktest_expect(ktest_syscall3(__k_SYS_FCNTL, fd, __k_F_GETFD, 0), 0);
