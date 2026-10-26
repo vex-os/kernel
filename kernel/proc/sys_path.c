@@ -1,4 +1,5 @@
 #include <vex/atomic.h>
+#include <vex/cred.h>
 #include <vex/dirent.h>
 #include <vex/errno.h>
 #include <vex/fcntl.h>
@@ -199,6 +200,68 @@ static intptr_t sys_fstatat(const uintptr_t* restrict args)
 }
 
 define_syscall(sys_fstatat, SYS_FSTATAT);
+
+static intptr_t sys_faccessat(const uintptr_t* restrict args)
+{
+    thread_t* thread = this_thread();
+    process_t* process = thread->process;
+
+    if(process == nullptr) {
+        return -ENOSYS;
+    }
+
+    unsigned mode = args[2];
+    unsigned flags = args[3];
+
+    if(mode & ~(R_OK | W_OK | X_OK)) {
+        return -EINVAL;
+    }
+
+    if(flags & ~(AT_SYMLINK_NOFOLLOW | AT_EMPTY_PATH | AT_EACCESS)) {
+        return -EINVAL;
+    }
+
+    char path[PATH_MAX];
+    ssize_t copied = user_copyin_str(path, args[1], sizeof(path));
+
+    if(copied < 0) {
+        return copied;
+    }
+
+    // The walk to the node checks the search rights of the directories with the effective ids
+    vnode_t* node;
+    int retval = syscall_resolve_at(args[0], path, flags & (AT_SYMLINK_NOFOLLOW | AT_EMPTY_PATH), &node);
+
+    if(retval < 0) {
+        return retval;
+    }
+
+    const credentials_t* credentials = thread->credentials;
+    credentials_t* real = nullptr;
+
+    if(0 == (flags & AT_EACCESS)) {
+        real = cred_copy_real(credentials);
+
+        if(real == nullptr) {
+            vnode_decref(node);
+            return -ENOMEM;
+        }
+
+        credentials = real;
+    }
+
+    retval = vnode_access(node, credentials, mode);
+
+    if(real) {
+        cred_decref(real);
+    }
+
+    vnode_decref(node);
+
+    return retval;
+}
+
+define_syscall(sys_faccessat, SYS_FACCESSAT);
 
 static intptr_t sys_fchmodat(const uintptr_t* restrict args)
 {

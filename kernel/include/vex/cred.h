@@ -38,6 +38,12 @@ extern credentials_t kernel_credentials;
 extern size_t cred_max_groups;
 
 credentials_t* cred_copy(const credentials_t* restrict credentials) __nodiscard;
+
+/// Copies the credentials as they are for a check that goes by the real ids, as access does
+/// @return The copy with one reference, or nullptr when out of memory
+/// @note The copy has the real ids as the effective ones. As on Linux, it has all the permitted capabilities
+/// if the real uid is 0, and none otherwise
+credentials_t* cred_copy_real(const credentials_t* restrict credentials) __nodiscard;
 credentials_t* cred_copy_ids(const credentials_t* restrict credentials, size_t num_groups) __nodiscard;
 void cred_incref(credentials_t* restrict credentials);
 void cred_decref(credentials_t* restrict credentials);

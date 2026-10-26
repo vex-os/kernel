@@ -76,6 +76,7 @@
 #define __k_SYS_GETCWD     0x7B
 #define __k_SYS_CHDIR      0x7C
 #define __k_SYS_FCHDIR     0x7D
+#define __k_SYS_FACCESSAT  0x7E
 
 #define __k_SYS_GETXATTRAT    0x80
 #define __k_SYS_SETXATTRAT    0x81

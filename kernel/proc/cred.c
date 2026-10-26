@@ -120,6 +120,29 @@ credentials_t* cred_copy(const credentials_t* restrict credentials)
     return copy;
 }
 
+credentials_t* cred_copy_real(const credentials_t* restrict credentials)
+{
+    kassert(credentials);
+
+    credentials_t* copy = cred_copy(credentials);
+
+    if(copy == nullptr) {
+        return nullptr;
+    }
+
+    copy->euid = copy->uid;
+    copy->egid = copy->gid;
+
+    if(copy->uid == 0) {
+        copy->cap_effective = copy->cap_permitted;
+    }
+    else {
+        copy->cap_effective = 0;
+    }
+
+    return copy;
+}
+
 credentials_t* cred_copy_ids(const credentials_t* restrict credentials, size_t num_groups)
 {
     kassert(credentials);
