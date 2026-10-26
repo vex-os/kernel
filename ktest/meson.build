@@ -23,6 +23,7 @@ ktest_programs = [
     'fs',
     'fs_times',
     'getdents',
+    'path',
     'kplog',
     'hwtree',
     'tty',
