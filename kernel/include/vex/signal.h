@@ -37,6 +37,8 @@ typedef struct thread_s thread_t;
 #define SIGWINCH  __k_SIGWINCH
 #define SIGSYS    __k_SIGSYS
 #define SIGINFO   __k_SIGINFO
+#define SIGIO     __k_SIGIO
+#define SIGPWR    __k_SIGPWR
 #define SIGRTMIN  __k_SIGRTMIN
 #define SIGRTMAX  __k_SIGRTMAX
 #define NSIG      __k_NSIG
