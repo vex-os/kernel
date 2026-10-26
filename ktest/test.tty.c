@@ -16,7 +16,8 @@ static volatile unsigned int never_changes;
 #define LINE_ERROR_BREAK   1
 #define LINE_ERROR_PARITY  2
 #define LINE_ERROR_OVERRUN 4
-#define LINE_FILL_SIZE     3900 /* Leaves the 4 KiB input ring less room than IXOFF's margin */
+#define SERIAL_TEST_DEVICE "/dev/serial1337" /* The number is in serial_test.c */
+#define LINE_FILL_SIZE     3900              /* Leaves the 4 KiB input ring less room than IXOFF's margin */
 
 static long tty_fd;
 static long line_fd;
@@ -184,7 +185,7 @@ static void test_tty_line(void)
     __builtin_unreachable();
 }
 
-/* Leaves serial0 bound to a terminal, and serial_fd its controlling file */
+/* Leaves the serial test port bound to a terminal, and serial_fd its controlling file */
 static void test_serial(void)
 {
     struct __k_serial_info info;
@@ -194,7 +195,7 @@ static void test_serial(void)
     char answer[16];
     long viewer;
 
-    viewer = ktest_open("/dev/serial0", __k_O_RDONLY, 0);
+    viewer = ktest_open(SERIAL_TEST_DEVICE, __k_O_RDONLY, 0);
     ktest_expect(viewer >= 0, 1);
     ktest_syscall3(__k_SYS_IOCTL, viewer, __k_SERIAL_GET_INFO, (long)&info);
     ktest_expect(ktest_string_equal(info.driver, "serial_test"), 1);
@@ -204,12 +205,12 @@ static void test_serial(void)
     /* Only a file that keeps everyone else out changes the port */
     line.speed = 115200;
     ktest_expect(ktest_syscall3(__k_SYS_IOCTL, viewer, __k_SERIAL_SET_LINE, (long)&line), -__k_EPERM);
-    ktest_expect(ktest_open("/dev/serial0", __k_O_RDWR | __k_O_EXCL, 0), -__k_EBUSY);
+    ktest_expect(ktest_open(SERIAL_TEST_DEVICE, __k_O_RDWR | __k_O_EXCL, 0), -__k_EBUSY);
     ktest_close(viewer);
 
-    serial_fd = ktest_open("/dev/serial0", __k_O_RDWR | __k_O_EXCL, 0);
+    serial_fd = ktest_open(SERIAL_TEST_DEVICE, __k_O_RDWR | __k_O_EXCL, 0);
     ktest_expect(serial_fd >= 0, 1);
-    ktest_expect(ktest_open("/dev/serial0", __k_O_RDONLY, 0), -__k_EBUSY);
+    ktest_expect(ktest_open(SERIAL_TEST_DEVICE, __k_O_RDONLY, 0), -__k_EBUSY);
     ktest_expect(ktest_syscall3(__k_SYS_IOCTL, serial_fd, __k_SERIAL_SET_LINE, (long)&line), 0);
 
     /* An unbound port talks to what is on the line, here a modem that answers OK */

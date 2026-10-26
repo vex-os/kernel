@@ -138,6 +138,10 @@ struct serial_consumer_s {
 /// Makes the port's control node, serialN, and binds what the serial= command line option names for it
 int serial_interface_add(serial_interface_t* restrict interface);
 
+/// serial_interface_add that gives the port a number of its own, so that it does not take one from the real ports
+/// @retval -EEXIST Another port has the number
+int serial_interface_add_numbered(serial_interface_t* restrict interface, unsigned number);
+
 /// Removes the object that is bound to the port, also when it is in use, and the control node
 /// @post The serial core makes no more calls into the driver, except release
 int serial_interface_remove(serial_interface_t* restrict interface);

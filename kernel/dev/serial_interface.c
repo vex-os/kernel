@@ -841,7 +841,7 @@ static void prepare_console(serial_interface_t* restrict interface, const char* 
     interface->char_interface.console = cons;
 }
 
-int serial_interface_add(serial_interface_t* restrict interface)
+static int add_with_unit(serial_interface_t* restrict interface, bool numbered, unsigned number)
 {
     serial_interface_private_t* priv = &interface->priv;
 
@@ -857,7 +857,14 @@ int serial_interface_add(serial_interface_t* restrict interface)
         interface->line.flow = 0;
     }
 
-    int retval = dev_unit_alloc(&dev_prefix_serial, interface->char_interface.device, &priv->unit);
+    int retval;
+
+    if(numbered) {
+        retval = dev_unit_claim(&dev_prefix_serial, number, &priv->unit);
+    }
+    else {
+        retval = dev_unit_alloc(&dev_prefix_serial, interface->char_interface.device, &priv->unit);
+    }
 
     if(retval < 0) {
         mutex_deinit(&priv->lock);
@@ -896,6 +903,16 @@ int serial_interface_add(serial_interface_t* restrict interface)
     bind_from_cmdline(interface);
 
     return 0;
+}
+
+int serial_interface_add(serial_interface_t* restrict interface)
+{
+    return add_with_unit(interface, false, 0);
+}
+
+int serial_interface_add_numbered(serial_interface_t* restrict interface, unsigned number)
+{
+    return add_with_unit(interface, true, number);
 }
 
 int serial_interface_remove(serial_interface_t* restrict interface)

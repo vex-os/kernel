@@ -10,6 +10,9 @@
 #include <vex/string.h>
 #include <vex/uaccess.h>
 
+// Far from the numbers of the real ports, which keep serial0, serial1 and so on
+#define SERIAL_TEST_UNIT 1337
+
 // Long enough for tty_worker to echo what was just written to the line
 #define LINE_WAIT_NSEC UINT64_C(200000000)
 
@@ -127,7 +130,7 @@ static void init_serial_test(void)
     test_port.modem_lines = SERIAL_MODEM_DTR | SERIAL_MODEM_RTS | SERIAL_MODEM_DCD | SERIAL_MODEM_DSR | SERIAL_MODEM_CTS;
     test_line.ops = &test_line_ops;
 
-    int retval = serial_interface_add(&test_port);
+    int retval = serial_interface_add_numbered(&test_port, SERIAL_TEST_UNIT);
 
     if(retval == 0) {
         retval = dev_prefix_claim(&dev_prefix_serialtest);
