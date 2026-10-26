@@ -10,6 +10,14 @@
 
 #define MAX_SYMLINK_DEPTH 8
 
+typedef struct name_search_s name_search_t;
+
+struct name_search_s {
+    ino_t ino;
+    bool found;
+    char name[NAME_SIZE];
+};
+
 static int resolve_internal(vnode_t* restrict base_dir, const char* restrict path, unsigned flags,
     const credentials_t* restrict credentials, vnode_t** restrict out, unsigned depth);
 
@@ -112,6 +120,37 @@ static vnode_t* parent_of(vnode_t* restrict dir)
     spinlock_release(&dir->lock);
 
     return parent;
+}
+
+// The name of a mounted filesystem's root is the name of the directory it covers
+static vnode_t* covered_dir(vnode_t* restrict dir)
+{
+    while(dir->fs && dir->fs->root == dir && dir->fs->mountpoint) {
+        dir = dir->fs->mountpoint;
+    }
+
+    vnode_incref(dir);
+
+    return dir;
+}
+
+static bool name_search_emit(dir_context_t* restrict dir_context, const dirent_t* restrict entry)
+{
+    name_search_t* search = dir_context->state;
+
+    if(entry->d_ino != search->ino) {
+        return true;
+    }
+
+    // A directory is also its own "." and its child's ".."
+    if(entry->d_name[0] == '.' && (entry->d_name[1] == 0 || (entry->d_name[1] == '.' && entry->d_name[2] == 0))) {
+        return true;
+    }
+
+    kstrncpy(search->name, (const char*)(entry->d_name), sizeof(search->name));
+    search->found = true;
+
+    return false;
 }
 
 static int resolve_internal(vnode_t* restrict base_dir, const char* restrict path, unsigned flags,
@@ -310,4 +349,92 @@ int path_resolve_parent_at(vnode_t* restrict base_dir, const char* restrict path
     }
 
     return 0;
+}
+
+ssize_t path_build(vnode_t* restrict node, char* restrict buffer, size_t size)
+{
+    kassert(node);
+    kassert(buffer);
+
+    if(size == 0) {
+        return -ERANGE;
+    }
+
+    vnode_t* root = vfs_get_root();
+
+    if(root == nullptr) {
+        return -ENOENT;
+    }
+
+    size_t end = size - 1;
+    buffer[end] = 0;
+
+    name_search_t search;
+    vnode_t* current = covered_dir(node);
+    int retval = 0;
+
+    while(current != root) {
+        vnode_t* parent = parent_of(current);
+
+        if(parent == current) {
+            vnode_decref(parent);
+            retval = -ENOENT;
+            break;
+        }
+
+        dir_context_t dir_context = {};
+
+        search.ino = current->ino;
+        search.found = false;
+        dir_context.emit = &name_search_emit;
+        dir_context.state = &search;
+
+        retval = vnode_iterate(parent, &dir_context);
+
+        if(retval == 0 && !search.found) {
+            retval = -ENOENT;
+        }
+
+        size_t length = strlen(search.name);
+
+        if(retval == 0 && length + 1 > end) {
+            retval = -ERANGE;
+        }
+
+        if(retval < 0) {
+            vnode_decref(parent);
+            break;
+        }
+
+        end -= length;
+        memcpy(&buffer[end], search.name, length);
+        end -= 1;
+        buffer[end] = PATH_SEPARATOR;
+
+        vnode_decref(current);
+        current = covered_dir(parent);
+        vnode_decref(parent);
+    }
+
+    vnode_decref(current);
+    vnode_decref(root);
+
+    if(retval < 0) {
+        return retval;
+    }
+
+    if(end == size - 1) {
+        if(end == 0) {
+            return -ERANGE;
+        }
+
+        end -= 1;
+        buffer[end] = PATH_SEPARATOR;
+    }
+
+    size_t length = size - end;
+
+    memmove(buffer, &buffer[end], length);
+
+    return length;
 }

@@ -661,7 +661,43 @@ define_syscall(sys_getdents, SYS_GETDENTS);
 
 static intptr_t sys_getcwd(const uintptr_t* restrict args)
 {
-    return -ENOSYS;
+    thread_t* thread = this_thread();
+    process_t* process = thread->process;
+
+    if(process == nullptr) {
+        return -ENOSYS;
+    }
+
+    vnode_t* cwd = process_get_cwd(process);
+
+    if(cwd == nullptr) {
+        return -ENOENT;
+    }
+
+    char path[PATH_MAX];
+    ssize_t length = path_build(cwd, path, sizeof(path));
+
+    vnode_decref(cwd);
+
+    if(length == -ERANGE) {
+        return -ENAMETOOLONG;
+    }
+
+    if(length < 0) {
+        return length;
+    }
+
+    if((size_t)(length) > args[1]) {
+        return -ERANGE;
+    }
+
+    ssize_t copied = user_copyout(args[0], path, length);
+
+    if(copied < 0) {
+        return copied;
+    }
+
+    return length;
 }
 
 define_syscall(sys_getcwd, SYS_GETCWD);
