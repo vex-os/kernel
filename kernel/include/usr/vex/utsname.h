@@ -2,7 +2,7 @@
 #define USR_VEX_UTSNAME_H
 
 #ifndef __k_UNAME_SIZE
-#define __k_UNAME_SIZE 128
+#define __k_UNAME_SIZE 256
 #endif
 
 struct __k_utsname {
