@@ -1,0 +1,10 @@
+Third-party material in this tree that is not vendored under contrib/
+
+Framebuffer console fonts, kernel/fbcons/fonts
+    IBM_VGA_*.bin
+        Dumps of VGA ROM fonts
+        https://github.com/spacerace/romfont
+    Terminus_*.bin, TerminusBold_*.bin
+        Terminus Font, Dimitar Toshkov Zhekov
+        https://terminus-font.sourceforge.net/
+        SIL Open Font License 1.1, see kernel/fbcons/fonts/Terminus-OFL.TXT
