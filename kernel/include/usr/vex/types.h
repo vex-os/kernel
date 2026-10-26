@@ -80,7 +80,7 @@ typedef __k_UINT64_TYPE __k_fsfilcnt_t;
 typedef __k_UINT64_TYPE __k_ino_t;
 
 typedef __k_SINT32_TYPE __k_clockid_t;
-typedef __k_SINT32_TYPE __k_suseconds_t;
+typedef __k_SINT64_TYPE __k_suseconds_t;
 typedef __k_SINT32_TYPE __k_timer_t;
 typedef __k_SINT64_TYPE __k_clock_t;
 typedef __k_SINT64_TYPE __k_time_t;
