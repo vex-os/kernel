@@ -62,12 +62,14 @@
 #define ENOTCONN        __k_ENOTCONN
 #define ENOTDIR         __k_ENOTDIR
 #define ENOTEMPTY       __k_ENOTEMPTY
+#define ENOTRECOVERABLE __k_ENOTRECOVERABLE
 #define ENOTSOCK        __k_ENOTSOCK
 #define ENOTSUP         __k_ENOTSUP
 #define ENOTTY          __k_ENOTTY
 #define ENXIO           __k_ENXIO
 #define EOPNOTSUPP      __k_EOPNOTSUPP
 #define EOVERFLOW       __k_EOVERFLOW
+#define EOWNERDEAD      __k_EOWNERDEAD
 #define EPERM           __k_EPERM
 #define EPIPE           __k_EPIPE
 #define EPROTO          __k_EPROTO
@@ -80,7 +82,6 @@
 #define ETIME           __k_ETIME
 #define ETIMEDOUT       __k_ETIMEDOUT
 #define ETXTBSY         __k_ETXTBSY
-#define EWOULDBLOCK     __k_EWOULDBLOCK
 #define EXDEV           __k_EXDEV
 
 // Kernel-only: the syscall runs again unless a handler without SA_RESTART takes the

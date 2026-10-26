@@ -393,6 +393,10 @@ int strerror_r(int errnum, char* restrict str, size_t size)
             kstrncpy(str, "directory not empty", size);
             return 0;
 
+        case ENOTRECOVERABLE:
+            kstrncpy(str, "state not recoverable", size);
+            return 0;
+
         case ENOTSOCK:
             kstrncpy(str, "not a socket", size);
             return 0;
@@ -415,6 +419,10 @@ int strerror_r(int errnum, char* restrict str, size_t size)
 
         case EOVERFLOW:
             kstrncpy(str, "value too large to be stored in data type", size);
+            return 0;
+
+        case EOWNERDEAD:
+            kstrncpy(str, "previous owner died", size);
             return 0;
 
         case EPERM:
@@ -463,10 +471,6 @@ int strerror_r(int errnum, char* restrict str, size_t size)
 
         case ETXTBSY:
             kstrncpy(str, "text file busy", size);
-            return 0;
-
-        case EWOULDBLOCK:
-            kstrncpy(str, "operation would block", size);
             return 0;
 
         case EXDEV:

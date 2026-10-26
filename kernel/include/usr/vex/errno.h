@@ -83,7 +83,8 @@
 #define __k_ETIME           272
 #define __k_ETIMEDOUT       273
 #define __k_ETXTBSY         274
-#define __k_EWOULDBLOCK     275
 #define __k_EXDEV           276
+#define __k_ENOTRECOVERABLE 277
+#define __k_EOWNERDEAD      278
 
 #endif /* USR_VEX_ERRNO_H */
