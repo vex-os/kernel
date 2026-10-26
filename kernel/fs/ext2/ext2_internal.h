@@ -389,7 +389,6 @@ struct ext2_vfs_context_s {
     ext2_superblock_t super;
     ext2_group_desc_t* groups;
 
-    bool param_readonly;
     uint16_t mount_state; // s_state as found when mounted writable, put back on unmount
 
     uint32_t creator_os;

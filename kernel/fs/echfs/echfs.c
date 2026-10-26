@@ -84,10 +84,6 @@ static int echfs_mount(vfs_t* restrict fs, const block_interface_t* restrict vol
 
     mutex_init(&context->lock);
 
-    context->param_readonly = false;
-    context->param_readonly = context->param_readonly || cmdline_contains(params, "ro");
-    context->param_readonly = context->param_readonly || cmdline_contains(params, "readonly");
-
     context->volume = volume;
     context->block_size = block_size;
     context->sectors_per_block = sectors_per_block;
@@ -136,7 +132,6 @@ static int echfs_mount(vfs_t* restrict fs, const block_interface_t* restrict vol
 
     fs->root = root;
     fs->ctxdata = context;
-    fs->readonly = context->param_readonly;
 
     return 0;
 }

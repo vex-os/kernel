@@ -309,7 +309,6 @@ static int ext2_mount(vfs_t* restrict fs, const block_interface_t* restrict volu
     mutex_init(&context->lock);
 
     context->volume = volume;
-    context->param_readonly = cmdline_contains(params, "readonly") || cmdline_contains(params, "ro");
 
     int retval = read_super(volume, &context->super);
 
@@ -347,7 +346,9 @@ static int ext2_mount(vfs_t* restrict fs, const block_interface_t* restrict volu
     }
 
     fs->ctxdata = context;
-    fs->readonly = context->param_readonly || must_mount_readonly(context);
+    if(must_mount_readonly(context)) {
+        fs->readonly = true;
+    }
 
     if(!fs->readonly) {
         retval = mark_mounted(context);

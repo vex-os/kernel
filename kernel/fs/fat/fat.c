@@ -159,7 +159,7 @@ static int fat_mount(vfs_t* restrict fs, const block_interface_t* restrict volum
     context->volume = volume;
     context->filesystem_type = filesystem_type;
 
-    context->param_readonly = cmdline_contains(params, "readonly") || cmdline_contains(params, "ro");
+    context->readonly = fs->readonly;
     context->param_quiet = cmdline_contains(params, "quiet");
 
     const char* uid_string = cmdline_argument(params, "uid");
@@ -244,7 +244,6 @@ static int fat_mount(vfs_t* restrict fs, const block_interface_t* restrict volum
 
     fs->root = root;
     fs->ctxdata = context;
-    fs->readonly = context->param_readonly;
 
     return 0;
 }
@@ -263,14 +262,14 @@ static int statvfs_locked(vfs_t* restrict fs, statvfs_t* restrict out)
     out->f_blocks = total;
     out->f_bfree = free_clusters;
 
-    if(!context->param_readonly) {
+    if(!context->readonly) {
         out->f_bavail = free_clusters;
     }
 
     out->f_flag = ST_NOSUID;
     out->f_namemax = 255;
 
-    if(context->param_readonly) {
+    if(context->readonly) {
         out->f_flag |= ST_RDONLY;
     }
 

@@ -109,10 +109,11 @@ static void free_fs(vfs_t* restrict fs)
     slab_free(fs);
 }
 
-static int mount_locked(const char* restrict type, const char* restrict path, const block_interface_t* restrict volume,
+static int mount_locked(const char* restrict type, const char* restrict path, const block_interface_t* restrict volume, unsigned flags,
     const char* restrict params)
 {
-    if(path == nullptr) {
+    // Without a type the driver is found by probing the device
+    if(path == nullptr || (type == nullptr && volume == nullptr)) {
         return -EINVAL;
     }
 
@@ -152,7 +153,7 @@ static int mount_locked(const char* restrict type, const char* restrict path, co
     }
 
     fs->ops = driver->ops;
-    fs->readonly = false;
+    fs->readonly = (flags & MNT_RDONLY) || cmdline_contains(&cmdl, "ro") || cmdline_contains(&cmdl, "readonly");
 
     int retval = set_dev(fs, volume);
 
@@ -319,10 +320,11 @@ int vfs_driver_remove(vfs_driver_t* restrict driver)
     return -ENOENT;
 }
 
-int vfs_mount(const char* restrict type, const char* restrict path, const block_interface_t* restrict volume, const char* restrict params)
+int vfs_mount(const char* restrict type, const char* restrict path, const block_interface_t* restrict volume, unsigned flags,
+    const char* restrict params)
 {
     mutex_acquire(&mounts_mutex);
-    int retval = mount_locked(type, path, volume, params);
+    int retval = mount_locked(type, path, volume, flags, params);
     mutex_release(&mounts_mutex);
     return retval;
 }

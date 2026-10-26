@@ -82,6 +82,12 @@ static intptr_t sys_mount(const uintptr_t* restrict args)
         return -EPERM;
     }
 
+    uintptr_t flags = args[3];
+
+    if(flags & ~(uintptr_t)(MNT_RDONLY)) {
+        return -EINVAL;
+    }
+
     char target[PATH_MAX];
     ssize_t copied = user_copyin_str(target, args[1], sizeof(target));
 
@@ -90,10 +96,16 @@ static intptr_t sys_mount(const uintptr_t* restrict args)
     }
 
     char fstype[64];
-    copied = user_copyin_str(fstype, args[2], sizeof(fstype));
+    const char* fstype_ptr = nullptr;
 
-    if(copied < 0) {
-        return copied;
+    if(args[2]) {
+        copied = user_copyin_str(fstype, args[2], sizeof(fstype));
+
+        if(copied < 0) {
+            return copied;
+        }
+
+        fstype_ptr = fstype;
     }
 
     char params[256];
@@ -149,7 +161,12 @@ static intptr_t sys_mount(const uintptr_t* restrict args)
         }
     }
 
-    int retval = vfs_mount(fstype, target, interface, params_ptr);
+    // Only a device lets the VFS find the type by itself
+    if(fstype_ptr == nullptr && interface == nullptr) {
+        return -EINVAL;
+    }
+
+    int retval = vfs_mount(fstype_ptr, target, interface, flags, params_ptr);
 
     if(interface) {
         block_interface_decref(interface);

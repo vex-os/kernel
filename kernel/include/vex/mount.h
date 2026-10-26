@@ -1,9 +1,12 @@
 #pragma once
 
+#include <usr/vex/mount.h>
 #include <vex/compiler.h>
 #include <vex/errno.h>
 #include <vex/statvfs.h>
 #include <vex/types.h>
+
+#define MNT_RDONLY __k_MNT_RDONLY
 
 typedef struct cmdline_s cmdline_t;
 typedef struct block_interface_s block_interface_t;
@@ -21,8 +24,9 @@ struct vfs_ops_s {
     /// @retval 0 The device holds this filesystem
     int (*probe)(vfs_t* restrict fs, const block_interface_t* restrict volume);
 
-    /// Sets root, holding a reference to it until unmount, and ctxdata and readonly
-    /// @pre fs->device is set, and nullptr for a filesystem without one
+    /// Sets root, holding a reference to it until unmount, and ctxdata
+    /// @pre fs->device is set, and nullptr for a filesystem without one. fs->readonly is set if the mount asked for it;
+    /// the driver may set it for a reason of its own, but must not clear it
     /// @post On failure nothing of the filesystem is left behind
     int (*mount)(vfs_t* restrict fs, const block_interface_t* restrict volume, const cmdline_t* restrict params);
 
@@ -47,7 +51,7 @@ struct vfs_s {
     dev_unit_t* unit;                // Under dev_prefix_anon, for a filesystem without a device
     dev_t dev;                       // The st_dev of its files
     void* ctxdata;
-    bool readonly;    // Set by the driver while mounting
+    bool readonly;    // Set from the mount flags and parameters, and by the driver while mounting
     bool unmounting;  // Under mounts_lock; turns away operations crossing into the filesystem
     unsigned orphans; // Unlinked vnodes still referenced; they keep the filesystem busy
 };
@@ -65,7 +69,10 @@ struct vfs_driver_s {
 int vfs_driver_add(vfs_driver_t* restrict driver);
 int vfs_driver_remove(vfs_driver_t* restrict driver);
 
-int vfs_mount(const char* restrict type, const char* restrict path, const block_interface_t* restrict volume, const char* restrict params);
+/// @param flags MNT_ values
+/// @param params Options for the filesystem, or nullptr. The VFS itself takes "ro" and "readonly" from them, as MNT_RDONLY
+int vfs_mount(const char* restrict type, const char* restrict path, const block_interface_t* restrict volume, unsigned flags,
+    const char* restrict params);
 int vfs_unmount(const char* restrict path);
 
 int vfs_sync_fs(vfs_t* restrict fs);

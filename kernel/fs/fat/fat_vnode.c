@@ -500,7 +500,7 @@ static int create_locked(vnode_t* restrict node, const char* restrict name, unsi
     fat_vnode_context_t* context = node->ctxdata;
     fat_vfs_context_t* fs = context->fs_ctx;
 
-    if(fs->param_readonly) {
+    if(fs->readonly) {
         return -EROFS;
     }
 
@@ -674,7 +674,7 @@ static int unlink_locked(vnode_t* restrict node, const char* restrict name, vnod
     fat_vnode_context_t* target_context = target->ctxdata;
     fat_vfs_context_t* fs = context->fs_ctx;
 
-    if(fs->param_readonly) {
+    if(fs->readonly) {
         return -EROFS;
     }
 
@@ -749,7 +749,7 @@ static int rename_locked(vnode_t* olddir, const char* oldname, vnode_t* source, 
     fat_vnode_context_t* source_context = source->ctxdata;
     fat_vfs_context_t* fs = old_context->fs_ctx;
 
-    if(fs->param_readonly) {
+    if(fs->readonly) {
         return -EROFS;
     }
 
@@ -979,7 +979,7 @@ static ssize_t write_span_locked(vnode_t* restrict node, const void* restrict bu
     fat_vnode_context_t* context = node->ctxdata;
     fat_vfs_context_t* fs = context->fs_ctx;
 
-    if(fs->param_readonly) {
+    if(fs->readonly) {
         return -EROFS;
     }
 
@@ -1143,7 +1143,7 @@ static int set_attr_locked(vnode_t* restrict node, const vnode_attr_t* restrict 
         return 0;
     }
 
-    if(fs->param_readonly) {
+    if(fs->readonly) {
         return -EROFS;
     }
 
@@ -1188,7 +1188,7 @@ static int stat_locked(vnode_t* restrict node, stat_t* restrict out)
 
     mode_t rw_bits = S_IRUSR | S_IRGRP | S_IROTH;
 
-    if(!fs->param_readonly) {
+    if(!fs->readonly) {
         rw_bits |= S_IWUSR | S_IWGRP;
     }
 

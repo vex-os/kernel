@@ -35,7 +35,7 @@ static void mount_root(void)
         unreachable();
     }
 
-    int retval = vfs_mount(nullptr, "/", interface, nullptr);
+    int retval = vfs_mount(nullptr, "/", interface, 0, nullptr);
 
     block_interface_decref(interface);
 
