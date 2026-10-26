@@ -18,6 +18,30 @@
 #define CHR_WS  0x20
 #define CHR_DEL 0x7F
 
+enum {
+    CURSOR_NONE,
+    CURSOR_INVERT,
+    CURSOR_OVERLAP,
+    CURSOR_FRAME,
+};
+
+#if defined(CONFIG_FBCONS_CURSOR_INVERT)
+#define CURSOR_STYLE CURSOR_INVERT
+#elif defined(CONFIG_FBCONS_CURSOR_OVERLAP)
+#define CURSOR_STYLE CURSOR_OVERLAP
+#elif defined(CONFIG_FBCONS_CURSOR_FRAME)
+#define CURSOR_STYLE CURSOR_FRAME
+#else
+#define CURSOR_STYLE CURSOR_NONE
+#endif
+
+// The cursor sits in the bottom left corner of its cell.
+// Its size is a share of the cell, rounded up to whole pixels
+#define CURSOR_HEIGHT ((FBCONS_FONT_HEIGHT * CONFIG_FBCONS_CURSOR_HEIGHT + 99) / 100)
+#define CURSOR_WIDTH  ((FBCONS_FONT_WIDTH * CONFIG_FBCONS_CURSOR_WIDTH + 99) / 100)
+
+static_assert(CURSOR_HEIGHT <= FBCONS_FONT_HEIGHT && CURSOR_WIDTH <= FBCONS_FONT_WIDTH);
+
 typedef struct vt_cell_s vt_cell_t;
 
 struct vt_cell_s {
@@ -70,6 +94,13 @@ static __always_inline void put_pixel(size_t offset, bool white)
     }
 }
 
+static const unsigned char* glyph_of(int value)
+{
+    if(value < 0 || value >= FBCONS_FONT_GLYPHS)
+        value = 0;
+    return &fbcons_font[value * FBCONS_FONT_GLYPH_BYTES];
+}
+
 static void render_cell(size_t sx, size_t sy, int value)
 {
     size_t pixel = 0U;
@@ -84,9 +115,7 @@ static void render_cell(size_t sx, size_t sy, int value)
         return;
     pixel += i;
 
-    if(value < 0 || value >= FBCONS_FONT_GLYPHS)
-        value = 0;
-    const unsigned char* gptr = &fbcons_font[value * FBCONS_FONT_GLYPH_BYTES];
+    const unsigned char* gptr = glyph_of(value);
 
     for(size_t gy = 0U; gy < FBCONS_FONT_HEIGHT; gy += 1U) {
         for(size_t gx = 0U; gx < FBCONS_FONT_WIDTH; gx += 1U)
@@ -96,7 +125,23 @@ static void render_cell(size_t sx, size_t sy, int value)
     }
 }
 
-static void render_cursor(size_t sx, size_t sy)
+static bool cursor_pixel(size_t gx, size_t gy, bool glyph)
+{
+    switch(CURSOR_STYLE) {
+        case CURSOR_INVERT:
+            return !glyph;
+
+        case CURSOR_FRAME:
+            if(gx == 0U || gy == 0U || gx == CURSOR_WIDTH - 1U || gy == CURSOR_HEIGHT - 1U)
+                return true;
+            return glyph;
+
+        default:
+            return true;
+    }
+}
+
+static void render_cursor(size_t sx, size_t sy, int value)
 {
     size_t pixel = 0U;
 
@@ -110,9 +155,16 @@ static void render_cursor(size_t sx, size_t sy)
         return;
     pixel += i;
 
-    for(size_t gy = 0U; gy < FBCONS_FONT_HEIGHT; gy += 1U) {
-        for(size_t gx = 0U; gx < FBCONS_FONT_WIDTH; gx += 1U)
-            put_pixel(pixel + gx, true);
+    size_t skipped = FBCONS_FONT_HEIGHT - CURSOR_HEIGHT;
+    pixel += skipped * fb_stride;
+    const unsigned char* gptr = glyph_of(value) + skipped * FBCONS_FONT_ROW_BYTES;
+
+    for(size_t gy = 0U; gy < CURSOR_HEIGHT; gy += 1U) {
+        for(size_t gx = 0U; gx < CURSOR_WIDTH; gx += 1U) {
+            bool glyph = gptr[gx >> 3] & (0x80 >> (gx & 0x07));
+            put_pixel(pixel + gx, cursor_pixel(gx, gy, glyph));
+        }
+        gptr += FBCONS_FONT_ROW_BYTES;
         pixel += fb_stride;
     }
 }
@@ -172,10 +224,14 @@ static void do_redraw(void)
     dirty_first = SIZE_MAX;
     dirty_last = 0U;
 
+    if(CURSOR_STYLE == CURSOR_NONE)
+        return;
+
     vt_cell_t* cell = &vt_cells[cursor_ypos_prev * vt_width + cursor_xpos_prev];
     render_cell(cursor_xpos_prev, cursor_ypos_prev, cell->value);
 
-    render_cursor(cursor_xpos, cursor_ypos);
+    cell = &vt_cells[cursor_ypos * vt_width + cursor_xpos];
+    render_cursor(cursor_xpos, cursor_ypos, cell->value);
 
     cursor_xpos_prev = cursor_xpos;
     cursor_ypos_prev = cursor_ypos;
@@ -215,7 +271,7 @@ static void fbcons_putchar(int character)
             return;
 
         case CHR_HT:
-            cursor_xpos += 4U - (cursor_xpos % 4U);
+            cursor_xpos += CONFIG_FBCONS_TAB_WIDTH - (cursor_xpos % CONFIG_FBCONS_TAB_WIDTH);
             if(cursor_xpos >= vt_width)
                 cursor_xpos = vt_width - 1U;
             return;

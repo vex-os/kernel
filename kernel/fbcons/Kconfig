@@ -91,3 +91,58 @@ config FBCONS_FONT_FILE
     default "TerminusBold_12x24.bin" if FBCONS_FONT_TERMINUS_BOLD_12X24
     default "Terminus_16x32.bin" if FBCONS_FONT_TERMINUS_16X32
     default "TerminusBold_16x32.bin" if FBCONS_FONT_TERMINUS_BOLD_16X32
+
+choice FBCONS_CURSOR
+    prompt "Framebuffer console cursor"
+    depends on FBCONS
+    default FBCONS_CURSOR_INVERT
+    help
+      The look of the cursor. It sits in the bottom
+      left corner of its cell
+
+config FBCONS_CURSOR_INVERT
+    bool "Inverted block"
+    help
+      Swaps the colors of the glyph under the cursor
+
+config FBCONS_CURSOR_OVERLAP
+    bool "Overlapping block"
+    help
+      Fills the cursor over the glyph under it
+
+config FBCONS_CURSOR_FRAME
+    bool "Frame"
+    help
+      Draws a frame of one pixel over the glyph under it
+
+config FBCONS_CURSOR_NONE
+    bool "None"
+
+endchoice
+
+config FBCONS_CURSOR_HEIGHT
+    int "Cursor height (% of the cell)"
+    depends on FBCONS && !FBCONS_CURSOR_NONE
+    range 0 100
+    default 6 if FBCONS_CURSOR_OVERLAP
+    default 100
+    help
+      A share of the height of the cell, rounded up
+      to whole pixels. 0 draws nothing
+
+config FBCONS_CURSOR_WIDTH
+    int "Cursor width (% of the cell)"
+    depends on FBCONS && !FBCONS_CURSOR_NONE
+    range 0 100
+    default 100
+    help
+      A share of the width of the cell, rounded up
+      to whole pixels. 0 draws nothing
+
+config FBCONS_TAB_WIDTH
+    int "Tab width"
+    depends on FBCONS
+    range 2 8
+    default 4
+    help
+      Columns between tab stops
