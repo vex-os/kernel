@@ -48,15 +48,28 @@ static vfs_driver_t* find_driver(const char* restrict name)
     return nullptr;
 }
 
+// A probe reads the device and may sleep, so the lock is not held for it.
+// A driver that is removed meanwhile ends the walk, as removal clears its link
 static vfs_driver_t* deduce_driver(const block_interface_t* restrict volume)
 {
-    vfs_driver_t* it;
+    spinlock_acquire(&drivers_lock);
 
-    for(it = drivers_head; it; it = it->priv.next) {
-        if(it->ops->probe && it->ops->probe(nullptr, volume) == 0) {
+    vfs_driver_t* it = drivers_head;
+
+    while(it) {
+        const vfs_ops_t* ops = it->ops;
+
+        spinlock_release(&drivers_lock);
+
+        if(ops->probe && ops->probe(nullptr, volume) == 0) {
             return it;
         }
+
+        spinlock_acquire(&drivers_lock);
+        it = it->priv.next;
     }
+
+    spinlock_release(&drivers_lock);
 
     return nullptr;
 }
@@ -103,18 +116,16 @@ static int mount_locked(const char* restrict type, const char* restrict path, co
         return -EINVAL;
     }
 
-    spinlock_acquire(&drivers_lock);
-
     vfs_driver_t* driver;
 
     if(type == nullptr) {
         driver = deduce_driver(volume);
     }
     else {
+        spinlock_acquire(&drivers_lock);
         driver = find_driver(type);
+        spinlock_release(&drivers_lock);
     }
-
-    spinlock_release(&drivers_lock);
 
     if(driver == nullptr) {
         return -ENOENT;
