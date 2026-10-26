@@ -86,38 +86,4 @@
 #define __k_EWOULDBLOCK     275
 #define __k_EXDEV           276
 
-/* Linux-like - TODO */
-
-#define __k_EBADFD          301
-#define __k_EBADR           302
-#define __k_EBADSLT         303
-#define __k_EHOSTDOWN       304
-#define __k_EKEYREJECTED    305
-#define __k_EKEYREVOKED     306
-#define __k_ELNRNG          307
-#define __k_EMEDIUMTYPE     308
-#define __k_ENOANO          309
-#define __k_ENOCSI          310
-#define __k_ENOKEY          311
-#define __k_ENOMEDIUM       312
-#define __k_ENONET          313
-#define __k_ENOPKG          314
-#define __k_ENOTBLK         315
-#define __k_ENOTRECOVERABLE 316
-#define __k_ENOTUNIQ        317
-#define __k_EOWNERDEAD      318
-#define __k_EPFNOSUPPORT    319
-#define __k_EREMOTE         320
-#define __k_EREMOTEIO       321
-#define __k_ERESTART        322
-#define __k_ERFKILL         323
-#define __k_ESHUTDOWN       324
-#define __k_ESOCKTNOSUPPORT 325
-#define __k_ESTRPIPE        326
-#define __k_ETOOMANYREFS    327
-#define __k_EUCLEAN         328
-#define __k_EUNATCH         329
-#define __k_EUSERS          330
-#define __k_EXFULL          331
-
 #endif /* USR_VEX_ERRNO_H */
