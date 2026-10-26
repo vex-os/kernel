@@ -47,11 +47,11 @@ static int run(void)
     ktest_expect(ktest_syscall2(__k_SYS_SETPGID, 99999, leader), -__k_ESRCH);
     ktest_expect(ktest_syscall2(__k_SYS_KILL, -leader, __k_SIGKILL), 0);
 
-    ktest_expect(ktest_syscall2(__k_SYS_WAITPID, -leader, (long)&wstatus) > 0, 1);
+    ktest_expect(ktest_syscall3(__k_SYS_WAITPID, -leader, (long)&wstatus, 0) > 0, 1);
     ktest_expect(wstatus, 9);
-    ktest_expect(ktest_syscall2(__k_SYS_WAITPID, -leader, (long)&wstatus) > 0, 1);
+    ktest_expect(ktest_syscall3(__k_SYS_WAITPID, -leader, (long)&wstatus, 0) > 0, 1);
     ktest_expect(wstatus, 9);
-    ktest_expect(ktest_syscall2(__k_SYS_WAITPID, -leader, (long)&wstatus), -__k_ECHILD); // group gone
+    ktest_expect(ktest_syscall3(__k_SYS_WAITPID, -leader, (long)&wstatus, 0), -__k_ECHILD); // group gone
     ktest_expect(ktest_syscall2(__k_SYS_KILL, -leader, 0), -__k_ESRCH);
 
     // A session leader stays in its own group, and its session is out of the parent's reach
@@ -78,7 +78,7 @@ static int run(void)
     }
 
     wstatus = -1;
-    ktest_syscall2(__k_SYS_WAITPID, child, (long)&wstatus);
+    ktest_syscall3(__k_SYS_WAITPID, child, (long)&wstatus, 0);
     ktest_expect(wstatus, 1792);
 
     // A child left in the caller's group is what waitpid(0) waits for
@@ -89,7 +89,7 @@ static int run(void)
     }
 
     wstatus = -1;
-    ktest_expect(ktest_syscall2(__k_SYS_WAITPID, 0, (long)&wstatus) == child, 1);
+    ktest_expect(ktest_syscall3(__k_SYS_WAITPID, 0, (long)&wstatus, 0) == child, 1);
     ktest_expect(wstatus, 1024);
 
     return ktest_result();

@@ -2,6 +2,7 @@
 
 #include <usr/vex/wait.h>
 
+#define WNOHANG     __k_WNOHANG
 #define W_EXITCODE  __k_W_EXITCODE
 #define WEXITSTATUS __k_WEXITSTATUS
 #define WTERMSIG    __k_WTERMSIG

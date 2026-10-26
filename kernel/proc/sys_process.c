@@ -284,7 +284,8 @@ static bool wait_matches(process_t* restrict child, pid_t pid, const process_gro
     return pid == -1 || child->pid == pid;
 }
 
-static intptr_t wait_child(process_t* restrict caller, pid_t pid, const process_group_t* restrict group, uintptr_t wstatus)
+static intptr_t wait_child(process_t* restrict caller, pid_t pid, const process_group_t* restrict group, uintptr_t wstatus,
+    uintptr_t options)
 {
     for(;;) {
         process_t* target = nullptr;
@@ -312,6 +313,11 @@ static intptr_t wait_child(process_t* restrict caller, pid_t pid, const process_
         }
 
         if(target == nullptr && has_match) {
+            if(options & WNOHANG) {
+                spinlock_release_intr(&caller->lock, intr_state);
+                return 0;
+            }
+
             event_t* child_exited = &caller->child_exited;
             ssize_t result = event_await_unlock(&child_exited, 1, &caller->lock, intr_state, 0);
 
@@ -439,6 +445,11 @@ static intptr_t sys_waitpid(const uintptr_t* restrict args)
 {
     pid_t pid = args[0];
     uintptr_t wstatus = args[1];
+    uintptr_t options = args[2];
+
+    if(options & ~(uintptr_t)(WNOHANG)) {
+        return -EINVAL;
+    }
 
     thread_t* thread = this_thread();
     process_t* caller = thread->process;
@@ -448,7 +459,7 @@ static intptr_t sys_waitpid(const uintptr_t* restrict args)
     }
 
     if(pid > 0 || pid == -1) {
-        return wait_child(caller, pid, nullptr, wstatus);
+        return wait_child(caller, pid, nullptr, wstatus, options);
     }
 
     if(pid == INT32_MIN) {
@@ -468,7 +479,7 @@ static intptr_t sys_waitpid(const uintptr_t* restrict args)
         return -ECHILD;
     }
 
-    intptr_t retval = wait_child(caller, pid, group, wstatus);
+    intptr_t retval = wait_child(caller, pid, group, wstatus, options);
     process_group_decref(group);
 
     return retval;

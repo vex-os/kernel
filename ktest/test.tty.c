@@ -333,7 +333,7 @@ static void test_tty(void)
     ktest_expect(ktest_syscall3(__k_SYS_IOCTL, tty_fd, __k_TIOCSPGRP, (long)&pgid), 0);
     line_send("\x03");
     wstatus = -1;
-    ktest_syscall2(__k_SYS_WAITPID, child, (long)&wstatus);
+    ktest_syscall3(__k_SYS_WAITPID, child, (long)&wstatus, 0);
     ktest_expect(wstatus, 2);
     ktest_expect(expect_line("^C"), 1);
 

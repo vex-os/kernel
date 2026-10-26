@@ -173,7 +173,7 @@ static long wait_program(long child)
     become_foreground(child);
     set_signals(true);
 
-    long waited = ktest_syscall2(__k_SYS_WAITPID, child, (long)(&status));
+    long waited = ktest_syscall3(__k_SYS_WAITPID, child, (long)(&status), 0);
 
     set_signals(false);
     become_foreground(runner_group);

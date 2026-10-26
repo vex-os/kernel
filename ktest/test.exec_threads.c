@@ -92,7 +92,7 @@ int main(int argc, char** argv)
     }
 
     int wstatus = -1;
-    ktest_syscall2(__k_SYS_WAITPID, child, (long)&wstatus);
+    ktest_syscall3(__k_SYS_WAITPID, child, (long)&wstatus, 0);
     ktest_expect(wstatus, 10752);
 
     return ktest_result();
