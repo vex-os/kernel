@@ -95,7 +95,7 @@ config FBCONS_FONT_FILE
 choice FBCONS_CURSOR
     prompt "Framebuffer console cursor"
     depends on FBCONS
-    default FBCONS_CURSOR_INVERT
+    default FBCONS_CURSOR_FRAME
     help
       The look of the cursor. It sits in the bottom
       left corner of its cell
