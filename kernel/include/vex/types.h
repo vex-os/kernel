@@ -1,5 +1,8 @@
 #pragma once
 
+#include <limits.h>
+#include <stddef.h>
+#include <stdint.h>
 #include <usr/vex/types.h>
 
 #if __STDC_VERSION__ < 199901L

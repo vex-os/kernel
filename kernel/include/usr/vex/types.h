@@ -1,9 +1,18 @@
 #ifndef USR_VEX_TYPES_H
 #define USR_VEX_TYPES_H
 
-#include <limits.h>
-
-#if defined(__cplusplus) || defined(__STDC_VERSION__) && __STDC_VERSION__ >= 202311L
+#if defined(__INT8_TYPE__) && defined(__INT16_TYPE__) && defined(__INT32_TYPE__) && defined(__INT64_TYPE__) && defined(__UINT8_TYPE__) \
+    && defined(__UINT16_TYPE__) && defined(__UINT32_TYPE__) && defined(__UINT64_TYPE__)
+#define __k_SINT8_TYPE  __INT8_TYPE__
+#define __k_SINT16_TYPE __INT16_TYPE__
+#define __k_SINT32_TYPE __INT32_TYPE__
+#define __k_SINT64_TYPE __INT64_TYPE__
+#define __k_UINT8_TYPE  __UINT8_TYPE__
+#define __k_UINT16_TYPE __UINT16_TYPE__
+#define __k_UINT32_TYPE __UINT32_TYPE__
+#define __k_UINT64_TYPE __UINT64_TYPE__
+#define __k_SSIZE_TYPE  __INT64_TYPE__
+#elif defined(__cplusplus) || defined(__STDC_VERSION__) && __STDC_VERSION__ >= 199901L
 #include <stddef.h>
 #include <stdint.h>
 #define __k_SINT8_TYPE  int8_t
@@ -16,6 +25,7 @@
 #define __k_UINT64_TYPE uint64_t
 #define __k_SSIZE_TYPE  int64_t
 #else
+#include <limits.h>
 #if UCHAR_MAX == 0xFF
 #define __k_SINT8_TYPE signed char
 #define __k_UINT8_TYPE unsigned char
