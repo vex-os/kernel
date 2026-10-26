@@ -13,7 +13,7 @@
 
 static int resolve(const uintptr_t* restrict args, unsigned flags, vnode_t** restrict out)
 {
-    char path[PATH_SIZE];
+    char path[PATH_MAX];
     ssize_t copied = user_copyin_str(path, args[1], sizeof(path));
 
     if(copied < 0) {

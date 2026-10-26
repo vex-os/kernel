@@ -26,14 +26,14 @@ static int follow_symlink(vnode_t* restrict node, vnode_t* restrict link, const 
         return -ENOMEM;
     }
 
-    ssize_t length = vnode_readlink(link, target, PATH_MAX);
+    ssize_t length = vnode_readlink(link, target, PATH_LIM);
 
     if(length < 0) {
         pslab_free_virt(target);
         return length;
     }
 
-    if(length > PATH_MAX) {
+    if(length > PATH_LIM) {
         pslab_free_virt(target);
         return -ENAMETOOLONG;
     }
@@ -281,7 +281,7 @@ int path_resolve_parent_at(vnode_t* restrict base_dir, const char* restrict path
     else {
         size_t dir_length = slash - path;
 
-        if(dir_length > PATH_MAX) {
+        if(dir_length > PATH_LIM) {
             return -ENAMETOOLONG;
         }
 

@@ -166,7 +166,7 @@ static intptr_t sys_fstatat(const uintptr_t* restrict args)
         return -EINVAL;
     }
 
-    char path[PATH_SIZE];
+    char path[PATH_MAX];
     ssize_t copied = user_copyin_str(path, args[1], sizeof(path));
 
     if(copied < 0) {
@@ -215,7 +215,7 @@ static intptr_t sys_fchmodat(const uintptr_t* restrict args)
         return -EINVAL;
     }
 
-    char path[PATH_SIZE];
+    char path[PATH_MAX];
     ssize_t copied = user_copyin_str(path, args[1], sizeof(path));
 
     if(copied < 0) {
@@ -253,7 +253,7 @@ static intptr_t sys_fchownat(const uintptr_t* restrict args)
         return -EINVAL;
     }
 
-    char path[PATH_SIZE];
+    char path[PATH_MAX];
     ssize_t copied = user_copyin_str(path, args[1], sizeof(path));
 
     if(copied < 0) {
@@ -291,7 +291,7 @@ static intptr_t sys_utimensat(const uintptr_t* restrict args)
         return -EINVAL;
     }
 
-    char path[PATH_SIZE];
+    char path[PATH_MAX];
     ssize_t copied = user_copyin_str(path, args[1], sizeof(path));
 
     if(copied < 0) {
@@ -336,7 +336,7 @@ static intptr_t sys_mkdirat(const uintptr_t* restrict args)
         return -ENOSYS;
     }
 
-    char path[PATH_SIZE];
+    char path[PATH_MAX];
     ssize_t copied = user_copyin_str(path, args[1], sizeof(path));
 
     if(copied < 0) {
@@ -400,7 +400,7 @@ static intptr_t sys_unlinkat(const uintptr_t* restrict args)
         return -EINVAL;
     }
 
-    char path[PATH_SIZE];
+    char path[PATH_MAX];
     ssize_t copied = user_copyin_str(path, args[1], sizeof(path));
 
     if(copied < 0) {
@@ -450,14 +450,14 @@ static intptr_t sys_renameat(const uintptr_t* restrict args)
         return -ENOSYS;
     }
 
-    char oldpath[PATH_SIZE];
+    char oldpath[PATH_MAX];
     ssize_t copied = user_copyin_str(oldpath, args[1], sizeof(oldpath));
 
     if(copied < 0) {
         return copied;
     }
 
-    char newpath[PATH_SIZE];
+    char newpath[PATH_MAX];
     copied = user_copyin_str(newpath, args[3], sizeof(newpath));
 
     if(copied < 0) {
@@ -508,14 +508,14 @@ static intptr_t sys_linkat(const uintptr_t* restrict args)
         return -EINVAL;
     }
 
-    char oldpath[PATH_SIZE];
+    char oldpath[PATH_MAX];
     ssize_t copied = user_copyin_str(oldpath, args[1], sizeof(oldpath));
 
     if(copied < 0) {
         return copied;
     }
 
-    char newpath[PATH_SIZE];
+    char newpath[PATH_MAX];
     copied = user_copyin_str(newpath, args[3], sizeof(newpath));
 
     if(copied < 0) {
@@ -562,14 +562,14 @@ static intptr_t sys_symlinkat(const uintptr_t* restrict args)
         return -ENOSYS;
     }
 
-    char target[PATH_SIZE];
+    char target[PATH_MAX];
     ssize_t copied = user_copyin_str(target, args[0], sizeof(target));
 
     if(copied < 0) {
         return copied;
     }
 
-    char path[PATH_SIZE];
+    char path[PATH_MAX];
     copied = user_copyin_str(path, args[2], sizeof(path));
 
     if(copied < 0) {
@@ -609,7 +609,7 @@ static intptr_t sys_readlinkat(const uintptr_t* restrict args)
         return -ENOSYS;
     }
 
-    char path[PATH_SIZE];
+    char path[PATH_MAX];
     ssize_t copied = user_copyin_str(path, args[1], sizeof(path));
 
     if(copied < 0) {
@@ -623,7 +623,7 @@ static intptr_t sys_readlinkat(const uintptr_t* restrict args)
         return retval;
     }
 
-    char target[PATH_SIZE];
+    char target[PATH_MAX];
     size_t size = args[3];
     ssize_t length = -EINVAL;
 
@@ -675,7 +675,7 @@ static intptr_t sys_chdir(const uintptr_t* restrict args)
         return -ENOSYS;
     }
 
-    char path[PATH_SIZE];
+    char path[PATH_MAX];
     ssize_t copied = user_copyin_str(path, args[0], sizeof(path));
 
     if(copied < 0) {

@@ -129,7 +129,7 @@ static int exec_cred(const credentials_t* restrict credentials, const stat_t* re
 
 static intptr_t exec_image(thread_t* restrict thread, char* restrict path, char* restrict strings, const uintptr_t* restrict args)
 {
-    ssize_t copied = user_copyin_str(path, args[0], PATH_SIZE);
+    ssize_t copied = user_copyin_str(path, args[0], PATH_MAX);
 
     if(copied < 0) {
         return copied;
@@ -417,7 +417,7 @@ static intptr_t sys_exec(const uintptr_t* restrict args)
         return -ENOSYS;
     }
 
-    char* path = kmalloc(PATH_SIZE);
+    char* path = kmalloc(PATH_MAX);
     char* strings = pslab_alloc_virt();
 
     intptr_t retval = -ENOMEM;

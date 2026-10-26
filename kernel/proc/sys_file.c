@@ -223,7 +223,7 @@ static intptr_t sys_openat(const uintptr_t* restrict args)
         return -ENOSYS;
     }
 
-    char path[PATH_SIZE];
+    char path[PATH_MAX];
     ssize_t copied = user_copyin_str(path, args[1], sizeof(path));
 
     if(copied < 0) {

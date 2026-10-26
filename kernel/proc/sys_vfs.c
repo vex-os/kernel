@@ -82,7 +82,7 @@ static intptr_t sys_mount(const uintptr_t* restrict args)
         return -EPERM;
     }
 
-    char target[PATH_SIZE];
+    char target[PATH_MAX];
     ssize_t copied = user_copyin_str(target, args[1], sizeof(target));
 
     if(copied < 0) {
@@ -112,7 +112,7 @@ static intptr_t sys_mount(const uintptr_t* restrict args)
     const block_interface_t* interface = nullptr;
 
     if(args[0]) {
-        char source[PATH_SIZE];
+        char source[PATH_MAX];
         copied = user_copyin_str(source, args[0], sizeof(source));
 
         if(copied < 0) {
@@ -175,7 +175,7 @@ static intptr_t sys_umount(const uintptr_t* restrict args)
         return -EPERM;
     }
 
-    char path[PATH_SIZE];
+    char path[PATH_MAX];
     ssize_t copied = user_copyin_str(path, args[0], sizeof(path));
 
     if(copied < 0) {

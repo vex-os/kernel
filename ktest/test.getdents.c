@@ -66,7 +66,7 @@ static long count_entries(const char* path, size_t buffer_size)
 
 static long create_files(const char* directory)
 {
-    char name[__k_PATH_SIZE];
+    char name[__k_PATH_MAX];
 
     for(int i = 0; i < FILE_COUNT; ++i) {
         ktest_snprintf(name, sizeof(name), "%s/file-%d", directory, i);
@@ -134,7 +134,7 @@ static long read_file_entries(const char* path)
 static long count_while_unlinking(const char* directory)
 {
     alignas(8) char records[LARGE_BUFFER_SIZE];
-    char path[__k_PATH_SIZE];
+    char path[__k_PATH_MAX];
     long fd = ktest_open(directory, __k_O_RDONLY, 0);
     long count = 0;
 
@@ -172,11 +172,11 @@ static long count_while_unlinking(const char* directory)
 // On FAT the long names take several slots of the directory
 static void test_fat(const char* work_directory)
 {
-    char mount_point[__k_PATH_SIZE];
-    char directory[__k_PATH_SIZE];
-    char file[__k_PATH_SIZE];
-    char nested[__k_PATH_SIZE];
-    char above_mount[__k_PATH_SIZE];
+    char mount_point[__k_PATH_MAX];
+    char directory[__k_PATH_MAX];
+    char file[__k_PATH_MAX];
+    char nested[__k_PATH_MAX];
+    char above_mount[__k_PATH_MAX];
 
     ktest_snprintf(mount_point, sizeof(mount_point), "%s/fat", work_directory);
     ktest_snprintf(directory, sizeof(directory), "%s/tmp", mount_point);
