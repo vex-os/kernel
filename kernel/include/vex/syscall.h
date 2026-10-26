@@ -18,6 +18,7 @@ typedef struct vnode_s vnode_t;
 #define SYS_SETPGID __k_SYS_SETPGID
 #define SYS_GETPGID __k_SYS_GETPGID
 #define SYS_GETSID  __k_SYS_GETSID
+#define SYS_SLEEP   __k_SYS_SLEEP
 
 #define SYS_THREAD_CREATE __k_SYS_THREAD_CREATE
 #define SYS_THREAD_EXIT   __k_SYS_THREAD_EXIT

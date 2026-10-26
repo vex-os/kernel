@@ -1,5 +1,6 @@
 #include <vex/atomic.h>
 #include <vex/binfmt.h>
+#include <vex/clocksrc.h>
 #include <vex/errno.h>
 #include <vex/event.h>
 #include <vex/fcntl.h>
@@ -14,6 +15,7 @@
 #include <vex/signal.h>
 #include <vex/syscall.h>
 #include <vex/thread.h>
+#include <vex/time.h>
 #include <vex/uaccess.h>
 #include <vex/vms.h>
 #include <vex/wait.h>
@@ -612,3 +614,83 @@ static intptr_t sys_getsid(const uintptr_t* restrict args)
 }
 
 define_syscall(sys_getsid, SYS_GETSID);
+
+static uint64_t sleep_nanoseconds(const timespec_t* restrict request)
+{
+    uint64_t seconds = request->tv_sec;
+
+    if(seconds >= (UINT64_MAX - request->tv_nsec) / NSEC_PER_SEC) {
+        return UINT64_MAX;
+    }
+
+    return seconds * NSEC_PER_SEC + request->tv_nsec;
+}
+
+// A signal ends the sleep for good, as POSIX has it, so the call never restarts
+static intptr_t sys_sleep(const uintptr_t* restrict args)
+{
+    thread_t* thread = this_thread();
+
+    if(thread->process == nullptr) {
+        return -ENOSYS;
+    }
+
+    timespec_t request;
+    ssize_t copied = user_copyin(&request, args[0], sizeof(request));
+
+    if(copied < 0) {
+        return copied;
+    }
+
+    if(request.tv_sec < 0 || request.tv_nsec < 0 || request.tv_nsec >= NSEC_PER_SEC) {
+        return -EINVAL;
+    }
+
+    uint64_t timeout = sleep_nanoseconds(&request);
+
+    // Zero would mean to wait for as long as it takes
+    if(timeout == 0) {
+        sched_yield();
+        return 0;
+    }
+
+    uint64_t start = clock_source_now_ns();
+
+    // Nobody triggers the event, so only the timeout or a signal ends the wait
+    event_t event;
+    event_init(&event);
+
+    event_t* event_pointer = &event;
+    spinlock_t lock = SPINLOCK_INIT;
+    bool intr_state = spinlock_acquire_intr(&lock);
+    ssize_t result = event_await_unlock(&event_pointer, 1, &lock, intr_state, timeout);
+
+    event_deinit(&event);
+
+    if(result == -ETIMEDOUT) {
+        return 0;
+    }
+
+    if(result != -ERESTART) {
+        return result;
+    }
+
+    if(args[1]) {
+        uint64_t elapsed = clock_source_now_ns() - start;
+        timespec_t remaining = {};
+
+        if(elapsed < timeout) {
+            timespec_from_nsec(&remaining, timeout - elapsed);
+        }
+
+        copied = user_copyout(args[1], &remaining, sizeof(remaining));
+
+        if(copied < 0) {
+            return copied;
+        }
+    }
+
+    return -EINTR;
+}
+
+define_syscall(sys_sleep, SYS_SLEEP);
