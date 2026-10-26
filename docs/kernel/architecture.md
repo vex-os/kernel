@@ -66,6 +66,13 @@ What userspace sees of a node (block, char, serial, tty, fb) is an interface on 
 - `fs/` has the VFS (vnode, vcache, mount, path, file) plus the devfs, echfs, ext2 and FAT backends.
 - Device names look like `ada0n1p1` (used in `ktest/limine.conf.in`).
 
+## Framebuffer console
+
+`kernel/fbcons/` is a console backend that draws on a framebuffer. It is a top directory with its own `Kconfig`, and it builds only with
+`CONFIG_FBCONS`. The font is a raw bitmap from `kernel/fbcons/fonts/`, named `<name>_<width>x<height>.bin`, in CP437 order. At build time
+`scripts/fbcons/bin_to_ch.py` turns it into `generated.fbcons_font.{c,h}`, and the size comes from the name. A new font needs its file and an
+entry in the `FBCONS_FONT` choice. `scripts/fbcons/psf_to_bin.py` converts a PSF font to this format.
+
 ## Logging
 
 Use `pr_emerg` … `pr_verbose` (`vex/kprintf.h`). The `loglevel=verbose` cmdline option enables verbose output. Use `panic()` for fatal

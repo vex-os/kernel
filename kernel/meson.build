@@ -71,6 +71,7 @@ kernel_subsystems = {
     'device': 'KP_DEVICE',
     'drivers': 'KP_DRIVERS',
     'exec': 'KP_EXEC',
+    'fbcons': 'KP_CORE',
     'firmware': 'KP_FIRMWARE',
     'fs': 'KP_FS',
     'init': 'KP_CORE',
@@ -88,8 +89,14 @@ kernel_libs = []
 
 foreach directory, subsystem : kernel_subsystems
     kernel_sources = [kernel_config_h, kernel_utsname_h]
+    generated_sources = kernel_sources.length()
 
     subdir(directory)
+
+    # A directory that is switched off by its config adds nothing
+    if kernel_sources.length() == generated_sources
+        continue
+    endif
 
     if directory == 'firmware'
         kernel_sources += uacpi_sources

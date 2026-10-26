@@ -1,0 +1,93 @@
+config FBCONS
+    bool "Framebuffer console"
+    default y
+    help
+      Print kernel messages to the first boot framebuffer,
+      or to the native driver's that took its memory over
+
+choice FBCONS_FONT
+    prompt "Framebuffer console font"
+    depends on FBCONS
+    default FBCONS_FONT_VEXDEMOS_8X16
+    help
+      The font in fbcons/fonts that the console draws with.
+      Its size is the one in its file name. To add a font,
+      put the file there and give it an entry here and a
+      line in FBCONS_FONT_FILE
+
+config FBCONS_FONT_VEXDEMOS_8X16
+    bool "VexDemos 8x16"
+    help
+      The hand-drawn font of the project
+
+config FBCONS_FONT_IBM_VGA_8X8
+    bool "IBM VGA 8x8"
+    help
+      Dump of the 8x8 IBM VGA ROM font
+
+config FBCONS_FONT_IBM_VGA_8X14
+    bool "IBM VGA 8x14"
+    help
+      Dump of the 8x14 IBM VGA ROM font
+
+config FBCONS_FONT_IBM_VGA_8X16
+    bool "IBM VGA 8x16"
+    help
+      Dump of the 8x16 IBM VGA ROM font
+
+config FBCONS_FONT_TERMINUS_8X16
+    bool "Terminus 8x16"
+    help
+      256-glyph 8x16 Terminus, OFL-1.1
+
+config FBCONS_FONT_TERMINUS_BOLD_8X16
+    bool "Terminus 8x16 Bold"
+    help
+      256-glyph 8x16 Terminus Bold, OFL-1.1
+
+config FBCONS_FONT_TERMINUS_10X20
+    bool "Terminus 10x20"
+    help
+      256-glyph 10x20 Terminus, OFL-1.1
+
+config FBCONS_FONT_TERMINUS_BOLD_10X20
+    bool "Terminus 10x20 Bold"
+    help
+      256-glyph 10x20 Terminus Bold, OFL-1.1
+
+config FBCONS_FONT_TERMINUS_12X24
+    bool "Terminus 12x24"
+    help
+      256-glyph 12x24 Terminus, OFL-1.1
+
+config FBCONS_FONT_TERMINUS_BOLD_12X24
+    bool "Terminus 12x24 Bold"
+    help
+      256-glyph 12x24 Terminus Bold, OFL-1.1
+
+config FBCONS_FONT_TERMINUS_16X32
+    bool "Terminus 16x32"
+    help
+      256-glyph 16x32 Terminus, OFL-1.1
+
+config FBCONS_FONT_TERMINUS_BOLD_16X32
+    bool "Terminus 16x32 Bold"
+    help
+      256-glyph 16x32 Terminus Bold, OFL-1.1
+
+endchoice
+
+config FBCONS_FONT_FILE
+    string
+    default "VexDemos_8x16.bin" if FBCONS_FONT_VEXDEMOS_8X16
+    default "IBM_VGA_8x8.bin" if FBCONS_FONT_IBM_VGA_8X8
+    default "IBM_VGA_8x14.bin" if FBCONS_FONT_IBM_VGA_8X14
+    default "IBM_VGA_8x16.bin" if FBCONS_FONT_IBM_VGA_8X16
+    default "Terminus_8x16.bin" if FBCONS_FONT_TERMINUS_8X16
+    default "TerminusBold_8x16.bin" if FBCONS_FONT_TERMINUS_BOLD_8X16
+    default "Terminus_10x20.bin" if FBCONS_FONT_TERMINUS_10X20
+    default "TerminusBold_10x20.bin" if FBCONS_FONT_TERMINUS_BOLD_10X20
+    default "Terminus_12x24.bin" if FBCONS_FONT_TERMINUS_12X24
+    default "TerminusBold_12x24.bin" if FBCONS_FONT_TERMINUS_BOLD_12X24
+    default "Terminus_16x32.bin" if FBCONS_FONT_TERMINUS_16X32
+    default "TerminusBold_16x32.bin" if FBCONS_FONT_TERMINUS_BOLD_16X32

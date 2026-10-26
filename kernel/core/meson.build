@@ -10,7 +10,3 @@ kernel_sources += files(
 if kconfig.get('CONFIG_KASSERT', 'n') == 'y'
     kernel_sources += files('assert.c')
 endif
-
-if kconfig.get('CONFIG_FBCONS', 'n') == 'y'
-    kernel_sources += files('fbcons.c')
-endif

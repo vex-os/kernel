@@ -9,12 +9,7 @@ config KPRINTF_BUFSIZE
 
 comment "Consoles"
 
-config FBCONS
-    bool "Framebuffer console"
-    default y
-    help
-      Print kernel messages to the first boot framebuffer,
-      or to the native driver's that took its memory over
+source "kernel/fbcons/Kconfig"
 
 config BXCONS
     bool "Bochs debug port console"
