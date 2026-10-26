@@ -48,7 +48,7 @@ static int devfs_dir_iterate(vnode_t* restrict node, dir_context_t* restrict dir
         memset(record.d_name, 0, sizeof(record.d_name));
         kstrncpy(record.d_name, it->name, sizeof(record.d_name));
         record.d_ino = (ino_t)((uintptr_t)(it->node));
-        record.d_nodetype = it->node->type;
+        record.d_type = dirent_type_from_vnode(it->node->type);
 
         if(!dir_emit(dir_context, &record, index + 1)) {
             break;

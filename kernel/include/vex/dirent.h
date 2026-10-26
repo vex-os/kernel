@@ -4,6 +4,15 @@
 #include <vex/path.h>
 #include <vex/types.h>
 
+#define DT_UNKNOWN __k_DT_UNKNOWN
+#define DT_FIFO    __k_DT_FIFO
+#define DT_CHR     __k_DT_CHR
+#define DT_DIR     __k_DT_DIR
+#define DT_BLK     __k_DT_BLK
+#define DT_REG     __k_DT_REG
+#define DT_LNK     __k_DT_LNK
+#define DT_SOCK    __k_DT_SOCK
+
 #define DIR_DOTS_END 2 // The position after "." and ".."
 
 typedef struct __k_dirent dirent_t;
@@ -30,3 +39,8 @@ bool dir_emit(dir_context_t* restrict dir_context, dirent_t* restrict entry, uin
 /// @retval false The reader is full; the caller stops
 /// @note A filesystem that calls this starts its own positions at DIR_DOTS_END
 bool dir_emit_dots(dir_context_t* restrict dir_context, ino_t self, ino_t parent);
+
+/// Gives the DT_ value that a directory entry of this node type has
+/// @param vnode_type A VNODE_ value
+/// @retval DT_UNKNOWN The type has no DT_ value
+uint8_t dirent_type_from_vnode(unsigned vnode_type);

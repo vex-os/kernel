@@ -122,7 +122,7 @@ static int iterate_locked(vnode_t* restrict node, dir_context_t* restrict dir_co
         }
 
         record.d_ino = entry.ino;
-        record.d_nodetype = type;
+        record.d_type = dirent_type_from_vnode(type);
 
         memset(record.d_name, 0, NAME_SIZE);
         kstrncpy(record.d_name, entry.name, NAME_SIZE);

@@ -480,10 +480,10 @@ static int iterate_locked(vnode_t* restrict node, dir_context_t* restrict dir_co
         record.d_ino = fat_nodenumber(fs, context->first_cluster, offset - 1);
 
         if(entry.base.attribute & FAT_ATTR_DIRECTORY) {
-            record.d_nodetype = VNODE_DIRECTORY;
+            record.d_type = DT_DIR;
         }
         else {
-            record.d_nodetype = VNODE_FILE;
+            record.d_type = DT_REG;
         }
 
         memset(record.d_name, 0, NAME_SIZE);

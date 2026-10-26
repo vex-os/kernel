@@ -700,10 +700,28 @@ bool dir_emit(dir_context_t* restrict dir_context, dirent_t* restrict entry, uin
     return true;
 }
 
+uint8_t dirent_type_from_vnode(unsigned vnode_type)
+{
+    switch(vnode_type) {
+        case VNODE_FILE:
+            return DT_REG;
+        case VNODE_DIRECTORY:
+            return DT_DIR;
+        case VNODE_BLOCK_DEV:
+            return DT_BLK;
+        case VNODE_CHAR_DEV:
+            return DT_CHR;
+        case VNODE_SYM_LINK:
+            return DT_LNK;
+        default:
+            return DT_UNKNOWN;
+    }
+}
+
 bool dir_emit_dots(dir_context_t* restrict dir_context, ino_t self, ino_t parent)
 {
     dirent_t record = {};
-    record.d_nodetype = VNODE_DIRECTORY;
+    record.d_type = DT_DIR;
 
     if(dir_context->position == 0) {
         record.d_ino = self;
