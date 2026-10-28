@@ -37,10 +37,10 @@ struct char_interface_ops_s {
     ssize_t (*write)(const char_interface_t* restrict interface, void* restrict file_ctxdata, off_t offset, const void* restrict buffer,
         size_t size, unsigned flags);
 
-    /// Moves the file's offset by the device's own rules, for devices whose offset isn't a byte position
+    /// Moves the file's offset by the device's own rules
     /// @param position The file's offset now
     /// @return The new offset
-    /// @note nullptr leaves the offset to the VFS
+    /// @note nullptr makes the device a stream that can't seek
     off_t (*seek)(const char_interface_t* restrict interface, void* restrict file_ctxdata, off_t position, off_t offset, int origin);
 
     int (*ioctl)(const char_interface_t* restrict interface, void* restrict file_ctxdata, uint32_t request, uintptr_t argument);
@@ -142,14 +142,14 @@ static __always_inline ssize_t char_interface_write(const char_interface_t* rest
     return interface->ops->write(interface, file_ctxdata, offset, buffer, size, flags);
 }
 
-/// @retval -ENOSYS The device leaves the offset to the VFS
+/// @retval -ESPIPE The device is a stream
 static __always_inline off_t char_interface_seek(const char_interface_t* restrict interface, void* restrict file_ctxdata, off_t position,
     off_t offset, int origin)
 {
     if(atomic_load(&interface->priv.removed, ATOMIC_ACQUIRE))
         return -ENODEV;
     if(interface->ops->seek == nullptr)
-        return -ENOSYS;
+        return -ESPIPE;
     return interface->ops->seek(interface, file_ctxdata, position, offset, origin);
 }
 

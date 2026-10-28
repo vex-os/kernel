@@ -5,6 +5,7 @@
 #include <vex/errno.h>
 #include <vex/fb_interface.h>
 #include <vex/fbcons.h>
+#include <vex/file.h>
 #include <vex/hart.h>
 #include <vex/initcall.h>
 #include <vex/kprintf.h>
@@ -414,6 +415,40 @@ static ssize_t fb_char_write(const char_interface_t* restrict interface, void* r
     return retval;
 }
 
+static off_t fb_char_seek(const char_interface_t* restrict interface, void* restrict file_ctxdata, off_t position, off_t offset, int origin)
+{
+    const fb_interface_t* fb = fb_of(interface);
+
+    if(!enter(fb)) {
+        return -ENODEV;
+    }
+
+    off_t size = fb->info.size;
+    leave(fb);
+
+    off_t base;
+
+    if(origin == SEEK_SET) {
+        base = 0;
+    }
+    else if(origin == SEEK_CUR) {
+        base = position;
+    }
+    else if(origin == SEEK_END) {
+        base = size;
+    }
+    else {
+        return -EINVAL;
+    }
+
+    // The offset stays within the framebuffer, and the end counts as within
+    if(offset < -base || offset > size - base) {
+        return -EINVAL;
+    }
+
+    return base + offset;
+}
+
 static int fb_char_ioctl(const char_interface_t* restrict interface, void* restrict file_ctxdata, uint32_t request, uintptr_t argument)
 {
     const fb_interface_t* fb = fb_of(interface);
@@ -466,6 +501,7 @@ static void fb_char_release(const char_interface_t* restrict interface)
 static const char_interface_ops_t fb_char_ops = {
     .read = &fb_char_read,
     .write = &fb_char_write,
+    .seek = &fb_char_seek,
     .ioctl = &fb_char_ioctl,
     .mmap = &fb_char_mmap,
     .resolve_page = &fb_char_resolve_page,
