@@ -33,7 +33,7 @@ ssize_t file_read(file_t* restrict file, void* restrict buffer, size_t size);
 ssize_t file_write(file_t* restrict file, const credentials_t* restrict credentials, const void* restrict buffer, size_t size);
 
 int file_truncate(file_t* restrict file, const credentials_t* restrict credentials, off_t size);
-int file_seek(file_t* restrict file, off_t offset, int origin);
+off_t file_seek(file_t* restrict file, off_t offset, int origin);
 int file_ioctl(file_t* restrict file, uint32_t request, uintptr_t argument);
 
 static __always_inline unsigned file_flags(const file_t* restrict file)

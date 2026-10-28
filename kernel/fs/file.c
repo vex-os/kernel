@@ -278,7 +278,7 @@ int file_truncate(file_t* restrict file, const credentials_t* restrict credentia
     return vnode_set_attr(file->node, &attr);
 }
 
-int file_seek(file_t* restrict file, off_t offset, int origin)
+off_t file_seek(file_t* restrict file, off_t offset, int origin)
 {
     if(file == nullptr) {
         return -EINVAL;
@@ -288,11 +288,11 @@ int file_seek(file_t* restrict file, off_t offset, int origin)
 
     if(moved >= 0) {
         file->offset = moved;
-        return 0;
+        return moved;
     }
 
     if(moved != -ENOSYS) {
-        return (int)(moved);
+        return moved;
     }
 
     off_t new_offset;
@@ -325,7 +325,7 @@ apply_offset:
     if(new_offset < 0)
         return -EINVAL;
     file->offset = new_offset;
-    return 0;
+    return new_offset;
 }
 
 int file_ioctl(file_t* restrict file, uint32_t request, uintptr_t argument)
