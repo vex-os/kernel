@@ -13,11 +13,6 @@ static int check_flags(uintptr_t flags)
         return -EINVAL;
     }
 
-    // Keys that hold across processes would come from the file behind the mapping
-    if(flags & FUTEX_SHARED) {
-        return -ENOSYS;
-    }
-
     return 0;
 }
 
@@ -65,7 +60,7 @@ static intptr_t sys_futex_wait(const uintptr_t* restrict args)
         deadline = deadline_after(&timeout);
     }
 
-    return futex_wait(process->vmspace, args[0], (uint32_t)(args[1]), deadline);
+    return futex_wait(process->vmspace, args[0], (uint32_t)(args[1]), deadline, args[3] & FUTEX_SHARED);
 }
 
 define_syscall(sys_futex_wait, SYS_FUTEX_WAIT);
@@ -89,7 +84,7 @@ static intptr_t sys_futex_wake(const uintptr_t* restrict args)
         return -EINVAL;
     }
 
-    return futex_wake(process->vmspace, args[0], args[1]);
+    return futex_wake(process->vmspace, args[0], args[1], args[2] & FUTEX_SHARED);
 }
 
 define_syscall(sys_futex_wake, SYS_FUTEX_WAKE);

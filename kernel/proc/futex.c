@@ -28,8 +28,8 @@ struct futex_bucket_s {
 struct futex_waiter_s {
     futex_waiter_t* next;
     futex_waiter_t* prev;
-    const vmspace_t* vmspace;
-    uintptr_t address;
+    const vmspace_t* vmspace; // nullptr for a shared key
+    uintptr_t address;        // Virtual for a private key, physical for a shared one
     thread_t* thread;
     bool queued;
 };
@@ -77,7 +77,7 @@ static void unlink_locked(futex_bucket_t* restrict bucket, futex_waiter_t* restr
     waiter->queued = false;
 }
 
-int futex_wait(vmspace_t* restrict vmspace, uintptr_t address, uint32_t expected, uint64_t deadline)
+int futex_wait(vmspace_t* restrict vmspace, uintptr_t address, uint32_t expected, uint64_t deadline, bool shared)
 {
     if(address % sizeof(uint32_t)) {
         return -EINVAL;
@@ -90,13 +90,21 @@ int futex_wait(vmspace_t* restrict vmspace, uintptr_t address, uint32_t expected
     }
 
     thread_t* thread = this_thread();
-    futex_bucket_t* bucket = bucket_of(vmspace, address);
     const uint32_t* word = phys_to_virt(phys);
 
     futex_waiter_t waiter;
-    waiter.vmspace = vmspace;
-    waiter.address = address;
     waiter.thread = thread;
+
+    if(shared) {
+        waiter.vmspace = nullptr;
+        waiter.address = phys;
+    }
+    else {
+        waiter.vmspace = vmspace;
+        waiter.address = address;
+    }
+
+    futex_bucket_t* bucket = bucket_of(waiter.vmspace, waiter.address);
 
     bool intr_state = spinlock_acquire_intr(&bucket->lock);
 
@@ -125,7 +133,11 @@ int futex_wait(vmspace_t* restrict vmspace, uintptr_t address, uint32_t expected
     }
 
     spinlock_release_intr(&bucket->lock, intr_state);
-    vms_unpin(phys);
+
+    // A shared key is the frame itself, so the frame stays put until the waiter leaves the queue
+    if(!shared) {
+        vms_unpin(phys);
+    }
 
     sched_yield();
 
@@ -143,6 +155,10 @@ int futex_wait(vmspace_t* restrict vmspace, uintptr_t address, uint32_t expected
 
     spinlock_release_intr(&bucket->lock, intr_state);
 
+    if(shared) {
+        vms_unpin(phys);
+    }
+
     if(woken) {
         return 0;
     }
@@ -158,9 +174,24 @@ int futex_wait(vmspace_t* restrict vmspace, uintptr_t address, uint32_t expected
     return 0; // Spurious, the caller looks at the word again anyway
 }
 
-size_t futex_wake(const vmspace_t* restrict vmspace, uintptr_t address, size_t count)
+ssize_t futex_wake(vmspace_t* restrict vmspace, uintptr_t address, size_t count, bool shared)
 {
-    futex_bucket_t* bucket = bucket_of(vmspace, address);
+    const vmspace_t* key_vmspace = vmspace;
+    uintptr_t key_address = address;
+    uintptr_t phys = 0;
+
+    if(shared) {
+        phys = vms_pin(vmspace, address);
+
+        if(phys == 0) {
+            return -EFAULT;
+        }
+
+        key_vmspace = nullptr;
+        key_address = phys;
+    }
+
+    futex_bucket_t* bucket = bucket_of(key_vmspace, key_address);
     size_t woken = 0;
 
     bool intr_state = spinlock_acquire_intr(&bucket->lock);
@@ -170,7 +201,7 @@ size_t futex_wake(const vmspace_t* restrict vmspace, uintptr_t address, size_t c
     while(waiter && woken < count) {
         futex_waiter_t* next = waiter->next;
 
-        if(waiter->vmspace == vmspace && waiter->address == address) {
+        if(waiter->vmspace == key_vmspace && waiter->address == key_address) {
             unlink_locked(bucket, waiter);
             sched_enqueue(waiter->thread);
             woken += 1;
@@ -180,6 +211,10 @@ size_t futex_wake(const vmspace_t* restrict vmspace, uintptr_t address, size_t c
     }
 
     spinlock_release_intr(&bucket->lock, intr_state);
+
+    if(shared) {
+        vms_unpin(phys);
+    }
 
     return woken;
 }

@@ -63,7 +63,8 @@ static intptr_t __noreturn sys_thread_exit(const uintptr_t* restrict args)
         uint32_t cleared = 0;
 
         if(user_copyout(thread->clear_tid, &cleared, sizeof(cleared)) >= 0) {
-            futex_wake(process->vmspace, thread->clear_tid, SIZE_MAX);
+            futex_wake(process->vmspace, thread->clear_tid, SIZE_MAX, false);
+            futex_wake(process->vmspace, thread->clear_tid, SIZE_MAX, true);
         }
     }
 
