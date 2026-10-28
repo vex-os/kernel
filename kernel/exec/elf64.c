@@ -104,7 +104,7 @@ static int copy_page(vmspace_t* restrict vmspace, file_t* restrict file, const e
             return -EIO;
         }
 
-        if(file_read(file, kva + lo - page, hi - lo) != (ssize_t)(hi - lo)) {
+        if(file_read(file, kva + lo - page, hi - lo, &file->offset) != (ssize_t)(hi - lo)) {
             return -EIO;
         }
 
@@ -356,7 +356,7 @@ static int elf64_setup(vmspace_t* restrict vmspace, file_t* restrict file, const
         return -EIO;
     }
 
-    if(file_read(file, &ehdr, sizeof(ehdr)) != (ssize_t)(sizeof(ehdr))) {
+    if(file_read(file, &ehdr, sizeof(ehdr), &file->offset) != (ssize_t)(sizeof(ehdr))) {
         return -EIO;
     }
 
@@ -387,7 +387,7 @@ static int elf64_setup(vmspace_t* restrict vmspace, file_t* restrict file, const
             goto error;
         }
 
-        if(file_read(file, &phdr, sizeof(phdr)) != (ssize_t)(sizeof(phdr))) {
+        if(file_read(file, &phdr, sizeof(phdr), &file->offset) != (ssize_t)(sizeof(phdr))) {
             retval = -EIO;
             goto error;
         }

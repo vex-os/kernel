@@ -67,7 +67,7 @@ int load_binary(vmspace_t* restrict vmspace, file_t* restrict file, const char**
     const credentials_t* restrict credentials, binfmt_entry_t* restrict out)
 {
     uint8_t header[256];
-    ssize_t read = file_read(file, header, sizeof(header));
+    ssize_t read = file_read(file, header, sizeof(header), &file->offset);
 
     file_seek(file, 0, SEEK_SET);
 

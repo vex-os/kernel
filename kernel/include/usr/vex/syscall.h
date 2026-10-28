@@ -62,6 +62,8 @@
 #define __k_SYS_FTRUNCATE 0x0CA
 #define __k_SYS_FSYNC     0x0CB
 #define __k_SYS_FCNTL     0x0CC
+#define __k_SYS_PREAD     0x0CD
+#define __k_SYS_PWRITE    0x0CE
 
 #define __k_SYS_FSTATAT    0x0E0
 #define __k_SYS_FCHMODAT   0x0E1

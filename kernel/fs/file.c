@@ -61,6 +61,7 @@ int file_open_node(vnode_t* restrict node, unsigned flags, const credentials_t* 
 
     file->node = node;
     file->flags = flags;
+    file->mode = 0;
     file->offset = 0;
     file->ctxdata = nullptr;
 
@@ -72,6 +73,10 @@ int file_open_node(vnode_t* restrict node, unsigned flags, const credentials_t* 
         slab_free(file);
         vnode_decref(node);
         return retval;
+    }
+
+    if(vnode_seek(node, file, 0, SEEK_CUR) != -ESPIPE) {
+        file->mode |= FILE_SEEKABLE;
     }
 
     if((flags & O_TRUNC) && node->type == VNODE_FILE) {
@@ -193,11 +198,9 @@ void file_close(file_t* restrict file)
     }
 }
 
-ssize_t file_read(file_t* restrict file, void* restrict buffer, size_t size)
+ssize_t file_read(file_t* restrict file, void* restrict buffer, size_t size, off_t* restrict position)
 {
-    ssize_t result;
-
-    if(file == nullptr || buffer == nullptr) {
+    if(file == nullptr || buffer == nullptr || position == nullptr) {
         return -EINVAL;
     }
 
@@ -205,38 +208,24 @@ ssize_t file_read(file_t* restrict file, void* restrict buffer, size_t size)
         return -EBADF;
     }
 
-    result = vnode_read(file->node, file, buffer, size, file->offset);
+    ssize_t result = vnode_read(file->node, file, buffer, size, *position);
 
     if(result > 0) {
-        file->offset += result;
+        *position += result;
     }
 
     return result;
 }
 
-ssize_t file_write(file_t* restrict file, const credentials_t* restrict credentials, const void* restrict buffer, size_t size)
+ssize_t file_write(file_t* restrict file, const credentials_t* restrict credentials, const void* restrict buffer, size_t size,
+    off_t* restrict position)
 {
-    if(file == nullptr || buffer == nullptr) {
+    if(file == nullptr || buffer == nullptr || position == nullptr) {
         return -EINVAL;
     }
 
     if(!file_flags_allow_write(file->flags)) {
         return -EBADF;
-    }
-
-    if(file->flags & O_APPEND) {
-        stat_t stat;
-        int retval = vnode_stat(file->node, &stat);
-
-        if(retval < 0) {
-            return retval;
-        }
-
-        if(stat.st_size < 0) {
-            return -EINVAL;
-        }
-
-        file->offset = stat.st_size;
     }
 
     if(size > 0) {
@@ -247,10 +236,10 @@ ssize_t file_write(file_t* restrict file, const credentials_t* restrict credenti
         }
     }
 
-    ssize_t result = vnode_write(file->node, file, buffer, size, file->offset);
+    ssize_t result = vnode_write(file->node, file, buffer, size, *position);
 
     if(result > 0) {
-        file->offset += result;
+        *position += result;
     }
 
     return result;

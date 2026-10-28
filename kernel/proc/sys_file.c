@@ -25,11 +25,9 @@ static char* io_page_of(thread_t* restrict thread)
     return thread->io_page;
 }
 
-static intptr_t read_file(file_t* restrict file, const uintptr_t* restrict args)
+static intptr_t read_chunks(file_t* restrict file, uintptr_t user_buf, size_t remaining, off_t* restrict position)
 {
     thread_t* thread = this_thread();
-    uintptr_t user_buf = args[1];
-    size_t remaining = args[2];
     size_t total = 0;
 
     char* buffer = io_page_of(thread);
@@ -48,7 +46,7 @@ static intptr_t read_file(file_t* restrict file, const uintptr_t* restrict args)
             chunk = remaining;
         }
 
-        ssize_t num_read = file_read(file, buffer, chunk);
+        ssize_t num_read = file_read(file, buffer, chunk, position);
 
         if(num_read < 0) {
             if(total > 0)
@@ -80,11 +78,28 @@ static intptr_t read_file(file_t* restrict file, const uintptr_t* restrict args)
     return total;
 }
 
-static intptr_t write_file(file_t* restrict file, const uintptr_t* restrict args)
+// The offset of the file goes to its end before each chunk, so that appenders mix at chunk borders only
+static int move_to_end(file_t* restrict file)
+{
+    stat_t stat;
+    int retval = vnode_stat(file->node, &stat);
+
+    if(retval < 0) {
+        return retval;
+    }
+
+    if(stat.st_size < 0) {
+        return -EINVAL;
+    }
+
+    file->offset = stat.st_size;
+
+    return 0;
+}
+
+static intptr_t write_chunks(file_t* restrict file, uintptr_t user_buf, size_t remaining, off_t* restrict position, bool append)
 {
     thread_t* thread = this_thread();
-    uintptr_t user_buf = args[1];
-    size_t remaining = args[2];
     size_t total = 0;
 
     char* buffer = io_page_of(thread);
@@ -109,7 +124,17 @@ static intptr_t write_file(file_t* restrict file, const uintptr_t* restrict args
             return copied;
         }
 
-        ssize_t num_written = file_write(file, thread->credentials, buffer, chunk);
+        if(append) {
+            int retval = move_to_end(file);
+
+            if(retval < 0) {
+                if(total > 0)
+                    return total;
+                return retval;
+            }
+        }
+
+        ssize_t num_written = file_write(file, thread->credentials, buffer, chunk, position);
 
         if(num_written < 0) {
             if(total > 0)
@@ -132,6 +157,59 @@ static intptr_t write_file(file_t* restrict file, const uintptr_t* restrict args
     }
 
     return total;
+}
+
+// The whole range has to be a valid offset,
+// so that a long call never wraps around
+static bool range_valid(off_t offset, size_t size)
+{
+    static_assert(sizeof(off_t) == sizeof(uint64_t));
+
+    return offset >= 0 && size <= (size_t)(INT64_MAX) - (size_t)(offset);
+}
+
+static intptr_t read_file(file_t* restrict file, const uintptr_t* restrict args)
+{
+    return read_chunks(file, args[1], args[2], &file->offset);
+}
+
+// A write with O_APPEND goes to the end of the file,
+// but pwrite writes where it is told to, as POSIX has it
+static intptr_t write_file(file_t* restrict file, const uintptr_t* restrict args)
+{
+    bool append = file_flags(file) & O_APPEND;
+
+    return write_chunks(file, args[1], args[2], &file->offset, append);
+}
+
+static intptr_t pread_file(file_t* restrict file, const uintptr_t* restrict args)
+{
+    off_t position = args[3];
+
+    if(!file_seekable(file)) {
+        return -ESPIPE;
+    }
+
+    if(!range_valid(position, args[2])) {
+        return -EINVAL;
+    }
+
+    return read_chunks(file, args[1], args[2], &position);
+}
+
+static intptr_t pwrite_file(file_t* restrict file, const uintptr_t* restrict args)
+{
+    off_t position = args[3];
+
+    if(!file_seekable(file)) {
+        return -ESPIPE;
+    }
+
+    if(!range_valid(position, args[2])) {
+        return -EINVAL;
+    }
+
+    return write_chunks(file, args[1], args[2], &position, false);
 }
 
 static intptr_t seek_file(file_t* restrict file, const uintptr_t* restrict args)
@@ -328,6 +406,20 @@ static intptr_t sys_write(const uintptr_t* restrict args)
 }
 
 define_syscall(sys_write, SYS_WRITE);
+
+static intptr_t sys_pread(const uintptr_t* restrict args)
+{
+    return syscall_with_fd(args, &pread_file);
+}
+
+define_syscall(sys_pread, SYS_PREAD);
+
+static intptr_t sys_pwrite(const uintptr_t* restrict args)
+{
+    return syscall_with_fd(args, &pwrite_file);
+}
+
+define_syscall(sys_pwrite, SYS_PWRITE);
 
 static intptr_t sys_seek(const uintptr_t* restrict args)
 {
