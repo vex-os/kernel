@@ -11,11 +11,31 @@
 #include <vex/uaccess.h>
 #include <vex/wallclock.h>
 
+// The kernel steps the realtime clock and never slews, so the raw and coarse clocks read as the fine ones
+// TODO: CLOCK_BOOTTIME is not an alias once suspend exists, as it counts the time spent suspended
+// UNDONE: CLOCK_PROCESS_CPUTIME_ID and CLOCK_THREAD_CPUTIME_ID need the CPU time counters (RDTSC?)
+static int canonical_clock(uintptr_t clock)
+{
+    switch(clock) {
+        case CLOCK_REALTIME:
+        case CLOCK_REALTIME_COARSE:
+            return CLOCK_REALTIME;
+
+        case CLOCK_MONOTONIC:
+        case CLOCK_MONOTONIC_RAW:
+        case CLOCK_MONOTONIC_COARSE:
+            return CLOCK_MONOTONIC;
+
+        default:
+            return -EINVAL;
+    }
+}
+
 static intptr_t sys_gettime(const uintptr_t* restrict args)
 {
     timespec_t time;
 
-    switch(args[0]) {
+    switch(canonical_clock(args[0])) {
         case CLOCK_REALTIME:
             wallclock_get(&time);
             break;
@@ -66,6 +86,32 @@ static intptr_t sys_settime(const uintptr_t* restrict args)
 }
 
 define_syscall(sys_settime, SYS_SETTIME);
+
+// Both clocks tick from the active clock source
+// A null pointer only asks whether the clock exists, as in Linux
+static intptr_t sys_gettimeres(const uintptr_t* restrict args)
+{
+    if(canonical_clock(args[0]) < 0) {
+        return -EINVAL;
+    }
+
+    if(args[1] == 0) {
+        return 0;
+    }
+
+    timespec_t resolution;
+    timespec_from_nsec(&resolution, clock_source_resolution_ns());
+
+    ssize_t copied = user_copyout(args[1], &resolution, sizeof(resolution));
+
+    if(copied < 0) {
+        return copied;
+    }
+
+    return 0;
+}
+
+define_syscall(sys_gettimeres, SYS_GETTIMERES);
 
 // Nobody triggers the event, so only the timeout or a signal ends the wait
 static ssize_t sleep_nanoseconds(uint64_t timeout)
@@ -151,7 +197,9 @@ static intptr_t sys_nanosleep(const uintptr_t* restrict args)
         return -ENOSYS;
     }
 
-    if(args[0] != CLOCK_REALTIME && args[0] != CLOCK_MONOTONIC) {
+    int clock = canonical_clock(args[0]);
+
+    if(clock < 0) {
         return -EINVAL;
     }
 
@@ -171,7 +219,7 @@ static intptr_t sys_nanosleep(const uintptr_t* restrict args)
     }
 
     if(args[1] & TIMER_ABSTIME) {
-        if(args[0] == CLOCK_REALTIME) {
+        if(clock == CLOCK_REALTIME) {
             return sleep_until_realtime(&request);
         }
 

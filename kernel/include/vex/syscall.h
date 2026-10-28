@@ -98,6 +98,7 @@ typedef struct vnode_s vnode_t;
 #define SYS_SETTIME     __k_SYS_SETTIME
 #define SYS_SETHOSTNAME __k_SYS_SETHOSTNAME
 #define SYS_NANOSLEEP   __k_SYS_NANOSLEEP
+#define SYS_GETTIMERES  __k_SYS_GETTIMERES
 
 typedef struct syscall_s syscall_t;
 

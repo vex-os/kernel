@@ -179,6 +179,26 @@ uint64_t clock_source_now_ns(void)
     return now_nsec;
 }
 
+uint64_t clock_source_resolution_ns(void)
+{
+    bool intr_state = spinlock_acquire_intr(&clock_source_lock);
+
+    uint64_t resolution = 1;
+
+    if(active_clock_source) {
+        // The tick is mult / 2^shift nanoseconds
+        uint128_t tick = (uint128_t)(active_clock_source->priv.mult) + (UINT64_C(1) << active_clock_source->priv.shift) - 1;
+        tick >>= active_clock_source->priv.shift;
+
+        if(tick > resolution) {
+            resolution = (uint64_t)(tick);
+        }
+    }
+
+    spinlock_release_intr(&clock_source_lock, intr_state);
+    return resolution;
+}
+
 uint64_t clock_source_peek_ns(void)
 {
     bool intr_state = disable_interrupts();

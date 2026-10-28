@@ -50,6 +50,10 @@ clock_source_t* clock_source_active(void) __nodiscard;
 
 uint64_t clock_source_now_ns(void) __nodiscard;
 
+/// The length of one tick of the active source in nanoseconds, rounded up
+/// @retval 1 No source is active, or the tick is shorter than a nanosecond
+uint64_t clock_source_resolution_ns(void) __nodiscard;
+
 /// clock_source_now_ns that never waits for the lock: while someone holds it,
 /// this returns the time of the last update instead, which is all panic output can afford
 uint64_t clock_source_peek_ns(void) __nodiscard;

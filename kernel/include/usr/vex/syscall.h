@@ -95,5 +95,6 @@
 #define __k_SYS_SETTIME     0x122
 #define __k_SYS_SETHOSTNAME 0x123
 #define __k_SYS_NANOSLEEP   0x124
+#define __k_SYS_GETTIMERES  0x125
 
 #endif /* USR_VEX_SYSCALL_H */
