@@ -43,10 +43,15 @@
 #define __k_SYS_CAPGET    0x088
 #define __k_SYS_CAPSET    0x089
 
-#define __k_SYS_MMAP     0x0A0
-#define __k_SYS_MUNMAP   0x0A1
-#define __k_SYS_MPROTECT 0x0A2
-#define __k_SYS_MSYNC    0x0A3
+#define __k_SYS_MMAP       0x0A0
+#define __k_SYS_MUNMAP     0x0A1
+#define __k_SYS_MPROTECT   0x0A2
+#define __k_SYS_MSYNC      0x0A3
+#define __k_SYS_MADVISE    0x0A4
+#define __k_SYS_MLOCK      0x0A5
+#define __k_SYS_MUNLOCK    0x0A6
+#define __k_SYS_MLOCKALL   0x0A7
+#define __k_SYS_MUNLOCKALL 0x0A8
 
 #define __k_SYS_OPENAT    0x0C0
 #define __k_SYS_CLOSE     0x0C1

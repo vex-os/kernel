@@ -57,6 +57,11 @@ int vms_map_replace(vmspace_t* restrict vmspace, uintptr_t start, uintptr_t end,
 
 int vms_map_any(vmspace_t* restrict vmspace, size_t size, unsigned vprot, const vm_backing_t* restrict backing, uintptr_t* restrict out);
 int vms_unmap(vmspace_t* restrict vmspace, uintptr_t start, uintptr_t end);
+/// Checks that every page of the range is mapped
+/// @retval -EINVAL The range is not page aligned, empty, or not in user space
+/// @retval -ENOMEM Part of the range is not mapped
+int vms_check_mapped(vmspace_t* restrict vmspace, uintptr_t start, uintptr_t end);
+
 int vms_sync(vmspace_t* restrict vmspace, uintptr_t start, uintptr_t end, bool wait);
 int vms_protect(vmspace_t* restrict vmspace, uintptr_t start, uintptr_t end, unsigned vprot);
 int vms_unmap_all(vmspace_t* restrict vmspace);

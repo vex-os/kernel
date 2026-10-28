@@ -46,10 +46,15 @@ typedef struct vnode_s vnode_t;
 #define SYS_CAPGET    __k_SYS_CAPGET
 #define SYS_CAPSET    __k_SYS_CAPSET
 
-#define SYS_MMAP     __k_SYS_MMAP
-#define SYS_MUNMAP   __k_SYS_MUNMAP
-#define SYS_MPROTECT __k_SYS_MPROTECT
-#define SYS_MSYNC    __k_SYS_MSYNC
+#define SYS_MMAP       __k_SYS_MMAP
+#define SYS_MUNMAP     __k_SYS_MUNMAP
+#define SYS_MPROTECT   __k_SYS_MPROTECT
+#define SYS_MADVISE    __k_SYS_MADVISE
+#define SYS_MLOCK      __k_SYS_MLOCK
+#define SYS_MUNLOCK    __k_SYS_MUNLOCK
+#define SYS_MLOCKALL   __k_SYS_MLOCKALL
+#define SYS_MUNLOCKALL __k_SYS_MUNLOCKALL
+#define SYS_MSYNC      __k_SYS_MSYNC
 
 #define SYS_OPENAT    __k_SYS_OPENAT
 #define SYS_CLOSE     __k_SYS_CLOSE

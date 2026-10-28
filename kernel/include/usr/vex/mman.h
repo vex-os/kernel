@@ -19,4 +19,14 @@
 #define __k_MS_INVALIDATE 0x0002
 #define __k_MS_SYNC       0x0004
 
+#define __k_MADV_NORMAL     0
+#define __k_MADV_RANDOM     1
+#define __k_MADV_SEQUENTIAL 2
+#define __k_MADV_WILLNEED   3
+#define __k_MADV_DONTNEED   4
+
+#define __k_MCL_CURRENT 0x0001
+#define __k_MCL_FUTURE  0x0002
+#define __k_MCL_ONFAULT 0x0004
+
 #endif /* USR_VEX_MMAN_H */

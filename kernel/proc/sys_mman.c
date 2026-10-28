@@ -9,9 +9,10 @@
 #include <vex/thread.h>
 #include <vex/vms.h>
 
-#define KNOWN_PROT  (PROT_READ | PROT_WRITE | PROT_EXEC)
-#define KNOWN_FLAGS (MAP_SHARED | MAP_PRIVATE | MAP_FIXED | MAP_ANONYMOUS | MAP_NORESERVE | MAP_POPULATE | MAP_STACK | MAP_FIXED_NOREPLACE)
-#define KNOWN_SYNC  (MS_ASYNC | MS_INVALIDATE | MS_SYNC)
+#define KNOWN_PROT    (PROT_READ | PROT_WRITE | PROT_EXEC)
+#define KNOWN_FLAGS   (MAP_SHARED | MAP_PRIVATE | MAP_FIXED | MAP_ANONYMOUS | MAP_NORESERVE | MAP_POPULATE | MAP_STACK | MAP_FIXED_NOREPLACE)
+#define KNOWN_SYNC    (MS_ASYNC | MS_INVALIDATE | MS_SYNC)
+#define KNOWN_LOCKALL (MCL_CURRENT | MCL_FUTURE | MCL_ONFAULT)
 
 static unsigned prot_to_vprot(uintptr_t prot)
 {
@@ -243,3 +244,110 @@ static intptr_t sys_msync(const uintptr_t* restrict args)
 }
 
 define_syscall(sys_msync, SYS_MSYNC);
+
+// The range is rounded out to whole pages, as Linux does, and has to be mapped as a whole
+static intptr_t check_range(vmspace_t* restrict vmspace, uintptr_t addr, uintptr_t length)
+{
+    uintptr_t user_end = pmap_user_end(vmspace->pmap);
+
+    if(addr >= user_end || length > user_end - addr) {
+        return -ENOMEM;
+    }
+
+    return vms_check_mapped(vmspace, page_align(addr), page_align_up(addr + length));
+}
+
+// UNDONE: MADV_DONTNEED frees the pages of an
+// anonymous mapping, and MADV_WILLNEED reads ahead
+static intptr_t sys_madvise(const uintptr_t* restrict args)
+{
+    thread_t* thread = this_thread();
+    process_t* process = thread->process;
+
+    if(process == nullptr) {
+        return -ENOSYS;
+    }
+
+    switch(args[2]) {
+        case MADV_NORMAL:
+        case MADV_RANDOM:
+        case MADV_SEQUENTIAL:
+        case MADV_WILLNEED:
+        case MADV_DONTNEED:
+            break;
+
+        default:
+            return -EINVAL;
+    }
+
+    if(page_offset(args[0])) {
+        return -EINVAL;
+    }
+
+    if(args[1] == 0) {
+        return 0;
+    }
+
+    return check_range(process->vmspace, args[0], args[1]);
+}
+
+define_syscall(sys_madvise, SYS_MADVISE);
+
+// UNDONE: Locked pages matter once there is swap. Then
+// this needs a capability and a limit, with RLIMIT_MEMLOCK
+static intptr_t sys_mlock(const uintptr_t* restrict args)
+{
+    thread_t* thread = this_thread();
+    process_t* process = thread->process;
+
+    if(process == nullptr) {
+        return -ENOSYS;
+    }
+
+    if(args[1] == 0) {
+        return 0;
+    }
+
+    return check_range(process->vmspace, args[0], args[1]);
+}
+
+define_syscall(sys_mlock, SYS_MLOCK);
+
+static intptr_t sys_munlock(const uintptr_t* restrict args)
+{
+    return sys_mlock(args); // Nothing is locked, so unlocking only checks the range
+}
+
+define_syscall(sys_munlock, SYS_MUNLOCK);
+
+// UNDONE: As for mlock, and MCL_FUTURE has to reach the mappings made later
+static intptr_t sys_mlockall(const uintptr_t* restrict args)
+{
+    thread_t* thread = this_thread();
+
+    if(thread->process == nullptr) {
+        return -ENOSYS;
+    }
+
+    // MCL_ONFAULT only says how to lock, so it needs one of the others
+    if((args[0] & ~(uintptr_t)(KNOWN_LOCKALL)) || 0 == (args[0] & (MCL_CURRENT | MCL_FUTURE))) {
+        return -EINVAL;
+    }
+
+    return 0;
+}
+
+define_syscall(sys_mlockall, SYS_MLOCKALL);
+
+static intptr_t sys_munlockall(const uintptr_t* restrict args)
+{
+    thread_t* thread = this_thread();
+
+    if(thread->process == nullptr) {
+        return -ENOSYS;
+    }
+
+    return 0;
+}
+
+define_syscall(sys_munlockall, SYS_MUNLOCKALL);

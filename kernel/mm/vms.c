@@ -800,6 +800,23 @@ int vms_protect(vmspace_t* restrict vmspace, uintptr_t start, uintptr_t end, uns
     return 0;
 }
 
+int vms_check_mapped(vmspace_t* restrict vmspace, uintptr_t start, uintptr_t end)
+{
+    if(!range_valid(vmspace, start, end)) {
+        return -EINVAL;
+    }
+
+    mutex_acquire(&vmspace->lock);
+    bool covered = range_covered(vmspace, start, end);
+    mutex_release(&vmspace->lock);
+
+    if(!covered) {
+        return -ENOMEM;
+    }
+
+    return 0;
+}
+
 int vms_sync(vmspace_t* restrict vmspace, uintptr_t start, uintptr_t end, bool wait)
 {
     if(!range_valid(vmspace, start, end)) {

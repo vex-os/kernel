@@ -24,6 +24,7 @@ ktest_programs = [
     'tlb_shootdown',
     'mmap_flags',
     'mmap',
+    'mlock',
     'fs',
     'fs_times',
     'pread',
