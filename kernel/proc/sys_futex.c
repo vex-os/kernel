@@ -16,18 +16,6 @@ static int check_flags(uintptr_t flags)
     return 0;
 }
 
-static uint64_t deadline_after(const timespec_t* restrict timeout)
-{
-    uint64_t now = clock_source_now_ns();
-    uint64_t seconds = timeout->tv_sec;
-
-    if(seconds >= (UINT64_MAX - now) / NSEC_PER_SEC) {
-        return UINT64_MAX;
-    }
-
-    return now + seconds * NSEC_PER_SEC + timeout->tv_nsec;
-}
-
 static intptr_t sys_futex_wait(const uintptr_t* restrict args)
 {
     thread_t* thread = this_thread();
@@ -53,11 +41,11 @@ static intptr_t sys_futex_wait(const uintptr_t* restrict args)
             return copied;
         }
 
-        if(timeout.tv_sec < 0 || timeout.tv_nsec < 0 || timeout.tv_nsec >= NSEC_PER_SEC) {
+        if(!timespec_valid(&timeout)) {
             return -EINVAL;
         }
 
-        deadline = deadline_after(&timeout);
+        deadline = deadline_after_nsec(timespec_to_nsec(&timeout));
     }
 
     return futex_wait(process->vmspace, args[0], (uint32_t)(args[1]), deadline, args[3] & FUTEX_SHARED);

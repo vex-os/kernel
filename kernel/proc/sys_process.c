@@ -615,17 +615,6 @@ static intptr_t sys_getsid(const uintptr_t* restrict args)
 
 define_syscall(sys_getsid, SYS_GETSID);
 
-static uint64_t sleep_nanoseconds(const timespec_t* restrict request)
-{
-    uint64_t seconds = request->tv_sec;
-
-    if(seconds >= (UINT64_MAX - request->tv_nsec) / NSEC_PER_SEC) {
-        return UINT64_MAX;
-    }
-
-    return seconds * NSEC_PER_SEC + request->tv_nsec;
-}
-
 // A signal ends the sleep for good, as POSIX has it, so the call never restarts
 static intptr_t sys_sleep(const uintptr_t* restrict args)
 {
@@ -642,11 +631,11 @@ static intptr_t sys_sleep(const uintptr_t* restrict args)
         return copied;
     }
 
-    if(request.tv_sec < 0 || request.tv_nsec < 0 || request.tv_nsec >= NSEC_PER_SEC) {
+    if(!timespec_valid(&request)) {
         return -EINVAL;
     }
 
-    uint64_t timeout = sleep_nanoseconds(&request);
+    uint64_t timeout = timespec_to_nsec(&request);
 
     // Zero would mean to wait for as long as it takes
     if(timeout == 0) {

@@ -8,22 +8,11 @@
 #include <vex/sched.h>
 #include <vex/slab.h>
 #include <vex/thread.h>
+#include <vex/time.h>
 
 static_assert(sizeof(event_t) <= SLAB_MAX_SIZE);
 
 static event_deferral_t* deferred_head = nullptr;
-
-// Never zero, which await_until takes as no deadline
-static uint64_t deadline_after(uint64_t timeout_nsec)
-{
-    uint64_t deadline = clock_source_now_ns() + timeout_nsec;
-
-    if(deadline < timeout_nsec || deadline == 0) {
-        deadline = UINT64_MAX;
-    }
-
-    return deadline;
-}
 
 static void release_locks(event_t** restrict events, size_t count, spinlock_t* restrict lock)
 {
@@ -268,7 +257,7 @@ ssize_t event_await_blocking(event_t** restrict events, size_t count)
 
 ssize_t event_await_timeout(event_t** restrict events, size_t count, uint64_t timeout_nsec)
 {
-    return await_until(events, count, deadline_after(timeout_nsec), false, nullptr, false);
+    return await_until(events, count, deadline_after_nsec(timeout_nsec), false, nullptr, false);
 }
 
 ssize_t event_await_interruptible(event_t** restrict events, size_t count)
@@ -281,7 +270,7 @@ ssize_t event_await_unlock(event_t** restrict events, size_t count, spinlock_t* 
     uint64_t deadline = 0;
 
     if(timeout_nsec) {
-        deadline = deadline_after(timeout_nsec);
+        deadline = deadline_after_nsec(timeout_nsec);
     }
 
     return await_until(events, count, deadline, true, lock, intr_state);
