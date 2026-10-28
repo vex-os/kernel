@@ -2,6 +2,7 @@
 #include <vex/calendar.h>
 #include <vex/clocksrc.h>
 #include <vex/errno.h>
+#include <vex/event.h>
 #include <vex/initcall.h>
 #include <vex/kprintf.h>
 #include <vex/rtc.h>
@@ -23,6 +24,11 @@ static volatile __used __section(".limine_requests") struct limine_date_at_boot_
 static timespec_t wallclock_offset = {};
 static seqlock_t wallclock_seqlock = SEQLOCK_INIT;
 static bool date_known = false; // Set at boot or by someone, so an RTC that comes later only checks it
+
+// Triggered under set_lock after each wallclock_set,
+// so a waiter that computed its timeout under the lock can't miss it
+static event_t set_event;
+static spinlock_t set_lock = SPINLOCK_INIT;
 
 static void store_offset(const timespec_t* restrict offset)
 {
@@ -119,8 +125,13 @@ int wallclock_set(const timespec_t* restrict time)
         return -EINVAL;
     }
 
+    bool intr_state = spinlock_acquire_intr(&set_lock);
+
     step_to(time);
     date_known = true;
+
+    event_trigger(&set_event, false);
+    spinlock_release_intr(&set_lock, intr_state);
 
     // The system clock is set by now, and failing to keep
     // the time over a reboot is no reason to undo that
@@ -131,6 +142,39 @@ int wallclock_set(const timespec_t* restrict time)
     }
 
     return 0;
+}
+
+ssize_t wallclock_wait_until(const timespec_t* restrict target)
+{
+    for(;;) {
+        bool intr_state = spinlock_acquire_intr(&set_lock);
+
+        timespec_t now;
+        wallclock_get(&now);
+
+        if(target->tv_sec < now.tv_sec || (target->tv_sec == now.tv_sec && target->tv_nsec <= now.tv_nsec)) {
+            spinlock_release_intr(&set_lock, intr_state);
+            return 0;
+        }
+
+        timespec_t left;
+        left.tv_sec = target->tv_sec - now.tv_sec;
+        left.tv_nsec = target->tv_nsec - now.tv_nsec;
+
+        if(left.tv_nsec < 0) {
+            left.tv_nsec += NSEC_PER_SEC;
+            left.tv_sec -= 1;
+        }
+
+        event_t* event = &set_event;
+        ssize_t result = event_await_unlock(&event, 1, &set_lock, intr_state, timespec_to_nsec(&left));
+
+        // Either the clock was set or the time
+        // ran out; the next round tells which
+        if(result != 0 && result != -ETIMEDOUT) {
+            return result;
+        }
+    }
 }
 
 time_t wallclock_now(void)
@@ -167,6 +211,8 @@ void wallclock_rtc_arrived(void)
 static void init_wallclock(void)
 {
     struct limine_date_at_boot_response* response = date_request.response;
+
+    event_init(&set_event);
 
     if(response == nullptr || !seconds_valid(response->timestamp)) {
         pr_warning("wallclock: no date at boot, starting at the epoch until an RTC says otherwise");

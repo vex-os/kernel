@@ -15,7 +15,6 @@
 #define __k_SYS_SETPGID 0x027
 #define __k_SYS_GETPGID 0x028
 #define __k_SYS_GETSID  0x029
-#define __k_SYS_SLEEP   0x02A
 
 #define __k_SYS_THREAD_CREATE 0x040
 #define __k_SYS_THREAD_EXIT   0x041
@@ -95,5 +94,6 @@
 #define __k_SYS_GETTIME     0x121
 #define __k_SYS_SETTIME     0x122
 #define __k_SYS_SETHOSTNAME 0x123
+#define __k_SYS_NANOSLEEP   0x124
 
 #endif /* USR_VEX_SYSCALL_H */

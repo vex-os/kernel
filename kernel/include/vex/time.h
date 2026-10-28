@@ -8,6 +8,8 @@
 #define CLOCK_REALTIME  __k_CLOCK_REALTIME
 #define CLOCK_MONOTONIC __k_CLOCK_MONOTONIC
 
+#define TIMER_ABSTIME __k_TIMER_ABSTIME
+
 #define NSEC_PER_SEC INT64_C(1000000000)
 
 typedef struct __k_timespec timespec_t;

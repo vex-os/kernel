@@ -39,7 +39,7 @@ static void sleep_for(long nanoseconds)
     request.tv_sec = nanoseconds / 1000000000L;
     request.tv_nsec = nanoseconds % 1000000000L;
 
-    ktest_syscall2(__k_SYS_SLEEP, (long)&request, 0);
+    ktest_syscall4(__k_SYS_NANOSLEEP, __k_CLOCK_MONOTONIC, 0, (long)&request, 0);
 }
 
 static long wait_status(long child)

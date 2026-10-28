@@ -18,7 +18,6 @@ typedef struct vnode_s vnode_t;
 #define SYS_SETPGID __k_SYS_SETPGID
 #define SYS_GETPGID __k_SYS_GETPGID
 #define SYS_GETSID  __k_SYS_GETSID
-#define SYS_SLEEP   __k_SYS_SLEEP
 
 #define SYS_THREAD_CREATE __k_SYS_THREAD_CREATE
 #define SYS_THREAD_EXIT   __k_SYS_THREAD_EXIT
@@ -98,6 +97,7 @@ typedef struct vnode_s vnode_t;
 #define SYS_GETTIME     __k_SYS_GETTIME
 #define SYS_SETTIME     __k_SYS_SETTIME
 #define SYS_SETHOSTNAME __k_SYS_SETHOSTNAME
+#define SYS_NANOSLEEP   __k_SYS_NANOSLEEP
 
 typedef struct syscall_s syscall_t;
 
