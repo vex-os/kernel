@@ -26,7 +26,7 @@ static long unlock(long address, long length)
 
 static void test_advise(long base)
 {
-    for(long advice = __k_MADV_NORMAL; advice <= __k_MADV_DONTNEED; ++advice) {
+    for(long advice = __k_MADV_NORMAL; advice <= __k_MADV_DONTNEED; advice += 1) {
         ktest_expect(advise(base, LENGTH, advice), 0);
     }
 
@@ -66,7 +66,7 @@ static void fill_page(long page, char value)
 
 static void test_dontneed_anonymous(long base)
 {
-    for(long page = 0; page < PAGES; ++page) {
+    for(long page = 0; page < PAGES; page += 1) {
         fill_page(base + page * PAGE_SIZE, 'a' + page);
     }
 
