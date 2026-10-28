@@ -338,21 +338,6 @@ static intptr_t wait_child(process_t* restrict caller, pid_t pid, const process_
     }
 }
 
-// Zero is the caller; a reference to the process is handed out
-static process_t* locate_target(process_t* restrict caller, pid_t pid)
-{
-    if(pid == 0) {
-        process_incref(caller);
-        return caller;
-    }
-
-    if(pid < 0) {
-        return nullptr;
-    }
-
-    return process_locate(pid);
-}
-
 static intptr_t __noreturn sys_exit(const uintptr_t* restrict args)
 {
     thread_t* thread = this_thread();
@@ -545,7 +530,7 @@ static intptr_t sys_setpgid(const uintptr_t* restrict args)
         return -EINVAL;
     }
 
-    process_t* process = locate_target(caller, pid);
+    process_t* process = process_locate_or_self(caller, pid);
 
     if(process == nullptr) {
         return -ESRCH;
@@ -574,7 +559,7 @@ static intptr_t sys_getpgid(const uintptr_t* restrict args)
         return -ESRCH;
     }
 
-    process_t* process = locate_target(caller, pid);
+    process_t* process = process_locate_or_self(caller, pid);
 
     if(process == nullptr) {
         return -ESRCH;
@@ -599,7 +584,7 @@ static intptr_t sys_getsid(const uintptr_t* restrict args)
         return -ESRCH;
     }
 
-    process_t* process = locate_target(caller, pid);
+    process_t* process = process_locate_or_self(caller, pid);
 
     if(process == nullptr) {
         return -ESRCH;

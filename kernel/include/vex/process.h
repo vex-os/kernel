@@ -85,6 +85,14 @@ pid_t process_alloc_id(void) __nodiscard;
 
 process_t* process_create(process_t* restrict parent) __nodiscard;
 process_t* process_locate(pid_t pid) __nodiscard;
+
+/// The process with this pid, or the caller for zero. The caller gets a new reference
+/// @return nullptr for a negative pid or a process that does not exist
+process_t* process_locate_or_self(process_t* restrict caller, pid_t pid) __nodiscard;
+
+/// Calls the callback for every process, with a reference held, in no particular order
+/// @note A process that appears or goes away meanwhile may be skipped or visited twice. The callback may sleep
+void process_for_each(void (*callback)(process_t* restrict process, void* restrict arg), void* restrict arg);
 void process_incref(process_t* process);
 void process_decref(process_t* process);
 

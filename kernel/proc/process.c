@@ -18,9 +18,10 @@
 #include <vex/vms.h>
 #include <vex/vnode.h>
 
-#define PROCTABLE_BUCKETS 1024
+#define PROCTABLE_BUCKETS  1024
+#define PROCESS_WALK_BATCH 16
 
-#define PROCESS_SIZE_BUDGET 256
+#define PROCESS_SIZE_BUDGET 512
 
 static_assert(sizeof(process_t) <= PROCESS_SIZE_BUDGET);
 
@@ -353,6 +354,58 @@ process_t* process_locate(pid_t pid)
     spinlock_release_intr(&proctable_lock, intr_state);
 
     return nullptr;
+}
+
+process_t* process_locate_or_self(process_t* restrict caller, pid_t pid)
+{
+    if(pid == 0) {
+        process_incref(caller);
+        return caller;
+    }
+
+    if(pid < 0) {
+        return nullptr;
+    }
+
+    return process_locate(pid);
+}
+
+void process_for_each(void (*callback)(process_t* restrict process, void* restrict arg), void* restrict arg)
+{
+    process_t* batch[PROCESS_WALK_BATCH];
+
+    for(size_t bucket = 0; bucket < PROCTABLE_BUCKETS; bucket += 1) {
+        size_t visited = 0;
+        size_t count;
+
+        do {
+            count = 0;
+
+            bool intr_state = spinlock_acquire_intr(&proctable_lock);
+            size_t index = 0;
+            process_t* it = proctable[bucket];
+
+            while(it && count < PROCESS_WALK_BATCH) {
+                if(index >= visited) {
+                    process_incref(it);
+                    batch[count] = it;
+                    count += 1;
+                }
+
+                index += 1;
+                it = it->hash_next;
+            }
+
+            spinlock_release_intr(&proctable_lock, intr_state);
+
+            for(size_t i = 0; i < count; ++i) {
+                callback(batch[i], arg);
+                process_decref(batch[i]);
+            }
+
+            visited += count;
+        } while(count == PROCESS_WALK_BATCH);
+    }
 }
 
 void process_incref(process_t* process)
