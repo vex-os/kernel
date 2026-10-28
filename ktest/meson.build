@@ -25,6 +25,7 @@ ktest_programs = [
     'mmap',
     'fs',
     'fs_times',
+    'pread',
     'getdents',
     'mount',
     'path',
