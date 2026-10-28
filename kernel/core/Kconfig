@@ -7,6 +7,13 @@ config KPRINTF_BUFSIZE
       replayed to consoles that register or take their
       device back later; a multiple of 8
 
+config DEFAULT_HOSTNAME
+    string "Default hostname"
+    default "vexsys"
+    help
+      Name of the machine until sethostname changes it;
+      at most 255 bytes
+
 comment "Consoles"
 
 source "kernel/fbcons/Kconfig"

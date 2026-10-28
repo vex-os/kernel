@@ -94,9 +94,10 @@ typedef struct vnode_s vnode_t;
 #define SYS_SYNCFS        __k_SYS_SYNCFS
 #define SYS_STATVFS       __k_SYS_STATVFS
 
-#define SYS_UNAME   __k_SYS_UNAME
-#define SYS_GETTIME __k_SYS_GETTIME
-#define SYS_SETTIME __k_SYS_SETTIME
+#define SYS_UNAME       __k_SYS_UNAME
+#define SYS_GETTIME     __k_SYS_GETTIME
+#define SYS_SETTIME     __k_SYS_SETTIME
+#define SYS_SETHOSTNAME __k_SYS_SETHOSTNAME
 
 typedef struct syscall_s syscall_t;
 

@@ -91,8 +91,9 @@
 #define __k_SYS_SYNCFS        0x107
 #define __k_SYS_STATVFS       0x108
 
-#define __k_SYS_UNAME   0x120
-#define __k_SYS_GETTIME 0x121
-#define __k_SYS_SETTIME 0x122
+#define __k_SYS_UNAME       0x120
+#define __k_SYS_GETTIME     0x121
+#define __k_SYS_SETTIME     0x122
+#define __k_SYS_SETHOSTNAME 0x123
 
 #endif /* USR_VEX_SYSCALL_H */
