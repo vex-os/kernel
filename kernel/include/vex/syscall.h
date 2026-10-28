@@ -8,16 +8,26 @@ typedef struct file_s file_t;
 typedef struct hart_context_s hart_context_t;
 typedef struct vnode_s vnode_t;
 
-#define SYS_EXIT    __k_SYS_EXIT
-#define SYS_FORK    __k_SYS_FORK
-#define SYS_EXEC    __k_SYS_EXEC
-#define SYS_WAITPID __k_SYS_WAITPID
-#define SYS_GETPID  __k_SYS_GETPID
-#define SYS_GETPPID __k_SYS_GETPPID
-#define SYS_SETSID  __k_SYS_SETSID
-#define SYS_SETPGID __k_SYS_SETPGID
-#define SYS_GETPGID __k_SYS_GETPGID
-#define SYS_GETSID  __k_SYS_GETSID
+#define SYS_EXIT             __k_SYS_EXIT
+#define SYS_FORK             __k_SYS_FORK
+#define SYS_EXEC             __k_SYS_EXEC
+#define SYS_WAITPID          __k_SYS_WAITPID
+#define SYS_GETPID           __k_SYS_GETPID
+#define SYS_GETPPID          __k_SYS_GETPPID
+#define SYS_SETSID           __k_SYS_SETSID
+#define SYS_SETPGID          __k_SYS_SETPGID
+#define SYS_GETPGID          __k_SYS_GETPGID
+#define SYS_GETSID           __k_SYS_GETSID
+#define SYS_GETPRIORITY      __k_SYS_GETPRIORITY
+#define SYS_SETPRIORITY      __k_SYS_SETPRIORITY
+#define SYS_GETSCHEDULER     __k_SYS_GETSCHEDULER
+#define SYS_SETSCHEDULER     __k_SYS_SETSCHEDULER
+#define SYS_GETSCHEDPARAM    __k_SYS_GETSCHEDPARAM
+#define SYS_SETSCHEDPARAM    __k_SYS_SETSCHEDPARAM
+#define SYS_GETSCHEDRANGE    __k_SYS_GETSCHEDRANGE
+#define SYS_GETSCHEDINTERVAL __k_SYS_GETSCHEDINTERVAL
+#define SYS_GETAFFINITY      __k_SYS_GETAFFINITY
+#define SYS_SETAFFINITY      __k_SYS_SETAFFINITY
 
 #define SYS_THREAD_CREATE __k_SYS_THREAD_CREATE
 #define SYS_THREAD_EXIT   __k_SYS_THREAD_EXIT

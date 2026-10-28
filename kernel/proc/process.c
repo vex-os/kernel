@@ -281,6 +281,7 @@ process_t* process_create(process_t* restrict parent)
     if(parent) {
         process->credentials = process_get_cred(parent);
         process->umask = atomic_load_n(&parent->umask, ATOMIC_RELAXED);
+        process->nice = atomic_load_n(&parent->nice, ATOMIC_RELAXED);
         process->cwd = process_get_cwd(parent);
     }
     else {

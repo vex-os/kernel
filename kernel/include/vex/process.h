@@ -38,6 +38,7 @@ struct process_s {
 
     uint8_t flags; // PROCESS_*, only ever set, with atomic_fetch_or: the bits share a byte
     uint8_t exit_signal;
+    int8_t nice; // read by the scheduler without the lock
 
     spinlock_t lock;
 

@@ -1,0 +1,519 @@
+#include <vex/atomic.h>
+#include <vex/capability.h>
+#include <vex/cred.h>
+#include <vex/errno.h>
+#include <vex/hart.h>
+#include <vex/pgrp.h>
+#include <vex/process.h>
+#include <vex/sched.h>
+#include <vex/syscall.h>
+#include <vex/thread.h>
+#include <vex/time.h>
+#include <vex/uaccess.h>
+
+#define AFFINITY_WORD_BITS 64
+#define AFFINITY_WORDS     ((num_harts + AFFINITY_WORD_BITS - 1) / AFFINITY_WORD_BITS)
+#define AFFINITY_BYTES     (AFFINITY_WORDS * sizeof(uint64_t))
+
+typedef struct priority_walk_s priority_walk_t;
+
+struct priority_walk_s {
+    const thread_t* caller;
+    int which;
+    uid_t uid; // Of the user that PRIO_USER names
+    int nice;  // The new value for a set, the lowest found for a get
+    bool found;
+    int error;
+};
+
+static bool hart_online(unsigned long index)
+{
+    hart_local_t* hart = &harts[index];
+
+    return atomic_load_n(&hart->flags, ATOMIC_RELAXED) & HART_FLAG_ONLINE;
+}
+
+static bool owns_target(const thread_t* restrict caller, process_t* restrict target)
+{
+    credentials_t* target_cred = process_get_cred(target);
+    bool owner = caller->credentials->euid == target_cred->uid || caller->credentials->euid == target_cred->euid;
+
+    cred_decref(target_cred);
+
+    return owner;
+}
+
+static bool may_change(const thread_t* restrict caller, process_t* restrict target)
+{
+    return owns_target(caller, target) || cred_capable(caller->credentials, CAP_SYS_NICE);
+}
+
+static bool walk_matches(priority_walk_t* restrict walk, process_t* restrict process)
+{
+    if(walk->which != PRIO_USER) {
+        return true;
+    }
+
+    credentials_t* credentials = process_get_cred(process);
+    bool matches = credentials->uid == walk->uid;
+
+    cred_decref(credentials);
+
+    return matches;
+}
+
+static void get_member(process_t* restrict process, void* restrict arg)
+{
+    priority_walk_t* walk = arg;
+
+    if(!walk_matches(walk, process)) {
+        return;
+    }
+
+    int nice = atomic_load_n(&process->nice, ATOMIC_RELAXED);
+
+    walk->found = true;
+
+    if(nice < walk->nice) {
+        walk->nice = nice;
+    }
+}
+
+// A failure on one member does not stop the others; the call reports the last one
+static void set_member(process_t* restrict process, void* restrict arg)
+{
+    priority_walk_t* walk = arg;
+
+    if(!walk_matches(walk, process)) {
+        return;
+    }
+
+    walk->found = true;
+
+    bool capable = cred_capable(walk->caller->credentials, CAP_SYS_NICE);
+
+    if(!capable && !owns_target(walk->caller, process)) {
+        walk->error = -EPERM;
+        return;
+    }
+
+    // UNDONE: RLIMIT_NICE lets a process lower the nice value that far, once the limits exist
+    if(!capable && walk->nice < atomic_load_n(&process->nice, ATOMIC_RELAXED)) {
+        walk->error = -EACCES;
+        return;
+    }
+
+    atomic_store(&process->nice, walk->nice, ATOMIC_RELAXED);
+}
+
+static int walk_process(priority_walk_t* restrict walk, pid_t who, void (*callback)(process_t* restrict process, void* restrict arg))
+{
+    process_t* process = process_locate_or_self(walk->caller->process, who);
+
+    if(process == nullptr) {
+        return -ESRCH;
+    }
+
+    callback(process, walk);
+    process_decref(process);
+
+    return 0;
+}
+
+static int walk_group(priority_walk_t* restrict walk, pid_t who, void (*callback)(process_t* restrict process, void* restrict arg))
+{
+    pid_t pgid = who;
+
+    if(pgid == 0) {
+        pgid = process_get_pgid(walk->caller->process);
+    }
+
+    return process_group_for_each(pgid, callback, walk);
+}
+
+static void walk_user(priority_walk_t* restrict walk, uid_t who, void (*callback)(process_t* restrict process, void* restrict arg))
+{
+    walk->uid = who;
+
+    if(walk->uid == 0) {
+        walk->uid = walk->caller->credentials->uid;
+    }
+
+    process_for_each(callback, walk);
+}
+
+static int walk_targets(priority_walk_t* restrict walk, pid_t who, void (*callback)(process_t* restrict process, void* restrict arg))
+{
+    int retval = 0;
+
+    switch(walk->which) {
+        case PRIO_PROCESS:
+            retval = walk_process(walk, who, callback);
+            break;
+
+        case PRIO_PGRP:
+            retval = walk_group(walk, who, callback);
+            break;
+
+        case PRIO_USER:
+            walk_user(walk, who, callback);
+            break;
+
+        default:
+            return -EINVAL;
+    }
+
+    if(retval < 0) {
+        return retval;
+    }
+
+    if(!walk->found) {
+        return -ESRCH;
+    }
+
+    return 0;
+}
+
+static intptr_t sys_getpriority(const uintptr_t* restrict args)
+{
+    thread_t* thread = this_thread();
+
+    if(thread->process == nullptr) {
+        return -ENOSYS;
+    }
+
+    priority_walk_t walk = {};
+    walk.caller = thread;
+    walk.which = args[0];
+    walk.nice = NICE_MAX + 1;
+
+    int retval = walk_targets(&walk, args[1], &get_member);
+
+    if(retval < 0) {
+        return retval;
+    }
+
+    return NICE_BIAS - walk.nice;
+}
+
+define_syscall(sys_getpriority, SYS_GETPRIORITY);
+
+static intptr_t sys_setpriority(const uintptr_t* restrict args)
+{
+    thread_t* thread = this_thread();
+
+    if(thread->process == nullptr) {
+        return -ENOSYS;
+    }
+
+    intptr_t nice = (intptr_t)(args[2]);
+
+    if(nice < NICE_MIN) {
+        nice = NICE_MIN;
+    }
+
+    if(nice > NICE_MAX) {
+        nice = NICE_MAX;
+    }
+
+    priority_walk_t walk = {};
+    walk.caller = thread;
+    walk.which = args[0];
+    walk.nice = nice;
+
+    int retval = walk_targets(&walk, args[1], &set_member);
+
+    if(retval < 0) {
+        return retval;
+    }
+
+    return walk.error;
+}
+
+define_syscall(sys_setpriority, SYS_SETPRIORITY);
+
+static intptr_t sys_getscheduler(const uintptr_t* restrict args)
+{
+    thread_t* thread = this_thread();
+    pid_t pid = args[0];
+
+    if(thread->process == nullptr) {
+        return -ENOSYS;
+    }
+
+    if(pid < 0) {
+        return -EINVAL;
+    }
+
+    process_t* process = process_locate_or_self(thread->process, pid);
+
+    if(process == nullptr) {
+        return -ESRCH;
+    }
+
+    process_decref(process);
+
+    return SCHED_OTHER;
+}
+
+define_syscall(sys_getscheduler, SYS_GETSCHEDULER);
+
+// The only policy is SCHED_OTHER, with priority 0. UNDONE: SCHED_FIFO and SCHED_RR
+static intptr_t set_scheduling(const uintptr_t* restrict args, uintptr_t policy, uintptr_t user_param)
+{
+    thread_t* thread = this_thread();
+    pid_t pid = args[0];
+
+    if(thread->process == nullptr) {
+        return -ENOSYS;
+    }
+
+    if(pid < 0 || policy != SCHED_OTHER) {
+        return -EINVAL;
+    }
+
+    sched_param_t param;
+    ssize_t copied = user_copyin(&param, user_param, sizeof(param));
+
+    if(copied < 0) {
+        return copied;
+    }
+
+    if(param.sched_priority != 0) {
+        return -EINVAL;
+    }
+
+    process_t* process = process_locate_or_self(thread->process, pid);
+
+    if(process == nullptr) {
+        return -ESRCH;
+    }
+
+    intptr_t retval = 0;
+
+    if(!may_change(thread, process)) {
+        retval = -EPERM;
+    }
+
+    process_decref(process);
+
+    return retval;
+}
+
+static intptr_t sys_setscheduler(const uintptr_t* restrict args)
+{
+    return set_scheduling(args, args[1], args[2]);
+}
+
+define_syscall(sys_setscheduler, SYS_SETSCHEDULER);
+
+static intptr_t sys_setschedparam(const uintptr_t* restrict args)
+{
+    return set_scheduling(args, SCHED_OTHER, args[1]);
+}
+
+define_syscall(sys_setschedparam, SYS_SETSCHEDPARAM);
+
+static intptr_t sys_getschedparam(const uintptr_t* restrict args)
+{
+    thread_t* thread = this_thread();
+    pid_t pid = args[0];
+
+    if(thread->process == nullptr) {
+        return -ENOSYS;
+    }
+
+    if(pid < 0) {
+        return -EINVAL;
+    }
+
+    process_t* process = process_locate_or_self(thread->process, pid);
+
+    if(process == nullptr) {
+        return -ESRCH;
+    }
+
+    process_decref(process);
+
+    sched_param_t param = {};
+    ssize_t copied = user_copyout(args[1], &param, sizeof(param));
+
+    if(copied < 0) {
+        return copied;
+    }
+
+    return 0;
+}
+
+define_syscall(sys_getschedparam, SYS_GETSCHEDPARAM);
+
+static intptr_t sys_getschedrange(const uintptr_t* restrict args)
+{
+    if(args[0] != SCHED_OTHER) {
+        return -EINVAL;
+    }
+
+    sched_range_t range = {};
+    ssize_t copied = user_copyout(args[1], &range, sizeof(range));
+
+    if(copied < 0) {
+        return copied;
+    }
+
+    return 0;
+}
+
+define_syscall(sys_getschedrange, SYS_GETSCHEDRANGE);
+
+static intptr_t sys_getschedinterval(const uintptr_t* restrict args)
+{
+    thread_t* thread = this_thread();
+    pid_t pid = args[0];
+
+    if(thread->process == nullptr) {
+        return -ENOSYS;
+    }
+
+    if(pid < 0) {
+        return -EINVAL;
+    }
+
+    process_t* process = process_locate_or_self(thread->process, pid);
+
+    if(process == nullptr) {
+        return -ESRCH;
+    }
+
+    uint64_t timeslice = sched_timeslice_for_nice(atomic_load_n(&process->nice, ATOMIC_RELAXED));
+
+    process_decref(process);
+
+    timespec_t interval;
+    timespec_from_nsec(&interval, timeslice);
+
+    ssize_t copied = user_copyout(args[1], &interval, sizeof(interval));
+
+    if(copied < 0) {
+        return copied;
+    }
+
+    return 0;
+}
+
+define_syscall(sys_getschedinterval, SYS_GETSCHEDINTERVAL);
+
+static uint64_t online_word(size_t word)
+{
+    uint64_t bits = 0;
+
+    for(size_t bit = 0; bit < AFFINITY_WORD_BITS; bit += 1) {
+        size_t index = word * AFFINITY_WORD_BITS + bit;
+
+        if(index < num_harts && hart_online(index)) {
+            bits |= UINT64_C(1) << bit;
+        }
+    }
+
+    return bits;
+}
+
+// The mask is in whole words, as Linux has it. The call returns the size of the mask, not zero
+static intptr_t sys_getaffinity(const uintptr_t* restrict args)
+{
+    thread_t* thread = this_thread();
+    pid_t pid = args[0];
+    size_t size = args[1];
+
+    if(thread->process == nullptr) {
+        return -ENOSYS;
+    }
+
+    if(pid < 0 || size < AFFINITY_BYTES || size % sizeof(uint64_t)) {
+        return -EINVAL;
+    }
+
+    process_t* process = process_locate_or_self(thread->process, pid);
+
+    if(process == nullptr) {
+        return -ESRCH;
+    }
+
+    process_decref(process);
+
+    for(size_t word = 0; word < AFFINITY_WORDS; word += 1) {
+        uint64_t bits = online_word(word);
+        ssize_t copied = user_copyout(args[2] + word * sizeof(bits), &bits, sizeof(bits));
+
+        if(copied < 0) {
+            return copied;
+        }
+    }
+
+    return AFFINITY_BYTES;
+}
+
+define_syscall(sys_getaffinity, SYS_GETAFFINITY);
+
+// UNDONE: The scheduler keeps the thread off the harts that the mask leaves out
+static intptr_t sys_setaffinity(const uintptr_t* restrict args)
+{
+    thread_t* thread = this_thread();
+    pid_t pid = args[0];
+    size_t size = args[1];
+
+    if(thread->process == nullptr) {
+        return -ENOSYS;
+    }
+
+    if(pid < 0) {
+        return -EINVAL;
+    }
+
+    // A mask that is shorter than ours leaves the rest clear, and the bytes past ours do not matter
+    bool allowed = false;
+
+    for(size_t word = 0; word < AFFINITY_WORDS; word += 1) {
+        uint64_t bits = 0;
+        size_t offset = word * sizeof(bits);
+
+        if(offset < size) {
+            size_t chunk = size - offset;
+
+            if(chunk > sizeof(bits)) {
+                chunk = sizeof(bits);
+            }
+
+            ssize_t copied = user_copyin(&bits, args[2] + offset, chunk);
+
+            if(copied < 0) {
+                return copied;
+            }
+        }
+
+        if(bits & online_word(word)) {
+            allowed = true;
+        }
+    }
+
+    process_t* process = process_locate_or_self(thread->process, pid);
+
+    if(process == nullptr) {
+        return -ESRCH;
+    }
+
+    bool permitted = may_change(thread, process);
+
+    process_decref(process);
+
+    if(!permitted) {
+        return -EPERM;
+    }
+
+    if(!allowed) {
+        return -EINVAL;
+    }
+
+    return 0;
+}
+
+define_syscall(sys_setaffinity, SYS_SETAFFINITY);

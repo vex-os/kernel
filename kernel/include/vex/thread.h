@@ -64,8 +64,6 @@ struct thread_s {
     uint64_t wake_deadline;
     thread_t* wake_next;
 
-    uint64_t timeslice;
-
     process_t* process;
     credentials_t* credentials;
     thread_t* process_next;

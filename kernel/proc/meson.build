@@ -11,6 +11,7 @@ kernel_sources += files(
     'signal.c',
     'sys_cred.c',
     'sys_path.c',
+    'sys_sched.c',
     'sys_file.c',
     'sys_futex.c',
     'sys_mman.c',

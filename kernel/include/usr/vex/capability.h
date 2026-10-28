@@ -15,6 +15,7 @@
 #define __k_CAP_SETGID         6
 #define __k_CAP_SETUID         7
 #define __k_CAP_SYS_ADMIN      21 /* Catch-all for administration, trusted.* extended attributes among it */
+#define __k_CAP_SYS_NICE       23 /* Lower the nice value of a process, and change processes of other users */
 #define __k_CAP_SYS_TIME       25 /* Step the realtime clock */
 #define __k_CAP_SYS_TTY_CONFIG 26 /* Configure serial ports and what they are bound to */
 #define __k_CAP_SETFCAP        31 /* Set file capabilities */

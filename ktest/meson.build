@@ -16,6 +16,7 @@ ktest_programs = [
     'thread',
     'futex',
     'sleep',
+    'sched',
     'clock',
     'signal_threads',
     'process',

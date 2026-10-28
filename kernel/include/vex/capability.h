@@ -10,6 +10,7 @@
 #define CAP_SETGID         __k_CAP_SETGID
 #define CAP_SETUID         __k_CAP_SETUID
 #define CAP_SYS_ADMIN      __k_CAP_SYS_ADMIN
+#define CAP_SYS_NICE       __k_CAP_SYS_NICE
 #define CAP_SYS_TIME       __k_CAP_SYS_TIME
 #define CAP_SYS_TTY_CONFIG __k_CAP_SYS_TTY_CONFIG
 #define CAP_SETFCAP        __k_CAP_SETFCAP

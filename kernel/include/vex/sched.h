@@ -1,13 +1,35 @@
 #pragma once
 
 #include <arch/sched.h>
+#include <usr/vex/sched.h>
 #include <vex/types.h>
 
 typedef struct hart_context_s hart_context_t;
 typedef struct thread_s thread_t;
 typedef struct process_s process_t;
 
+typedef struct __k_sched_param sched_param_t;
+typedef struct __k_sched_range sched_range_t;
+
+#define PRIO_PROCESS __k_PRIO_PROCESS
+#define PRIO_PGRP    __k_PRIO_PGRP
+#define PRIO_USER    __k_PRIO_USER
+
+#define NICE_MIN  __k_NICE_MIN
+#define NICE_MAX  __k_NICE_MAX
+#define NICE_BIAS __k_NICE_BIAS
+
+#define SCHED_OTHER __k_SCHED_OTHER
+#define SCHED_FIFO  __k_SCHED_FIFO
+#define SCHED_RR    __k_SCHED_RR
+#define SCHED_BATCH __k_SCHED_BATCH
+#define SCHED_IDLE  __k_SCHED_IDLE
+
 typedef void (*kernel_thread_entry_t)(void* restrict arg);
+
+/// How long a thread of a process with this nice value runs before the scheduler lets another thread on its hart
+/// @param nice Outside NICE_MIN to NICE_MAX it counts as the nearest end
+uint64_t sched_timeslice_for_nice(int nice) __nodiscard;
 
 /// The new thread stays blocked until sched_enqueue
 thread_t* thread_create_kernel(kernel_thread_entry_t entry, void* restrict arg);

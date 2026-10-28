@@ -5,16 +5,26 @@
  * a new call takes the next free number in its block. Number 0 stays invalid
  * so that a zeroed register fails with ENOSYS */
 
-#define __k_SYS_EXIT    0x020
-#define __k_SYS_FORK    0x021
-#define __k_SYS_EXEC    0x022
-#define __k_SYS_WAITPID 0x023
-#define __k_SYS_GETPID  0x024
-#define __k_SYS_GETPPID 0x025
-#define __k_SYS_SETSID  0x026
-#define __k_SYS_SETPGID 0x027
-#define __k_SYS_GETPGID 0x028
-#define __k_SYS_GETSID  0x029
+#define __k_SYS_EXIT             0x020
+#define __k_SYS_FORK             0x021
+#define __k_SYS_EXEC             0x022
+#define __k_SYS_WAITPID          0x023
+#define __k_SYS_GETPID           0x024
+#define __k_SYS_GETPPID          0x025
+#define __k_SYS_SETSID           0x026
+#define __k_SYS_SETPGID          0x027
+#define __k_SYS_GETPGID          0x028
+#define __k_SYS_GETSID           0x029
+#define __k_SYS_GETPRIORITY      0x02B
+#define __k_SYS_SETPRIORITY      0x02C
+#define __k_SYS_GETSCHEDULER     0x02D
+#define __k_SYS_SETSCHEDULER     0x02E
+#define __k_SYS_GETSCHEDPARAM    0x02F
+#define __k_SYS_SETSCHEDPARAM    0x030
+#define __k_SYS_GETSCHEDRANGE    0x031
+#define __k_SYS_GETSCHEDINTERVAL 0x032
+#define __k_SYS_GETAFFINITY      0x033
+#define __k_SYS_SETAFFINITY      0x034
 
 #define __k_SYS_THREAD_CREATE 0x040
 #define __k_SYS_THREAD_EXIT   0x041

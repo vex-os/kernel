@@ -25,6 +25,12 @@
 
 #define SCHED_TIMESLICE_NS (1000 * UINT64_C(CONFIG_SCHED_TIMESLICE))
 
+// Each nice step takes a fifth off the timeslice, or adds a quarter to it. The ends are cut, so that a
+// thread that asks for the most still gets the timer to fire in a sane time, and the least still gets to run
+#define SCHED_TIMESLICE_MIN_NS    UINT64_C(100000) // The least that the Kconfig option takes
+#define SCHED_TIMESLICE_MAX_SCALE 4
+#define NICE_LEVELS               (NICE_MAX - NICE_MIN + 1)
+
 #define THREAD_SIZE_BUDGET 512
 
 static_assert(sizeof(thread_t) <= THREAD_SIZE_BUDGET);
@@ -39,6 +45,7 @@ struct runqueue_s {
 };
 
 static runqueue_t runqueues[MAX_HARTS];
+static uint64_t nice_timeslices[NICE_LEVELS];
 static unsigned sched_irq_number;
 static spinlock_t sleep_lock = SPINLOCK_INIT;
 static thread_t* sleep_head;
@@ -148,6 +155,42 @@ static thread_t* rq_steal(hart_local_t* restrict hart)
     }
 
     return nullptr;
+}
+
+static void init_nice_timeslices(void)
+{
+    for(int nice = NICE_MIN; nice <= NICE_MAX; nice += 1) {
+        uint64_t timeslice = SCHED_TIMESLICE_NS;
+
+        for(int step = nice; step > 0; step -= 1) {
+            timeslice = timeslice * 4 / 5;
+        }
+
+        for(int step = nice; step < 0; step += 1) {
+            timeslice = timeslice * 5 / 4;
+        }
+
+        if(timeslice < SCHED_TIMESLICE_MIN_NS) {
+            timeslice = SCHED_TIMESLICE_MIN_NS;
+        }
+
+        if(timeslice > SCHED_TIMESLICE_MAX_SCALE * SCHED_TIMESLICE_NS) {
+            timeslice = SCHED_TIMESLICE_MAX_SCALE * SCHED_TIMESLICE_NS;
+        }
+
+        nice_timeslices[nice - NICE_MIN] = timeslice;
+    }
+}
+
+static uint64_t timeslice_of(const thread_t* restrict thread)
+{
+    process_t* process = thread->process;
+
+    if(process == nullptr) {
+        return SCHED_TIMESLICE_NS;
+    }
+
+    return sched_timeslice_for_nice(atomic_load_n(&process->nice, ATOMIC_RELAXED));
 }
 
 static __always_inline __nodiscard bool hart_is_idle(const hart_local_t* restrict hart)
@@ -275,7 +318,7 @@ static void sched_irq_handler(unsigned number, const hart_context_t* restrict ct
     // released; a blocking or dying thread has none to hold
     if(curr != hart->idle_thread && curr->state == THREAD_RUNNING && curr->preempt_count > 0) {
         curr->need_resched = true;
-        clock_event_oneshot(sched_irq_number, curr->timeslice);
+        clock_event_oneshot(sched_irq_number, timeslice_of(curr));
         return;
     }
 
@@ -311,7 +354,7 @@ static void sched_irq_handler(unsigned number, const hart_context_t* restrict ct
 
             raw_spinlock_release(&runqueue->lock);
             raw_spinlock_release(&curr->sched_lock);
-            clock_event_oneshot(sched_irq_number, curr->timeslice);
+            clock_event_oneshot(sched_irq_number, timeslice_of(curr));
             return;
         }
         else {
@@ -351,7 +394,7 @@ static void sched_irq_handler(unsigned number, const hart_context_t* restrict ct
     hart->curr_thread = next;
 
     arch_thread_ctx_load(next);
-    clock_event_oneshot(sched_irq_number, next->timeslice);
+    clock_event_oneshot(sched_irq_number, timeslice_of(next));
 
     sched_enter(thread_context(next), curr_hart_lock);
 }
@@ -390,7 +433,6 @@ static thread_t* alloc_thread_user(process_t* restrict process)
 
     thread->self = thread;
     thread->state = THREAD_BLOCKED;
-    thread->timeslice = SCHED_TIMESLICE_NS;
     thread->process = process;
     thread->credentials = process_get_cred(process);
     thread->runqueue = nullptr;
@@ -461,6 +503,19 @@ static hart_local_t* wake_locked(thread_t* restrict thread)
     return target;
 }
 
+uint64_t sched_timeslice_for_nice(int nice)
+{
+    if(nice < NICE_MIN) {
+        nice = NICE_MIN;
+    }
+
+    if(nice > NICE_MAX) {
+        nice = NICE_MAX;
+    }
+
+    return nice_timeslices[nice - NICE_MIN];
+}
+
 thread_t* thread_create_kernel(kernel_thread_entry_t entry, void* restrict arg)
 {
     thread_t* thread = slab_alloc(sizeof(thread_t));
@@ -478,7 +533,6 @@ thread_t* thread_create_kernel(kernel_thread_entry_t entry, void* restrict arg)
 
     thread->self = thread;
     thread->state = THREAD_BLOCKED;
-    thread->timeslice = SCHED_TIMESLICE_NS;
     thread->process = nullptr;
     thread->credentials = &kernel_credentials;
     thread->runqueue = nullptr;
@@ -738,6 +792,8 @@ void preempt_enable(void)
 
 static void sched_init(void)
 {
+    init_nice_timeslices();
+
     sched_irq_number = irq_handler_add(UINT_MAX, &sched_irq_handler, nullptr);
 
     if(sched_irq_number == UINT_MAX) {
