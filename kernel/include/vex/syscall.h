@@ -86,12 +86,11 @@ typedef struct vnode_s vnode_t;
 #define SYS_SETXATTRAT    __k_SYS_SETXATTRAT
 #define SYS_LISTXATTRAT   __k_SYS_LISTXATTRAT
 #define SYS_REMOVEXATTRAT __k_SYS_REMOVEXATTRAT
-
-#define SYS_MOUNT   __k_SYS_MOUNT
-#define SYS_UMOUNT  __k_SYS_UMOUNT
-#define SYS_SYNC    __k_SYS_SYNC
-#define SYS_SYNCFS  __k_SYS_SYNCFS
-#define SYS_STATVFS __k_SYS_STATVFS
+#define SYS_MOUNT         __k_SYS_MOUNT
+#define SYS_UMOUNT        __k_SYS_UMOUNT
+#define SYS_SYNC          __k_SYS_SYNC
+#define SYS_SYNCFS        __k_SYS_SYNCFS
+#define SYS_STATVFS       __k_SYS_STATVFS
 
 #define SYS_UNAME   __k_SYS_UNAME
 #define SYS_GETTIME __k_SYS_GETTIME

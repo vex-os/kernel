@@ -1,97 +1,96 @@
 #ifndef USR_VEX_SYSCALL_H
 #define USR_VEX_SYSCALL_H
 
-/* Each subsystem owns a block of 16 numbers starting at a multiple of 0x10;
+/* Each subsystem owns a block of 32 numbers starting at a multiple of 0x20;
  * a new call takes the next free number in its block. Number 0 stays invalid
  * so that a zeroed register fails with ENOSYS */
 
-#define __k_SYS_EXIT    0x10
-#define __k_SYS_FORK    0x11
-#define __k_SYS_EXEC    0x12
-#define __k_SYS_WAITPID 0x13
-#define __k_SYS_GETPID  0x14
-#define __k_SYS_GETPPID 0x15
-#define __k_SYS_SETSID  0x16
-#define __k_SYS_SETPGID 0x17
-#define __k_SYS_GETPGID 0x18
-#define __k_SYS_GETSID  0x19
-#define __k_SYS_SLEEP   0x1A
+#define __k_SYS_EXIT    0x020
+#define __k_SYS_FORK    0x021
+#define __k_SYS_EXEC    0x022
+#define __k_SYS_WAITPID 0x023
+#define __k_SYS_GETPID  0x024
+#define __k_SYS_GETPPID 0x025
+#define __k_SYS_SETSID  0x026
+#define __k_SYS_SETPGID 0x027
+#define __k_SYS_GETPGID 0x028
+#define __k_SYS_GETSID  0x029
+#define __k_SYS_SLEEP   0x02A
 
-#define __k_SYS_THREAD_CREATE 0x20
-#define __k_SYS_THREAD_EXIT   0x21
-#define __k_SYS_GETTID        0x22
-#define __k_SYS_TCB_SET       0x23
-#define __k_SYS_YIELD         0x24
-#define __k_SYS_FUTEX_WAIT    0x25
-#define __k_SYS_FUTEX_WAKE    0x26
+#define __k_SYS_THREAD_CREATE 0x040
+#define __k_SYS_THREAD_EXIT   0x041
+#define __k_SYS_GETTID        0x042
+#define __k_SYS_TCB_SET       0x043
+#define __k_SYS_YIELD         0x044
+#define __k_SYS_FUTEX_WAIT    0x045
+#define __k_SYS_FUTEX_WAKE    0x046
 
-#define __k_SYS_KILL        0x30
-#define __k_SYS_TGKILL      0x31
-#define __k_SYS_SIGACTION   0x32
-#define __k_SYS_SIGPROCMASK 0x33
-#define __k_SYS_SIGPENDING  0x34
-#define __k_SYS_SIGRETURN   0x35
-#define __k_SYS_SIGALTSTACK 0x36
+#define __k_SYS_KILL        0x060
+#define __k_SYS_TGKILL      0x061
+#define __k_SYS_SIGACTION   0x062
+#define __k_SYS_SIGPROCMASK 0x063
+#define __k_SYS_SIGPENDING  0x064
+#define __k_SYS_SIGRETURN   0x065
+#define __k_SYS_SIGALTSTACK 0x066
 
-#define __k_SYS_GETRESUID 0x40
-#define __k_SYS_SETRESUID 0x41
-#define __k_SYS_GETRESGID 0x42
-#define __k_SYS_SETRESGID 0x43
-#define __k_SYS_GETGROUPS 0x44
-#define __k_SYS_SETGROUPS 0x45
-#define __k_SYS_GETUMASK  0x46
-#define __k_SYS_SETUMASK  0x47
-#define __k_SYS_CAPGET    0x48
-#define __k_SYS_CAPSET    0x49
+#define __k_SYS_GETRESUID 0x080
+#define __k_SYS_SETRESUID 0x081
+#define __k_SYS_GETRESGID 0x082
+#define __k_SYS_SETRESGID 0x083
+#define __k_SYS_GETGROUPS 0x084
+#define __k_SYS_SETGROUPS 0x085
+#define __k_SYS_GETUMASK  0x086
+#define __k_SYS_SETUMASK  0x087
+#define __k_SYS_CAPGET    0x088
+#define __k_SYS_CAPSET    0x089
 
-#define __k_SYS_MMAP     0x50
-#define __k_SYS_MUNMAP   0x51
-#define __k_SYS_MPROTECT 0x52
-#define __k_SYS_MSYNC    0x53
+#define __k_SYS_MMAP     0x0A0
+#define __k_SYS_MUNMAP   0x0A1
+#define __k_SYS_MPROTECT 0x0A2
+#define __k_SYS_MSYNC    0x0A3
 
-#define __k_SYS_OPENAT    0x60
-#define __k_SYS_CLOSE     0x61
-#define __k_SYS_READ      0x62
-#define __k_SYS_WRITE     0x63
-#define __k_SYS_SEEK      0x64
-#define __k_SYS_IOCTL     0x65
-#define __k_SYS_DUP       0x66
-#define __k_SYS_DUP2      0x67
-#define __k_SYS_DUP3      0x68
-#define __k_SYS_FSTAT     0x69
-#define __k_SYS_FTRUNCATE 0x6A
-#define __k_SYS_FSYNC     0x6B
-#define __k_SYS_FCNTL     0x6C
+#define __k_SYS_OPENAT    0x0C0
+#define __k_SYS_CLOSE     0x0C1
+#define __k_SYS_READ      0x0C2
+#define __k_SYS_WRITE     0x0C3
+#define __k_SYS_SEEK      0x0C4
+#define __k_SYS_IOCTL     0x0C5
+#define __k_SYS_DUP       0x0C6
+#define __k_SYS_DUP2      0x0C7
+#define __k_SYS_DUP3      0x0C8
+#define __k_SYS_FSTAT     0x0C9
+#define __k_SYS_FTRUNCATE 0x0CA
+#define __k_SYS_FSYNC     0x0CB
+#define __k_SYS_FCNTL     0x0CC
 
-#define __k_SYS_FSTATAT    0x70
-#define __k_SYS_FCHMODAT   0x71
-#define __k_SYS_FCHOWNAT   0x72
-#define __k_SYS_UTIMENSAT  0x73
-#define __k_SYS_MKDIRAT    0x74
-#define __k_SYS_UNLINKAT   0x75
-#define __k_SYS_RENAMEAT   0x76
-#define __k_SYS_LINKAT     0x77
-#define __k_SYS_SYMLINKAT  0x78
-#define __k_SYS_READLINKAT 0x79
-#define __k_SYS_GETDENTS   0x7A
-#define __k_SYS_GETCWD     0x7B
-#define __k_SYS_CHDIR      0x7C
-#define __k_SYS_FCHDIR     0x7D
-#define __k_SYS_FACCESSAT  0x7E
+#define __k_SYS_FSTATAT    0x0E0
+#define __k_SYS_FCHMODAT   0x0E1
+#define __k_SYS_FCHOWNAT   0x0E2
+#define __k_SYS_UTIMENSAT  0x0E3
+#define __k_SYS_MKDIRAT    0x0E4
+#define __k_SYS_UNLINKAT   0x0E5
+#define __k_SYS_RENAMEAT   0x0E6
+#define __k_SYS_LINKAT     0x0E7
+#define __k_SYS_SYMLINKAT  0x0E8
+#define __k_SYS_READLINKAT 0x0E9
+#define __k_SYS_GETDENTS   0x0EA
+#define __k_SYS_GETCWD     0x0EB
+#define __k_SYS_CHDIR      0x0EC
+#define __k_SYS_FCHDIR     0x0ED
+#define __k_SYS_FACCESSAT  0x0EE
 
-#define __k_SYS_GETXATTRAT    0x80
-#define __k_SYS_SETXATTRAT    0x81
-#define __k_SYS_LISTXATTRAT   0x82
-#define __k_SYS_REMOVEXATTRAT 0x83
+#define __k_SYS_GETXATTRAT    0x100
+#define __k_SYS_SETXATTRAT    0x101
+#define __k_SYS_LISTXATTRAT   0x102
+#define __k_SYS_REMOVEXATTRAT 0x103
+#define __k_SYS_MOUNT         0x104
+#define __k_SYS_UMOUNT        0x105
+#define __k_SYS_SYNC          0x106
+#define __k_SYS_SYNCFS        0x107
+#define __k_SYS_STATVFS       0x108
 
-#define __k_SYS_MOUNT   0x90
-#define __k_SYS_UMOUNT  0x91
-#define __k_SYS_SYNC    0x92
-#define __k_SYS_SYNCFS  0x93
-#define __k_SYS_STATVFS 0x94
-
-#define __k_SYS_UNAME   0xA0
-#define __k_SYS_GETTIME 0xA1
-#define __k_SYS_SETTIME 0xA2
+#define __k_SYS_UNAME   0x120
+#define __k_SYS_GETTIME 0x121
+#define __k_SYS_SETTIME 0x122
 
 #endif /* USR_VEX_SYSCALL_H */
