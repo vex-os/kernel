@@ -17,6 +17,11 @@
 #define AMD64_PML_PATL    UINT64_C(0x0000000000001000) // PAT, in a 2 MiB or 1 GiB entry
 #define AMD64_PML_NOEXEC  UINT64_C(0x8000000000000000)
 
+// Software bit of a user page that keeps its
+// frame but allows no access: PRESENT is clear,
+// as an x86 page that is present is always readable
+#define AMD64_PML_PROTNONE UINT64_C(0x0000000000000200)
+
 #define AMD64_PAGEMAP_START_KERN 256U
 
 // Level 1 entries map 4 KiB pages; each level above covers 512 times more
@@ -128,7 +133,7 @@ static __always_inline __nodiscard unsigned amd64_pat_vprot(pmentry_t entry, uns
 
 static __always_inline __nodiscard bool pmentry_valid(pmentry_t entry)
 {
-    return entry & AMD64_PML_PRESENT;
+    return entry & (AMD64_PML_PRESENT | AMD64_PML_PROTNONE);
 }
 
 static __always_inline __nodiscard bool pmentry_leaf(pmentry_t entry, unsigned level)
@@ -148,7 +153,9 @@ static __always_inline __nodiscard uintptr_t pmentry_table_address(pmentry_t ent
 
 static __always_inline __nodiscard unsigned pmentry_vprot(pmentry_t entry, unsigned level)
 {
-    unsigned vprot = VPROT_READ;
+    unsigned vprot = VPROT_NONE;
+    if(entry & AMD64_PML_PRESENT)
+        vprot |= VPROT_READ;
     if(entry & AMD64_PML_WRITE)
         vprot |= VPROT_WRITE;
     if(entry & AMD64_PML_USER)
@@ -164,8 +171,14 @@ static __always_inline __nodiscard pmentry_t pmentry_setup(uintptr_t address, un
     pmentry_t result = PMENTRY_NULL;
 
     result |= address & AMD64_PML_ADDRESS_MASK;
-    result |= AMD64_PML_PRESENT;
     result |= AMD64_PML_NOEXEC;
+
+    if((vprot & VPROT_USER) && 0 == (vprot & (VPROT_READ | VPROT_WRITE | VPROT_EXEC))) {
+        result |= AMD64_PML_PROTNONE;
+    }
+    else {
+        result |= AMD64_PML_PRESENT;
+    }
 
     if(level > 1) {
         result |= AMD64_PML_LARGE;
