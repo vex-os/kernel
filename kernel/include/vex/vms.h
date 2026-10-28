@@ -64,6 +64,10 @@ int vms_clone(vmspace_t* restrict vmspace, vmspace_t* restrict source);
 
 int vms_fault(vmspace_t* restrict vmspace, uintptr_t virt, unsigned access);
 
+/// Faults in every page of the range that is mapped, and stops at the first one that fails
+/// @note Reports no error, as the pages fault in on use anyway
+void vms_populate(vmspace_t* restrict vmspace, uintptr_t start, uintptr_t end);
+
 /// Unmaps the device memory of node from every address space, so the next access faults on it again
 /// @pre The node's resolve_page fails from now on, or that fault maps the page back
 void vms_revoke(vnode_t* restrict node);

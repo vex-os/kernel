@@ -10,7 +10,7 @@
 #include <vex/vms.h>
 
 #define KNOWN_PROT  (PROT_READ | PROT_WRITE | PROT_EXEC)
-#define KNOWN_FLAGS (MAP_SHARED | MAP_PRIVATE | MAP_FIXED | MAP_ANONYMOUS)
+#define KNOWN_FLAGS (MAP_SHARED | MAP_PRIVATE | MAP_FIXED | MAP_ANONYMOUS | MAP_NORESERVE | MAP_POPULATE | MAP_STACK | MAP_FIXED_NOREPLACE)
 #define KNOWN_SYNC  (MS_ASYNC | MS_INVALIDATE | MS_SYNC)
 
 static unsigned prot_to_vprot(uintptr_t prot)
@@ -45,17 +45,24 @@ static bool user_range_end(vmspace_t* restrict vmspace, uintptr_t start, uintptr
     return *end <= user_end;
 }
 
-static intptr_t place_mapping(vmspace_t* restrict vmspace, uintptr_t addr, uintptr_t length, uintptr_t flags, unsigned vprot,
+static intptr_t map_range(vmspace_t* restrict vmspace, uintptr_t addr, uintptr_t length, uintptr_t flags, unsigned vprot,
     const vm_backing_t* restrict backing)
 {
     uintptr_t end;
 
-    if(flags & MAP_FIXED) {
+    if(flags & (MAP_FIXED | MAP_FIXED_NOREPLACE)) {
         if(!user_range_end(vmspace, addr, length, &end)) {
             return -EINVAL;
         }
 
-        int retval = vms_map_replace(vmspace, addr, end, vprot, backing);
+        int retval;
+
+        if(flags & MAP_FIXED_NOREPLACE) {
+            retval = vms_map(vmspace, addr, end, vprot, backing);
+        }
+        else {
+            retval = vms_map_replace(vmspace, addr, end, vprot, backing);
+        }
 
         if(retval < 0) {
             return retval;
@@ -74,6 +81,18 @@ static intptr_t place_mapping(vmspace_t* restrict vmspace, uintptr_t addr, uintp
 
     if(retval < 0) {
         return retval;
+    }
+
+    return placed;
+}
+
+static intptr_t place_mapping(vmspace_t* restrict vmspace, uintptr_t addr, uintptr_t length, uintptr_t flags, unsigned vprot,
+    const vm_backing_t* restrict backing)
+{
+    intptr_t placed = map_range(vmspace, addr, length, flags, vprot, backing);
+
+    if(placed >= 0 && (flags & MAP_POPULATE)) {
+        vms_populate(vmspace, placed, placed + page_align_up(length));
     }
 
     return placed;

@@ -951,6 +951,15 @@ int vms_fault(vmspace_t* restrict vmspace, uintptr_t virt, unsigned access)
     return retval;
 }
 
+void vms_populate(vmspace_t* restrict vmspace, uintptr_t start, uintptr_t end)
+{
+    for(uintptr_t page = start; page < end; page += PAGE_SIZE) {
+        if(vms_fault(vmspace, page, VPROT_NONE) < 0) {
+            return;
+        }
+    }
+}
+
 void vms_revoke(vnode_t* restrict node)
 {
     bool unmapped = false;
