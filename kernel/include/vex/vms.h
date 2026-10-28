@@ -57,6 +57,12 @@ int vms_map_replace(vmspace_t* restrict vmspace, uintptr_t start, uintptr_t end,
 
 int vms_map_any(vmspace_t* restrict vmspace, size_t size, unsigned vprot, const vm_backing_t* restrict backing, uintptr_t* restrict out);
 int vms_unmap(vmspace_t* restrict vmspace, uintptr_t start, uintptr_t end);
+/// Drops the pages of the range and keeps the regions, so the next access faults a fresh page in:
+/// zeros for anonymous memory, the contents of the file for a file mapping
+/// @retval -EINVAL The range is not page aligned, empty, or not in user space, or it holds device memory
+/// @retval -ENOMEM Part of the range is not mapped
+int vms_discard(vmspace_t* restrict vmspace, uintptr_t start, uintptr_t end);
+
 /// Checks that every page of the range is mapped
 /// @retval -EINVAL The range is not page aligned, empty, or not in user space
 /// @retval -ENOMEM Part of the range is not mapped

@@ -257,8 +257,7 @@ static intptr_t check_range(vmspace_t* restrict vmspace, uintptr_t addr, uintptr
     return vms_check_mapped(vmspace, page_align(addr), page_align_up(addr + length));
 }
 
-// UNDONE: MADV_DONTNEED frees the pages of an
-// anonymous mapping, and MADV_WILLNEED reads ahead
+// UNDONE: MADV_WILLNEED reads ahead
 static intptr_t sys_madvise(const uintptr_t* restrict args)
 {
     thread_t* thread = this_thread();
@@ -288,7 +287,13 @@ static intptr_t sys_madvise(const uintptr_t* restrict args)
         return 0;
     }
 
-    return check_range(process->vmspace, args[0], args[1]);
+    intptr_t retval = check_range(process->vmspace, args[0], args[1]);
+
+    if(retval == 0 && args[2] == MADV_DONTNEED) {
+        return vms_discard(process->vmspace, args[0], page_align_up(args[0] + args[1]));
+    }
+
+    return retval;
 }
 
 define_syscall(sys_madvise, SYS_MADVISE);

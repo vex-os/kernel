@@ -450,15 +450,10 @@ static void release_device_pages(vmspace_t* restrict vmspace, const vm_region_t*
     }
 }
 
-static void release_pages(vmspace_t* restrict vmspace, const vm_region_t* restrict region, uintptr_t* restrict batch,
-    size_t* restrict count, bool shootdown)
+static void release_range(vmspace_t* restrict vmspace, uintptr_t start, uintptr_t end, uintptr_t* restrict batch, size_t* restrict count,
+    bool shootdown)
 {
-    if(region->device) {
-        release_device_pages(vmspace, region, shootdown);
-        return;
-    }
-
-    for(uintptr_t page = region->start; page < region->end; page += PAGE_SIZE) {
+    for(uintptr_t page = start; page < end; page += PAGE_SIZE) {
         uintptr_t phys = rmap_unmap(vmspace->pmap, page);
 
         if(phys == 0) {
@@ -472,6 +467,17 @@ static void release_pages(vmspace_t* restrict vmspace, const vm_region_t* restri
             free_batch(batch, count, shootdown);
         }
     }
+}
+
+static void release_pages(vmspace_t* restrict vmspace, const vm_region_t* restrict region, uintptr_t* restrict batch,
+    size_t* restrict count, bool shootdown)
+{
+    if(region->device) {
+        release_device_pages(vmspace, region, shootdown);
+        return;
+    }
+
+    release_range(vmspace, region->start, region->end, batch, count, shootdown);
 }
 
 static void unmap_all_locked(vmspace_t* restrict vmspace, bool shootdown, bool deferred)
@@ -813,6 +819,50 @@ int vms_check_mapped(vmspace_t* restrict vmspace, uintptr_t start, uintptr_t end
     if(!covered) {
         return -ENOMEM;
     }
+
+    return 0;
+}
+
+int vms_discard(vmspace_t* restrict vmspace, uintptr_t start, uintptr_t end)
+{
+    if(!range_valid(vmspace, start, end)) {
+        return -EINVAL;
+    }
+
+    mutex_acquire(&vmspace->lock);
+
+    if(!range_covered(vmspace, start, end)) {
+        mutex_release(&vmspace->lock);
+        return -ENOMEM;
+    }
+
+    for(vm_region_t* it = find_region(vmspace, start); it && it->start < end; it = it->next) {
+        if(it->device) {
+            mutex_release(&vmspace->lock);
+            return -EINVAL;
+        }
+    }
+
+    uintptr_t batch[FREE_BATCH];
+    size_t count = 0;
+
+    for(vm_region_t* it = find_region(vmspace, start); it && it->start < end; it = it->next) {
+        uintptr_t clipped_start = start;
+        uintptr_t clipped_end = end;
+
+        if(clipped_start < it->start) {
+            clipped_start = it->start;
+        }
+
+        if(clipped_end > it->end) {
+            clipped_end = it->end;
+        }
+
+        release_range(vmspace, clipped_start, clipped_end, batch, &count, true);
+    }
+
+    free_batch(batch, &count, true);
+    mutex_release(&vmspace->lock);
 
     return 0;
 }
