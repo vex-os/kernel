@@ -21,6 +21,8 @@ ktest_programs = [
     'process_group',
     'exec_threads',
     'tlb_shootdown',
+    'mmap_flags',
+    'mmap',
     'fs',
     'fs_times',
     'getdents',
