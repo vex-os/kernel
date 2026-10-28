@@ -11,3 +11,5 @@
 
 #define MAX_CANON __k_MAX_CANON
 #define MAX_INPUT __k_MAX_INPUT
+
+#define IOV_MAX __k_IOV_MAX

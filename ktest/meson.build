@@ -27,6 +27,7 @@ ktest_programs = [
     'fs',
     'fs_times',
     'pread',
+    'iov',
     'getdents',
     'mount',
     'path',

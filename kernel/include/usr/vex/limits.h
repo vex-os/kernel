@@ -12,4 +12,6 @@
 #define __k_MAX_CANON 4096
 #define __k_MAX_INPUT 4096
 
+#define __k_IOV_MAX 1024
+
 #endif /* USR_VEX_LIMITS_H */
