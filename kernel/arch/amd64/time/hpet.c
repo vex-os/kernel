@@ -53,7 +53,7 @@ static clock_source_t hpet_clock_source = {
     .rating = 200,
 };
 
-static uint64_t hpet_address = 0; // Where the counting HPET is, or zero while none counts
+static phys_addr_t hpet_address = {}; // Where the counting HPET is, or null while none counts
 static uint64_t hpet_frequency = 0;
 
 static int hpet_probe(device_t* restrict device, const driver_match_t* restrict match)
@@ -67,7 +67,7 @@ static int hpet_attach(device_t* restrict device, const driver_match_t* restrict
 {
     uint64_t address;
 
-    if(hpet_address == 0 || device_get_io_address(device, 0, &address) < 0 || address != hpet_address) {
+    if(address_null(hpet_address) || device_get_io_address(device, 0, &address) < 0 || address != hpet_address.value) {
         return -ENODEV;
     }
 
@@ -121,7 +121,7 @@ static void hpet_release(device_t* restrict device)
     }
 
     hpet_clock_source.ctxdata = nullptr;
-    hpet_address = 0;
+    hpet_address = phys_addr(0);
 }
 
 static const driver_ops_t hpet_driver_ops = {
@@ -144,13 +144,13 @@ static void arch_init_hpet(void)
         struct acpi_hpet* hpet = (struct acpi_hpet*)(table.hdr);
 
         if(hpet->address.address) {
-            volatile uint64_t* mmio = mmio_map(phys_addr(hpet->address.address), HPET_MMIO_SIZE, VPROT_MMIO);
+            phys_addr_t address = phys_addr(hpet->address.address);
+            volatile uint64_t* mmio = mmio_map(address, HPET_MMIO_SIZE, VPROT_MMIO);
 
             if(mmio == nullptr) {
                 panic("hpet: failed to map registers");
             }
 
-            uint64_t address = hpet->address.address;
             uacpi_table_unref(&table);
 
             uint64_t hpet_caps = hpet_read_reg(mmio, HPET_REG_CAPS);
