@@ -278,6 +278,11 @@ ssize_t event_await_unlock(event_t** restrict events, size_t count, spinlock_t* 
     return await_until(events, count, deadline, true, lock, intr_state);
 }
 
+ssize_t event_await_blocking_unlock(event_t** restrict events, size_t count, spinlock_t* restrict lock, bool intr_state)
+{
+    return await_until(events, count, 0, false, lock, intr_state);
+}
+
 ssize_t event_sleep(uint64_t timeout_nsec)
 {
     event_t event;

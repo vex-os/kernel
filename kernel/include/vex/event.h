@@ -67,6 +67,13 @@ ssize_t event_await_interruptible(event_t** restrict events, size_t count);
 /// as it is and runs again or fails with EINTR on the way out
 ssize_t event_await_unlock(event_t** restrict events, size_t count, spinlock_t* restrict lock, bool intr_state, uint64_t timeout_nsec);
 
+/// event_await_unlock that only a trigger ends: pending work such as a signal does not
+/// @pre The caller holds the lock, taken with spinlock_acquire_intr, which returned intr_state
+/// @post The lock is released and interrupts are back to intr_state, whatever the result
+/// @return The index of the event in events
+/// @retval -ENOMEM No memory to register the thread as a listener
+ssize_t event_await_blocking_unlock(event_t** restrict events, size_t count, spinlock_t* restrict lock, bool intr_state);
+
 /// Sleeps until the timeout passes or pending work such as a signal arrives
 /// @param timeout_nsec Zero sleeps for as long as it takes
 /// @retval 0 The timeout passed
