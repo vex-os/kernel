@@ -26,6 +26,7 @@ ktest_programs = [
     'mmap_flags',
     'mmap',
     'mlock',
+    'commit',
     'fs',
     'fs_times',
     'pread',
