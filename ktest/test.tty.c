@@ -308,6 +308,31 @@ static void set_termios_in_background(void)
     }
 }
 
+// As a shell does it: a process in the background that sets the foreground group stops, unless it ignores SIGTTOU meanwhile
+static long set_foreground(__k_pid_t pgid)
+{
+    struct __k_sigaction ignore = {};
+    struct __k_sigaction previous = {};
+
+    ignore.sa_handler = __k_SIG_IGN;
+    ktest_syscall3(__k_SYS_SIGACTION, __k_SIGTTOU, (long)(&ignore), (long)(&previous));
+
+    long retval = ktest_syscall3(__k_SYS_IOCTL, tty_fd, __k_TIOCSPGRP, (long)(&pgid));
+
+    ktest_syscall3(__k_SYS_SIGACTION, __k_SIGTTOU, (long)(&previous), 0);
+
+    return retval;
+}
+
+static void set_foreground_in_background(void)
+{
+    __k_pid_t pgid = ktest_syscall1(__k_SYS_GETPID, 0);
+
+    if(ktest_syscall3(__k_SYS_IOCTL, tty_fd, __k_TIOCSPGRP, (long)(&pgid)) == 0) {
+        ktest_syscall1(__k_SYS_EXIT, 7);
+    }
+}
+
 static long wait_for(long child, long options, int* restrict wstatus)
 {
     return ktest_syscall3(__k_SYS_WAITPID, child, (long)wstatus, options);
@@ -393,7 +418,7 @@ static void test_tty_background(long pid)
     ktest_expect(__k_WIFSTOPPED(wstatus) && __k_WSTOPSIG(wstatus) == __k_SIGTTIN, 1);
 
     pgid = child;
-    ktest_expect(ktest_syscall3(__k_SYS_IOCTL, tty_fd, __k_TIOCSPGRP, (long)&pgid), 0);
+    ktest_expect(set_foreground(pgid), 0);
     ktest_syscall2(__k_SYS_KILL, -child, __k_SIGCONT);
     line_send("k\n");
     line_drain();
@@ -401,7 +426,7 @@ static void test_tty_background(long pid)
     ktest_expect(wstatus, __k_W_EXITCODE(7, 0));
 
     pgid = pid;
-    ktest_expect(ktest_syscall3(__k_SYS_IOCTL, tty_fd, __k_TIOCSPGRP, (long)&pgid), 0);
+    ktest_expect(set_foreground(pgid), 0);
 
     expect_exit(&read_ignoring_in_background, 7);
 
@@ -416,6 +441,7 @@ static void test_tty_background(long pid)
 
     expect_stop(&write_in_background, __k_SIGTTOU);
     expect_stop(&set_termios_in_background, __k_SIGTTOU);
+    expect_stop(&set_foreground_in_background, __k_SIGTTOU);
     expect_exit(&write_ignoring_in_background, 7);
     line_drain();
 
@@ -520,7 +546,7 @@ static void test_tty(void)
 
     ktest_syscall2(__k_SYS_SETPGID, child, child);
     pgid = child;
-    ktest_expect(ktest_syscall3(__k_SYS_IOCTL, tty_fd, __k_TIOCSPGRP, (long)&pgid), 0);
+    ktest_expect(set_foreground(pgid), 0);
     line_send("\x03");
     wstatus = -1;
     ktest_syscall3(__k_SYS_WAITPID, child, (long)&wstatus, 0);
@@ -528,7 +554,7 @@ static void test_tty(void)
     ktest_expect(expect_line("^C"), 1);
 
     pgid = pid;
-    ktest_expect(ktest_syscall3(__k_SYS_IOCTL, tty_fd, __k_TIOCSPGRP, (long)&pgid), 0);
+    ktest_expect(set_foreground(pgid), 0);
 
     test_tty_background(pid);
 

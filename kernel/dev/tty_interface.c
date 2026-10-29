@@ -1158,9 +1158,20 @@ static bool output_stops_background(tty_interface_t* restrict interface)
     return tostop;
 }
 
-static bool changes_termios(uint32_t request)
+// The requests that a process in the
+// background of its terminal may not make
+static bool changes_terminal(uint32_t request)
 {
-    return request == TCSETS || request == TCSETSW || request == TCSETSF;
+    switch(request) {
+        case TCSETS:
+        case TCSETSW:
+        case TCSETSF:
+        case TIOCSPGRP:
+            return true;
+
+        default:
+            return false;
+    }
 }
 
 static ssize_t tty_char_read(const char_interface_t* restrict chr, void* restrict file_ctxdata, off_t offset, void* restrict buffer,
@@ -1223,7 +1234,7 @@ static int tty_char_ioctl(const char_interface_t* restrict chr, void* restrict f
         return -EIO;
     }
 
-    if(changes_termios(request)) {
+    if(changes_terminal(request)) {
         int allowed = check_foreground(interface, SIGTTOU);
 
         if(allowed < 0) {
