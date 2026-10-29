@@ -1,4 +1,5 @@
 #include <vex/errno.h>
+#include <vex/resource.h>
 #include <vex/sched.h>
 #include <vex/syscall.h>
 #include <vex/time.h>
@@ -148,6 +149,12 @@ static void test_unprivileged(void)
     long child = ktest_syscall1(__k_SYS_FORK, 0);
 
     if(child == 0) {
+        // The limit is set before the capability goes, and lets the process lower its nice value down to 15
+        struct __k_rlimit limit = {};
+        limit.rlim_cur = 5;
+        limit.rlim_max = 5;
+        ktest_expect(ktest_syscall2(__k_SYS_SETRLIMIT, __k_RLIMIT_NICE, (long)(&limit)), 0);
+
         ktest_expect(ktest_syscall3(__k_SYS_SETRESUID, UNPRIVILEGED_ID, UNPRIVILEGED_ID, UNPRIVILEGED_ID), 0);
 
         // Only a process with CAP_SYS_NICE lowers the nice value, or touches a process of someone else
@@ -157,6 +164,12 @@ static void test_unprivileged(void)
         ktest_expect(set_nice(__k_PRIO_PROCESS, 0, 2), -__k_EACCES);
         ktest_expect(own_nice_encoded(), __k_NICE_BIAS - 5);
         ktest_expect(set_nice(__k_PRIO_PROCESS, ktest_syscall1(__k_SYS_GETPPID, 0), 5), -__k_EPERM);
+
+        // RLIMIT_NICE of 5 lets it go down to 20 - 5, and no further
+        ktest_expect(set_nice(__k_PRIO_PROCESS, 0, 19), 0);
+        ktest_expect(set_nice(__k_PRIO_PROCESS, 0, 15), 0);
+        ktest_expect(set_nice(__k_PRIO_PROCESS, 0, 14), -__k_EACCES);
+        ktest_expect(own_nice_encoded(), __k_NICE_BIAS - 15);
 
         // The same goes for a policy and a mask
         struct __k_sched_param param = {};

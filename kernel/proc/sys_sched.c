@@ -6,6 +6,7 @@
 #include <vex/hart.h>
 #include <vex/pgrp.h>
 #include <vex/process.h>
+#include <vex/rlimit.h>
 #include <vex/sched.h>
 #include <vex/syscall.h>
 #include <vex/thread.h>
@@ -75,6 +76,21 @@ static void get_member(process_t* restrict process, void* restrict arg)
     }
 }
 
+// The lowest nice value that RLIMIT_NICE lets a process
+// without CAP_SYS_NICE set: a limit of n allows (20 - n)
+static int nice_floor(const thread_t* restrict caller)
+{
+    rlimit_t limit = process_get_rlimit(caller->process, RLIMIT_NICE);
+
+    if(limit.rlim_cur > NICE_BIAS - NICE_MIN) {
+        return NICE_MIN;
+    }
+
+    int allowed = limit.rlim_cur;
+
+    return NICE_BIAS - allowed;
+}
+
 // A failure on one member does not stop the others; the call reports the last one
 static void set_member(process_t* restrict process, void* restrict arg)
 {
@@ -93,8 +109,9 @@ static void set_member(process_t* restrict process, void* restrict arg)
         return;
     }
 
-    // UNDONE: RLIMIT_NICE lets a process lower the nice value that far, once the limits exist
-    if(!capable && walk->nice < atomic_load_n(&process->nice, ATOMIC_RELAXED)) {
+    bool lowers = walk->nice < atomic_load_n(&process->nice, ATOMIC_RELAXED);
+
+    if(!capable && lowers && walk->nice < nice_floor(walk->caller)) {
         walk->error = -EACCES;
         return;
     }
