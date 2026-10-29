@@ -143,7 +143,10 @@ static bool name_search_emit(dir_context_t* restrict dir_context, const dirent_t
     }
 
     // A directory is also its own "." and its child's ".."
-    if(entry->d_name[0] == '.' && (entry->d_name[1] == 0 || (entry->d_name[1] == '.' && entry->d_name[2] == 0))) {
+    bool dot = entry->d_name[0] == '.' && entry->d_name[1] == 0;
+    bool dotdot = entry->d_name[0] == '.' && entry->d_name[1] == '.' && entry->d_name[2] == 0;
+
+    if(dot || dotdot) {
         return true;
     }
 

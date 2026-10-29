@@ -79,12 +79,22 @@ static bool map_segments(const block_interface_t* restrict interface, const uint
             piece = length;
         }
 
-        if(address_null(phys) || ((phys.value | piece) & interface->dma_align) || address_less(interface->dma_limit, phys)
-            || piece - 1 > address_diff(interface->dma_limit, phys)) {
+        if(address_null(phys) || ((phys.value | piece) & interface->dma_align)) {
             return false;
         }
 
-        if(count && address_equal(address_add(segments[count - 1].phys, segments[count - 1].length), phys)) {
+        if(address_less(interface->dma_limit, phys) || piece - 1 > address_diff(interface->dma_limit, phys)) {
+            return false;
+        }
+
+        bool adjacent = false;
+
+        if(count) {
+            phys_addr_t previous_end = address_add(segments[count - 1].phys, segments[count - 1].length);
+            adjacent = address_equal(previous_end, phys);
+        }
+
+        if(adjacent) {
             segments[count - 1].length += piece;
         }
         else {
@@ -172,14 +182,18 @@ static int transfer(const block_interface_t* restrict interface, unsigned op, ui
             req.num_segments = 1;
 
             if(op == BLOCK_REQ_WRITE) {
-                memcpy(phys_to_virt(bounce_phys), buffer, bytes);
+                void* bounce = phys_to_virt(bounce_phys);
+
+                memcpy(bounce, buffer, bytes);
             }
         }
 
         retval = block_submit_wait(interface, &req);
 
         if(retval == 0 && !direct && op == BLOCK_REQ_READ) {
-            memcpy(buffer, phys_to_virt(bounce_phys), bytes);
+            void* bounce = phys_to_virt(bounce_phys);
+
+            memcpy(buffer, bounce, bytes);
         }
 
         buffer += bytes;

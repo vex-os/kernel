@@ -183,7 +183,9 @@ static int mount_locked(const char* restrict type, const char* restrict path, co
         pr_verbose("vfs: mount %s: mountpoint=%s device=%s", driver->name, path, device_name);
     }
     else {
-        pr_verbose("vfs: %s: failed to mount: %s; mountpoint=%s device=%s", driver->name, strerror(retval), path, device_name);
+        const char* reason = strerror(retval);
+
+        pr_verbose("vfs: %s: failed to mount: %s; mountpoint=%s device=%s", driver->name, reason, path, device_name);
     }
 
     if(cmdl.buffer) {

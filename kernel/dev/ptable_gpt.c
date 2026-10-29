@@ -185,7 +185,8 @@ static int gpt_detect(const block_interface_t* restrict interface, void** restri
     }
 
     gpt_ptdata_t* gpt;
-    retval = gpt_check_header(interface, le32toh(sector.entries[0].lba_start), &gpt);
+    uint32_t first_lba = le32toh(sector.entries[0].lba_start);
+    retval = gpt_check_header(interface, first_lba, &gpt);
 
     if(retval < 0) {
         retval = gpt_check_header(interface, interface->sector_count - 1, &gpt);

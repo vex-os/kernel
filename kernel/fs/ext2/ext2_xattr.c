@@ -361,7 +361,9 @@ static int node_area(vnode_t* restrict node, unsigned which, ext2_area_t* restri
         return ibody_area(ctx->fs_ctx, (uint32_t)(node->ino), out);
     }
 
-    return block_area(ctx->fs_ctx, le32toh(ctx->inode.i_file_acl), out);
+    uint32_t block = le32toh(ctx->inode.i_file_acl);
+
+    return block_area(ctx->fs_ctx, block, out);
 }
 
 // Leaves the name NUL-terminated; returns zero past the last entry
@@ -502,7 +504,9 @@ static int store_block(vnode_t* restrict node, uint8_t* restrict buffer, uint32_
     }
 
     if(block && refcount == 1) {
-        return fcache_dev_write(fs_ctx->device_node, ext2_block_offset(fs_ctx, block), buffer, fs_ctx->block_size);
+        uint64_t offset = ext2_block_offset(fs_ctx, block);
+
+        return fcache_dev_write(fs_ctx->device_node, offset, buffer, fs_ctx->block_size);
     }
 
     uint32_t taken = take_xattr_block(node, block);
@@ -514,7 +518,9 @@ static int store_block(vnode_t* restrict node, uint8_t* restrict buffer, uint32_
     ext2_xattr_header_t* header = (ext2_xattr_header_t*)(buffer);
     header->h_refcount = htole32(1);
 
-    int retval = fcache_dev_write(fs_ctx->device_node, ext2_block_offset(fs_ctx, taken), buffer, fs_ctx->block_size);
+    uint64_t offset = ext2_block_offset(fs_ctx, taken);
+
+    int retval = fcache_dev_write(fs_ctx->device_node, offset, buffer, fs_ctx->block_size);
 
     if(retval == 0) {
         retval = enable_ext_attr(fs_ctx);
@@ -678,7 +684,9 @@ ssize_t ext2_xattr_get(vnode_t* restrict node, unsigned space, const char* restr
     }
 
     if(length) {
-        retval = fcache_dev_read(ctx->fs_ctx->device_node, area.base + le16toh(entry.e_value_offs), value, length);
+        uint64_t offset = area.base + le16toh(entry.e_value_offs);
+
+        retval = fcache_dev_read(ctx->fs_ctx->device_node, offset, value, length);
     }
 
     if(retval < 0) {

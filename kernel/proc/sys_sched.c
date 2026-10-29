@@ -439,7 +439,8 @@ static intptr_t sys_getaffinity(pid_t pid, size_t size, user_addr_t mask)
 
     for(size_t word = 0; word < AFFINITY_WORDS; word += 1) {
         uint64_t bits = online_word(word);
-        ssize_t copied = user_copyout(user_addr_add(mask, word * sizeof(bits)), &bits, sizeof(bits));
+        user_addr_t target = user_addr_add(mask, word * sizeof(bits));
+        ssize_t copied = user_copyout(target, &bits, sizeof(bits));
 
         if(copied < 0) {
             return copied;
@@ -478,7 +479,8 @@ static intptr_t sys_setaffinity(pid_t pid, size_t size, user_addr_t mask)
                 chunk = sizeof(bits);
             }
 
-            ssize_t copied = user_copyin(&bits, user_addr_add(mask, offset), chunk);
+            user_addr_t source = user_addr_add(mask, offset);
+            ssize_t copied = user_copyin(&bits, source, chunk);
 
             if(copied < 0) {
                 return copied;

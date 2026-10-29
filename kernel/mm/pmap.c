@@ -93,7 +93,9 @@ static int split_large_nolock(pmentry_t* restrict entry, unsigned level)
     unsigned vprot = pmentry_vprot(*entry, level);
 
     for(size_t i = 0; i < PAGEMAP_SIZE; ++i) {
-        table[i] = pmentry_setup(address_add(base, i * step), vprot, level - 1);
+        phys_addr_t frame = address_add(base, i * step);
+
+        table[i] = pmentry_setup(frame, vprot, level - 1);
     }
 
     *entry = pmentry_table(phys);
@@ -160,7 +162,10 @@ static phys_addr_t pmap_resolve_address_nolock(pmap_t* restrict pmap, virt_addr_
     pmentry_t* entry = pmentry_walk(pmap, virt, 1, false, &level);
 
     if(entry && pmentry_valid(*entry)) {
-        return address_add(pmentry_address(*entry, level), virt.value & (pmentry_level_size(level) - 1));
+        phys_addr_t frame = pmentry_address(*entry, level);
+        size_t offset = virt.value & (pmentry_level_size(level) - 1);
+
+        return address_add(frame, offset);
     }
 
     return phys_addr(0);
@@ -172,7 +177,9 @@ static int map_kernel_section(const void* restrict start, const void* restrict e
     virt_addr_t virt_end = page_align_up(virt_addr_from_pointer(end));
     phys_addr_t phys = phys_addr(virt.value - kernel_base_virt + kernel_base_phys);
 
-    return pmap_map_range(&sys_pmap, virt, phys, address_diff(virt_end, virt), vprot);
+    size_t size = address_diff(virt_end, virt);
+
+    return pmap_map_range(&sys_pmap, virt, phys, size, vprot);
 }
 
 static void map_hhdm_run(uintptr_t start, uintptr_t end)
@@ -233,7 +240,9 @@ pmap_t* pmap_create(void)
 
 void pmap_release(pmap_t* restrict pmap)
 {
-    pmap_table_free(pmap_root(pmap, virt_addr(0)), 0, PAGEMAP_USER_END, pmap->num_levels - 1);
+    pmentry_t* root = pmap_root(pmap, virt_addr(0));
+
+    pmap_table_free(root, 0, PAGEMAP_USER_END, pmap->num_levels - 1);
     arch_pmap_free(pmap);
     slab_free(pmap);
 }
@@ -252,7 +261,9 @@ int pmap_map(pmap_t* restrict pmap, virt_addr_t virt, phys_addr_t phys, unsigned
         retval = -EEXIST;
     }
     else {
-        *entry = pmentry_setup(page_align(phys), vprot, 1);
+        phys_addr_t frame = page_align(phys);
+
+        *entry = pmentry_setup(frame, vprot, 1);
         pmap_flush(virt);
         retval = 0;
     }
@@ -310,7 +321,9 @@ int pmap_patch_noflush(pmap_t* restrict pmap, virt_addr_t virt, unsigned vprot)
     }
 
     if(retval == 0) {
-        *entry = pmentry_setup(pmentry_address(*entry, 1), vprot, 1);
+        phys_addr_t frame = pmentry_address(*entry, 1);
+
+        *entry = pmentry_setup(frame, vprot, 1);
         pmap_flush(virt);
     }
 

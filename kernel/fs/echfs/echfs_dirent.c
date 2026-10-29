@@ -48,7 +48,9 @@ int echfs_dirent_read(const echfs_vfs_context_t* restrict context, uint64_t inde
         return -EINVAL;
     }
 
-    return fcache_dev_read(context->device_node, dirent_offset(context, index), out, sizeof(echfs_dirent_t));
+    uint64_t offset = dirent_offset(context, index);
+
+    return fcache_dev_read(context->device_node, offset, out, sizeof(echfs_dirent_t));
 }
 
 int echfs_dirent_write(echfs_vfs_context_t* restrict context, uint64_t index, const echfs_dirent_t* restrict entry)
@@ -57,7 +59,9 @@ int echfs_dirent_write(echfs_vfs_context_t* restrict context, uint64_t index, co
         return -EINVAL;
     }
 
-    return fcache_dev_write(context->device_node, dirent_offset(context, index), entry, sizeof(echfs_dirent_t));
+    uint64_t offset = dirent_offset(context, index);
+
+    return fcache_dev_write(context->device_node, offset, entry, sizeof(echfs_dirent_t));
 }
 
 int echfs_dirent_alloc(echfs_vfs_context_t* restrict context, uint64_t* restrict out_index)

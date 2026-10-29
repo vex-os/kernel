@@ -32,7 +32,9 @@ static bool table_load(const fat_vfs_context_t* restrict context, size_t offset,
         return false;
     }
 
-    return 0 == fcache_dev_read(context->device_node, table_offset(context, 0, offset), buffer, size);
+    uint64_t position = table_offset(context, 0, offset);
+
+    return 0 == fcache_dev_read(context->device_node, position, buffer, size);
 }
 
 static void invalidate_fsinfo(fat_vfs_context_t* restrict context)
@@ -74,7 +76,9 @@ static void table_store(fat_vfs_context_t* restrict context, size_t offset, cons
     }
 
     for(unsigned i = 0; i < context->num_tables; ++i) {
-        fcache_dev_write(context->device_node, table_offset(context, i, offset), buffer, size);
+        uint64_t position = table_offset(context, i, offset);
+
+        fcache_dev_write(context->device_node, position, buffer, size);
     }
 }
 
@@ -87,7 +91,9 @@ static bool fat12_get(const fat_vfs_context_t* restrict context, uintptr_t clust
 {
     uint16_t data;
 
-    if(!table_load(context, fat12_offset(cluster), &data, sizeof(data))) {
+    size_t position = fat12_offset(cluster);
+
+    if(!table_load(context, position, &data, sizeof(data))) {
         return false;
     }
 
@@ -106,8 +112,9 @@ static bool fat12_get(const fat_vfs_context_t* restrict context, uintptr_t clust
 static void fat12_set(fat_vfs_context_t* restrict context, uintptr_t cluster, uint16_t value)
 {
     uint16_t data;
+    size_t position = fat12_offset(cluster);
 
-    if(!table_load(context, fat12_offset(cluster), &data, sizeof(data))) {
+    if(!table_load(context, position, &data, sizeof(data))) {
         return;
     }
 
@@ -122,7 +129,7 @@ static void fat12_set(fat_vfs_context_t* restrict context, uintptr_t cluster, ui
 
     data = htole16(data);
 
-    table_store(context, fat12_offset(cluster), &data, sizeof(data));
+    table_store(context, position, &data, sizeof(data));
 }
 
 static uint32_t entry_get(const fat_vfs_context_t* restrict context, uintptr_t cluster)
@@ -315,7 +322,9 @@ void fat_cluster_free(fat_vfs_context_t* restrict context, uintptr_t cluster)
 
     entry_set(context, cluster, 0);
 
-    fcache_forget(context->device_node, fat_cluster_lba(context, cluster) * context->sector_size, context->cluster_size_b);
+    uint64_t offset = fat_cluster_lba(context, cluster) * context->sector_size;
+
+    fcache_forget(context->device_node, offset, context->cluster_size_b);
 
     if(cluster < context->next_free_hint) {
         context->next_free_hint = cluster;

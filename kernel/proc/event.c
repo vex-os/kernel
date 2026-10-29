@@ -257,7 +257,9 @@ ssize_t event_await_blocking(event_t** restrict events, size_t count)
 
 ssize_t event_await_timeout(event_t** restrict events, size_t count, uint64_t timeout_nsec)
 {
-    return await_until(events, count, deadline_after_nsec(timeout_nsec), false, nullptr, false);
+    uint64_t deadline = deadline_after_nsec(timeout_nsec);
+
+    return await_until(events, count, deadline, false, nullptr, false);
 }
 
 ssize_t event_await_interruptible(event_t** restrict events, size_t count)

@@ -788,7 +788,10 @@ static int set_owner_locked(vnode_t* restrict node, const vnode_attr_t* restrict
     }
 
     // Owner fields on disk are 16 bits wide
-    if(((attr->mask & VATTR_UID) && attr->uid > UINT16_MAX) || ((attr->mask & VATTR_GID) && attr->gid > UINT16_MAX)) {
+    bool bad_uid = (attr->mask & VATTR_UID) && attr->uid > UINT16_MAX;
+    bool bad_gid = (attr->mask & VATTR_GID) && attr->gid > UINT16_MAX;
+
+    if(bad_uid || bad_gid) {
         return -EINVAL;
     }
 

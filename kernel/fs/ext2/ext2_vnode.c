@@ -61,7 +61,9 @@ static int entry_nodetype(ext2_vfs_context_t* restrict fs_ctx, const ext2_dirent
         return retval;
     }
 
-    if(ext2_inode_nodetype(le16toh(inode.i_mode), out) < 0) {
+    uint16_t mode = le16toh(inode.i_mode);
+
+    if(ext2_inode_nodetype(mode, out) < 0) {
         *out = VNODE_FILE;
     }
 
@@ -543,7 +545,10 @@ static int link_locked(vnode_t* restrict node, const char* restrict name, vnode_
         return retval;
     }
 
-    retval = ext2_dirent_add(node, name, (uint32_t)(target->ino), file_type_of(le16toh(target_ctx->inode.i_mode)));
+    uint16_t mode = le16toh(target_ctx->inode.i_mode);
+    uint8_t file_type = file_type_of(mode);
+
+    retval = ext2_dirent_add(node, name, (uint32_t)(target->ino), file_type);
 
     if(retval < 0) {
         return retval;
@@ -1068,7 +1073,9 @@ static int ext2_vnode_fault(vnode_t* restrict node, off_t offset, pmap_t* restri
     }
 
     mutex_acquire(fs_lock(node));
-    int retval = fcache_fault(node, &ext2_bmap, offset, ext2_inode_size(&ctx->inode), pmap, virt, vprot);
+    uint64_t size = ext2_inode_size(&ctx->inode);
+
+    int retval = fcache_fault(node, &ext2_bmap, offset, size, pmap, virt, vprot);
     mutex_release(fs_lock(node));
 
     return retval;

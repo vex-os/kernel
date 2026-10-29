@@ -63,7 +63,13 @@ static bool parse_irq(const char* restrict text, unsigned flags, fwnode_resource
     const char* end;
     uint64_t number;
 
-    if(!parse_number(text, &end, &number) || (*end != ',' && *end) || number > UINT32_MAX) {
+    if(!parse_number(text, &end, &number)) {
+        return false;
+    }
+
+    bool trailing = *end != ',' && *end;
+
+    if(trailing || number > UINT32_MAX) {
         return false;
     }
 
@@ -81,7 +87,13 @@ static bool parse_dma(const char* restrict text, fwnode_resource_t* restrict res
     const char* end;
     uint64_t channel;
 
-    if(!parse_number(text, &end, &channel) || (*end != ',' && *end) || channel > UINT8_MAX) {
+    if(!parse_number(text, &end, &channel)) {
+        return false;
+    }
+
+    bool trailing = *end != ',' && *end;
+
+    if(trailing || channel > UINT8_MAX) {
         return false;
     }
 

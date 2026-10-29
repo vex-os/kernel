@@ -97,7 +97,10 @@ int arch_signal_setup(thread_t* restrict thread, hart_context_t* restrict ctx, c
     uintptr_t fpu_user = align_floor(top - fpu_state_size, FPU_STATE_ALIGN);
     uintptr_t sp = align_floor(fpu_user - sizeof(sigframe_t), 16) - sizeof(uint64_t); // As if call pushed restorer
 
-    if(top > user_end.value || ctx->amd64_rsp > user_end.value || sp >= top || sp < bottom) {
+    bool beyond_user = top > user_end.value || ctx->amd64_rsp > user_end.value;
+    bool bad_frame = sp >= top || sp < bottom;
+
+    if(beyond_user || bad_frame) {
         return -EFAULT;
     }
 

@@ -113,7 +113,9 @@ static bool parse_pinned(const char* restrict value, size_t* restrict prefix_len
     const char* end;
     unsigned long long parsed = strtoull(&value[letters], &end, 10);
 
-    if(letters == 0 || end == &value[letters] || *end != ',' || parsed >= DEV_NO_UNIT) {
+    bool malformed = letters == 0 || end == &value[letters];
+
+    if(malformed || *end != ',' || parsed >= DEV_NO_UNIT) {
         return false;
     }
 

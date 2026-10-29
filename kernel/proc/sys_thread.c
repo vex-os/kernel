@@ -10,6 +10,14 @@
 
 #include "syscall_internal.h"
 
+static bool in_user_space(const process_t* restrict process, user_addr_t address)
+{
+    virt_addr_t virt = user_addr_to_virt(address);
+    virt_addr_t user_end = pmap_user_end(process->vmspace->pmap);
+
+    return address_less(virt, user_end);
+}
+
 static intptr_t sys_thread_create(user_addr_t entry, user_addr_t stack_top, user_addr_t tcb, uintptr_t argument, user_addr_t clear_tid)
 {
     thread_t* thread = this_thread();
@@ -19,10 +27,11 @@ static intptr_t sys_thread_create(user_addr_t entry, user_addr_t stack_top, user
         return -ENOSYS;
     }
 
-    virt_addr_t user_end = pmap_user_end(process->vmspace->pmap);
+    if(!in_user_space(process, entry) || !in_user_space(process, stack_top)) {
+        return -EINVAL;
+    }
 
-    if(address_greater_equal(user_addr_to_virt(entry), user_end) || address_greater_equal(user_addr_to_virt(stack_top), user_end)
-        || address_greater_equal(user_addr_to_virt(tcb), user_end) || address_greater_equal(user_addr_to_virt(clear_tid), user_end)) {
+    if(!in_user_space(process, tcb) || !in_user_space(process, clear_tid)) {
         return -EINVAL;
     }
 
@@ -99,7 +108,7 @@ static intptr_t sys_tcb_set(user_addr_t tcb)
     }
 
     // A kernel address is useless to userspace and may not even be canonical
-    if(address_greater_equal(user_addr_to_virt(tcb), pmap_user_end(thread->process->vmspace->pmap))) {
+    if(!in_user_space(thread->process, tcb)) {
         return -EINVAL;
     }
 

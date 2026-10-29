@@ -76,7 +76,10 @@ static int setup_geometry(ext2_vfs_context_t* restrict context)
     uint32_t inodes_per_group = le32toh(super->s_inodes_per_group);
     size_t bits_per_block = block_size * 8;
 
-    if(blocks_per_group == 0 || blocks_per_group > bits_per_block || inodes_per_group == 0 || inodes_per_group > bits_per_block) {
+    bool bad_blocks = blocks_per_group == 0 || blocks_per_group > bits_per_block;
+    bool bad_inodes = inodes_per_group == 0 || inodes_per_group > bits_per_block;
+
+    if(bad_blocks || bad_inodes) {
         return -EINVAL;
     }
 
@@ -188,10 +191,14 @@ static int load_groups(ext2_vfs_context_t* restrict context)
     for(uint32_t i = 0; i < context->groups_count; ++i) {
         const ext2_group_desc_t* desc = &context->groups[i];
 
+        uint32_t block_bitmap = le32toh(desc->bg_block_bitmap);
+        uint32_t inode_bitmap = le32toh(desc->bg_inode_bitmap);
+        uint32_t inode_table = le32toh(desc->bg_inode_table);
+
         bool valid = true;
-        valid = valid && group_block_valid(context, le32toh(desc->bg_block_bitmap), 1);
-        valid = valid && group_block_valid(context, le32toh(desc->bg_inode_bitmap), 1);
-        valid = valid && group_block_valid(context, le32toh(desc->bg_inode_table), table_blocks);
+        valid = valid && group_block_valid(context, block_bitmap, 1);
+        valid = valid && group_block_valid(context, inode_bitmap, 1);
+        valid = valid && group_block_valid(context, inode_table, table_blocks);
 
         if(!valid) {
             pr_warning("ext2: %s: group %u points outside the filesystem", context->volume->name, i);
@@ -443,7 +450,9 @@ static int ext2_fill_node(vfs_t* restrict fs, vnode_t* restrict node)
     }
 
     if(retval == 0) {
-        retval = ext2_inode_nodetype(le16toh(node_context->inode.i_mode), &node->type);
+        uint16_t mode = le16toh(node_context->inode.i_mode);
+
+        retval = ext2_inode_nodetype(mode, &node->type);
     }
 
     if(retval < 0) {

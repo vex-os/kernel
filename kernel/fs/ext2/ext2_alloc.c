@@ -192,7 +192,9 @@ uint32_t ext2_block_alloc(ext2_vfs_context_t* restrict context, uint32_t goal)
         }
 
         uint32_t bit;
-        int retval = bitmap_take(context, le32toh(desc->bg_block_bitmap), 0, start, group_blocks(context, group), &bit);
+        uint32_t bitmap_block = le32toh(desc->bg_block_bitmap);
+        uint32_t limit = group_blocks(context, group);
+        int retval = bitmap_take(context, bitmap_block, 0, start, limit, &bit);
 
         if(retval < 0) {
             pr_warning("ext2: %s: no block taken from group %u: %s", context->volume->name, group, strerror(retval));
@@ -222,7 +224,8 @@ void ext2_block_free(ext2_vfs_context_t* restrict context, uint32_t block)
     uint32_t bit = (block - context->first_data_block) % context->blocks_per_group;
     ext2_group_desc_t* desc = &context->groups[group];
 
-    int retval = bitmap_put(context, le32toh(desc->bg_block_bitmap), bit);
+    uint32_t bitmap_block = le32toh(desc->bg_block_bitmap);
+    int retval = bitmap_put(context, bitmap_block, bit);
 
     if(retval < 0) {
         pr_warning("ext2: %s: failed to free block %u: %s", context->volume->name, block, strerror(retval));
@@ -270,7 +273,8 @@ uint32_t ext2_inode_alloc(ext2_vfs_context_t* restrict context, uint32_t parent_
         }
 
         uint32_t bit;
-        int retval = bitmap_take(context, le32toh(desc->bg_inode_bitmap), first, first, context->inodes_per_group, &bit);
+        uint32_t bitmap_block = le32toh(desc->bg_inode_bitmap);
+        int retval = bitmap_take(context, bitmap_block, first, first, context->inodes_per_group, &bit);
 
         if(retval < 0) {
             pr_warning("ext2: %s: no inode taken from group %u: %s", context->volume->name, group, strerror(retval));
@@ -311,7 +315,8 @@ void ext2_inode_free(ext2_vfs_context_t* restrict context, uint32_t ino, bool di
     uint32_t bit = (ino - 1) % context->inodes_per_group;
     ext2_group_desc_t* desc = &context->groups[group];
 
-    int retval = bitmap_put(context, le32toh(desc->bg_inode_bitmap), bit);
+    uint32_t bitmap_block = le32toh(desc->bg_inode_bitmap);
+    int retval = bitmap_put(context, bitmap_block, bit);
 
     if(retval < 0) {
         pr_warning("ext2: %s: failed to free inode %u: %s", context->volume->name, ino, strerror(retval));

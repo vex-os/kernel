@@ -247,7 +247,9 @@ static int acpi_node_get_address(const fwnode_t* restrict node, uint64_t* restri
 {
     uacpi_u64 value;
 
-    if(uacpi_unlikely_error(uacpi_eval_adr(namespace_node_of(node), &value))) {
+    uacpi_namespace_node* namespace_node = namespace_node_of(node);
+
+    if(uacpi_unlikely_error(uacpi_eval_adr(namespace_node, &value))) {
         return -ENOENT;
     }
 
@@ -332,8 +334,9 @@ static void acpi_node_for_each_child(const fwnode_t* restrict node, void (*callb
     walk.callback = callback;
     walk.arg = arg;
 
-    uacpi_namespace_for_each_child(namespace_node_of(node), &visit_child, nullptr, UACPI_OBJECT_DEVICE_BIT | UACPI_OBJECT_PROCESSOR_BIT, 1,
-        &walk);
+    uacpi_namespace_node* namespace_node = namespace_node_of(node);
+
+    uacpi_namespace_for_each_child(namespace_node, &visit_child, nullptr, UACPI_OBJECT_DEVICE_BIT | UACPI_OBJECT_PROCESSOR_BIT, 1, &walk);
 }
 
 static unsigned trigger_of(uacpi_u8 triggering)
@@ -528,7 +531,8 @@ static int acpi_node_for_each_resource(const fwnode_t* restrict node, void (*cal
     walk.callback = callback;
     walk.arg = arg;
 
-    uacpi_status status = uacpi_for_each_device_resource(namespace_node_of(node), "_CRS", &visit_resource, &walk);
+    uacpi_namespace_node* namespace_node = namespace_node_of(node);
+    uacpi_status status = uacpi_for_each_device_resource(namespace_node, "_CRS", &visit_resource, &walk);
 
     if(status == UACPI_STATUS_NOT_FOUND) {
         return -ENOENT;
@@ -617,8 +621,9 @@ static int route_entry(const uacpi_pci_routing_table_entry* restrict entry, fwno
 static int acpi_node_route_pci_interrupt(const fwnode_t* restrict node, unsigned slot, unsigned pin, fwnode_irq_t* restrict irq)
 {
     uacpi_pci_routing_table* table;
+    uacpi_namespace_node* namespace_node = namespace_node_of(node);
 
-    if(uacpi_unlikely_error(uacpi_get_pci_routing_table(namespace_node_of(node), &table))) {
+    if(uacpi_unlikely_error(uacpi_get_pci_routing_table(namespace_node, &table))) {
         return -ENOENT;
     }
 
@@ -728,7 +733,8 @@ static void acpi_node_eject(const fwnode_t* restrict node, int status)
     uacpi_object_unref(eject);
 
     if(uacpi_unlikely_error(result)) {
-        pr_warning("acpi: %.4s: _EJ0: %s", uacpi_namespace_node_name(namespace_node).text, uacpi_status_to_string(result));
+        uacpi_object_name name = uacpi_namespace_node_name(namespace_node);
+        pr_warning("acpi: %.4s: _EJ0: %s", name.text, uacpi_status_to_string(result));
         return;
     }
 
@@ -825,7 +831,8 @@ int fwnode_root(fwnode_t* restrict root)
 // GPEs that run _Lxx and _Exx, which send the notifications, come on with it
 static void init_acpi_notify(void)
 {
-    uacpi_status status = uacpi_install_notify_handler(uacpi_namespace_root(), &handle_notify, nullptr);
+    uacpi_namespace_node* root = uacpi_namespace_root();
+    uacpi_status status = uacpi_install_notify_handler(root, &handle_notify, nullptr);
 
     if(uacpi_unlikely_error(status)) {
         panic("acpi: notify handler: %s", uacpi_status_to_string(status));

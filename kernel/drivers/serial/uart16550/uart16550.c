@@ -448,7 +448,9 @@ static void uart16550_poll_write(serial_interface_t* restrict interface, const v
 
 static void uart16550_poll_drain(serial_interface_t* restrict interface)
 {
-    wait_transmitter(port_of(interface), LSR_THRE | LSR_TEMT);
+    uart16550_t* port = port_of(interface);
+
+    wait_transmitter(port, LSR_THRE | LSR_TEMT);
 }
 
 static void uart16550_poll_reset(serial_interface_t* restrict interface, const serial_line_t* restrict line)

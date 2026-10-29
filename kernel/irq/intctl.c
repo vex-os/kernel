@@ -106,7 +106,9 @@ static int bind_line(interrupt_line_t* restrict line)
     for(unsigned long i = 0; i < num_harts; ++i) {
         hart_local_t* hart = &harts[i];
 
-        if(hart != best && (i == 0 || (hart->flags & HART_FLAG_ONLINE)) && try_hart(line, hart)) {
+        bool eligible = hart != best && (i == 0 || (hart->flags & HART_FLAG_ONLINE));
+
+        if(eligible && try_hart(line, hart)) {
             return 0;
         }
     }

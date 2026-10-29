@@ -50,7 +50,9 @@ void fat_time_unpack(const fat_timestamp_t* restrict stamp, timespec_t* restrict
     out->tv_sec = 0;
     out->tv_nsec = 0;
 
-    if(calendar.month < 1 || calendar.month > 12 || calendar.day < 1 || stamp->tenth > 199) {
+    bool bad_month = calendar.month < 1 || calendar.month > 12;
+
+    if(bad_month || calendar.day < 1 || stamp->tenth > 199) {
         return;
     }
 

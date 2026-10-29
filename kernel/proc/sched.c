@@ -361,7 +361,8 @@ static void sched_irq_handler(unsigned number, const hart_context_t* restrict ct
             return;
         }
         else {
-            memcpy(thread_context(curr), ctx, sizeof(hart_context_t));
+            hart_context_t* saved = thread_context(curr);
+            memcpy(saved, ctx, sizeof(hart_context_t));
             arch_thread_ctx_save(curr);
 
             if(curr->state == THREAD_RUNNING) {
@@ -389,7 +390,9 @@ static void sched_irq_handler(unsigned number, const hart_context_t* restrict ct
         hart->curr_thread = hart->idle_thread;
         arch_thread_ctx_load(hart->idle_thread);
         clock_event_oneshot(sched_irq_number, SCHED_TIMESLICE_NS);
-        sched_enter(thread_context(hart->idle_thread), curr_hart_lock);
+
+        hart_context_t* idle_ctx = thread_context(hart->idle_thread);
+        sched_enter(idle_ctx, curr_hart_lock);
     }
 
     atomic_fetch_or(&hart->flags, HART_FLAG_ACTIVE, ATOMIC_SEQ_CST);
@@ -399,7 +402,8 @@ static void sched_irq_handler(unsigned number, const hart_context_t* restrict ct
     arch_thread_ctx_load(next);
     clock_event_oneshot(sched_irq_number, timeslice_of(next));
 
-    sched_enter(thread_context(next), curr_hart_lock);
+    hart_context_t* next_ctx = thread_context(next);
+    sched_enter(next_ctx, curr_hart_lock);
 }
 
 static void sched_idle(void* restrict arg)

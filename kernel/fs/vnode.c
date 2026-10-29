@@ -340,7 +340,10 @@ static int rename_crossed(vnode_t* olddir, const char* oldname, vnode_t* newdir,
         return -EROFS;
     }
 
-    if(0 == strcmp(oldname, ".") || 0 == strcmp(oldname, "..") || 0 == strcmp(newname, ".") || 0 == strcmp(newname, "..")) {
+    bool old_dots = 0 == strcmp(oldname, ".") || 0 == strcmp(oldname, "..");
+    bool new_dots = 0 == strcmp(newname, ".") || 0 == strcmp(newname, "..");
+
+    if(old_dots || new_dots) {
         return -EINVAL;
     }
 
@@ -378,13 +381,17 @@ static int rename_crossed(vnode_t* olddir, const char* oldname, vnode_t* newdir,
         retval = olddir->ops->rename(olddir, oldname, source, newdir, newname, victim);
     }
 
-    if(retval == 0 && !same_file && victim && !vcache_cached(victim)) {
-        victim->orphaned = true;
-        atomic_fetch_add(&victim->fs->orphans, 1, ATOMIC_RELAXED);
+    if(retval == 0 && !same_file) {
+        if(victim && !vcache_cached(victim)) {
+            victim->orphaned = true;
+            atomic_fetch_add(&victim->fs->orphans, 1, ATOMIC_RELAXED);
+        }
     }
 
-    if(retval == 0 && !same_file && source->type == VNODE_DIRECTORY && olddir != newdir) {
-        set_parent(source, newdir);
+    if(retval == 0 && !same_file) {
+        if(source->type == VNODE_DIRECTORY && olddir != newdir) {
+            set_parent(source, newdir);
+        }
     }
 
     mutex_release(&rename_mutex);
@@ -597,7 +604,10 @@ static void strip_file_caps(vnode_t* restrict node)
     privs_state_t state;
     privs_snapshot(target, &state);
 
-    if(target->type == VNODE_FILE && target->ops->remove_xattr && !target->fs->readonly && state.caps_state != VNODE_CAPS_NONE) {
+    bool removable = target->type == VNODE_FILE && target->ops->remove_xattr;
+    bool writable = !target->fs->readonly && state.caps_state != VNODE_CAPS_NONE;
+
+    if(removable && writable) {
         target->ops->remove_xattr(target, XATTR_SECURITY, XATTR_CAPS_NAME);
         privs_changed(target);
     }

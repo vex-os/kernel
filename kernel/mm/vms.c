@@ -162,6 +162,18 @@ static bool range_covered(vmspace_t* restrict vmspace, virt_addr_t start, virt_a
     return address_greater_equal(covered, end);
 }
 
+// A range of user memory that begins and ends below the end of the user half of the address space
+static bool user_range_ok(const vmspace_t* restrict vmspace, virt_addr_t start, size_t size)
+{
+    virt_addr_t user_end = pmap_user_end(vmspace->pmap);
+
+    if(address_greater_equal(start, user_end)) {
+        return false;
+    }
+
+    return size <= address_diff(user_end, start);
+}
+
 static bool range_valid(vmspace_t* restrict vmspace, virt_addr_t start, virt_addr_t end)
 {
     if(page_offset(start) || page_offset(end)) {
@@ -269,7 +281,9 @@ static int unshare_locked(vmspace_t* restrict vmspace, const vm_region_t* restri
         return -ENOMEM;
     }
 
-    memcpy(phys_to_virt(copy), phys_to_virt(phys), PAGE_SIZE);
+    void* target = phys_to_virt(copy);
+    void* source = phys_to_virt(phys);
+    memcpy(target, source, PAGE_SIZE);
 
     int retval = rmap_replace(vmspace->pmap, page, phys, copy, vprot);
 
@@ -369,7 +383,8 @@ static int fault_locked(vmspace_t* restrict vmspace, virt_addr_t page, unsigned 
         return -ENOMEM;
     }
 
-    memset(phys_to_virt(phys), 0, PAGE_SIZE);
+    void* data = phys_to_virt(phys);
+    memset(data, 0, PAGE_SIZE);
 
     int retval = rmap_map(vmspace->pmap, page, phys, region->vprot | VPROT_USER);
 
@@ -635,7 +650,9 @@ static vm_region_t* alloc_region(virt_addr_t start, virt_addr_t end, unsigned vp
         region->device = backing->device;
     }
 
-    if(region_counted(region) && commit_charge_replacing(region_pages(region), replaced) < 0) {
+    size_t pages = region_pages(region);
+
+    if(region_counted(region) && commit_charge_replacing(pages, replaced) < 0) {
         destroy_region(region);
         return nullptr;
     }
@@ -1095,7 +1112,9 @@ int vms_fault(vmspace_t* restrict vmspace, virt_addr_t virt, unsigned access)
 
     mutex_acquire(&vmspace->lock);
     access &= ~VPROT_USER;
-    int retval = fault_locked(vmspace, page_align(virt), access, (access & VPROT_WRITE));
+    virt_addr_t page = page_align(virt);
+
+    int retval = fault_locked(vmspace, page, access, (access & VPROT_WRITE));
     mutex_release(&vmspace->lock);
 
     return retval;
@@ -1188,7 +1207,7 @@ ssize_t vms_copyin(void* restrict dst, vmspace_t* restrict vmspace, virt_addr_t 
 {
     uint8_t* ptr = dst;
 
-    if(address_greater_equal(src, pmap_user_end(vmspace->pmap)) || size > address_diff(pmap_user_end(vmspace->pmap), src)) {
+    if(!user_range_ok(vmspace, src, size)) {
         return -EFAULT;
     }
 
@@ -1287,7 +1306,7 @@ ssize_t vms_copyout(vmspace_t* restrict vmspace, virt_addr_t dst, const void* re
 {
     const uint8_t* ptr = src;
 
-    if(address_greater_equal(dst, pmap_user_end(vmspace->pmap)) || size > address_diff(pmap_user_end(vmspace->pmap), dst)) {
+    if(!user_range_ok(vmspace, dst, size)) {
         return -EFAULT;
     }
 

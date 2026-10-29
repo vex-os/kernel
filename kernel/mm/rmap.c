@@ -147,7 +147,9 @@ int rmap_patch(pmap_t* restrict pmap, virt_addr_t virt, phys_addr_t phys, unsign
 
     int retval = -EAGAIN;
 
-    if(address_equal(phys, page_align(pmap_resolve_address(pmap, virt)))) {
+    phys_addr_t current = page_align(pmap_resolve_address(pmap, virt));
+
+    if(address_equal(phys, current)) {
         retval = pmap_patch_noflush(pmap, virt, vprot);
     }
 
@@ -169,7 +171,9 @@ phys_addr_t rmap_pin(pmap_t* restrict pmap, virt_addr_t virt, bool* restrict sol
 
     bool intr_state = spinlock_acquire_intr(lock);
 
-    bool mapped = address_equal(phys, page_align(pmap_resolve_address(pmap, virt)));
+    phys_addr_t current = page_align(pmap_resolve_address(pmap, virt));
+
+    bool mapped = address_equal(phys, current);
 
     if(mapped) {
         if(sole) {

@@ -98,7 +98,10 @@ static int fat_mount(vfs_t* restrict fs, const block_interface_t* restrict volum
     data_start += base->tables_count * fat_size;
     data_start += rootdir_sectors;
 
-    if(base->tables_count == 0 || fat_size == 0 || total_sectors <= data_start || total_sectors > volume->sector_count) {
+    bool empty = base->tables_count == 0 || fat_size == 0;
+    bool bad_size = total_sectors <= data_start || total_sectors > volume->sector_count;
+
+    if(empty || bad_size) {
         kfree(boot);
         return -EINVAL;
     }

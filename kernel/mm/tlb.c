@@ -70,7 +70,9 @@ void tlb_hart_online(void)
     hart_local_t* hart = this_hart();
 
     pmap_flush_all();
-    atomic_store_n(&hart->tlb_flushed, atomic_load_n(&tlb_generation, ATOMIC_SEQ_CST), ATOMIC_RELEASE);
+    uint64_t generation = atomic_load_n(&tlb_generation, ATOMIC_SEQ_CST);
+
+    atomic_store_n(&hart->tlb_flushed, generation, ATOMIC_RELEASE);
     atomic_store_n(&hart->tlb_online, true, ATOMIC_RELEASE);
     atomic_store_n(&tlb_ready, true, ATOMIC_RELEASE);
 }

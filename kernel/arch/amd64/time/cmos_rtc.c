@@ -196,7 +196,10 @@ static int cmos_rtc_read(rtc_t* restrict rtc, time_t* restrict out)
         calendar.year += 1900;
     }
 
-    if(calendar.month < 1 || calendar.month > 12 || calendar.day < 1 || calendar.day > 31) {
+    bool month_valid = calendar.month >= 1 && calendar.month <= 12;
+    bool day_valid = calendar.day >= 1 && calendar.day <= 31;
+
+    if(!month_valid || !day_valid) {
         return -EIO;
     }
 

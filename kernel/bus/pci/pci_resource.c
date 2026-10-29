@@ -142,8 +142,10 @@ static bool function_takes(pci_function_t* restrict function, const pci_bar_t* e
         const pci_bar_t* bar = &function->priv.bars[i];
         bool bar_is_io = bar->flags & PCI_BAR_IO;
 
-        if(bar != except && bar->length && bar->assigned && bar_is_io == is_io
-            && overlaps(start, end, bar->address, bar->address + bar->length)) {
+        bool usable = bar != except && bar->length && bar->assigned;
+        bool same_kind = bar_is_io == is_io;
+
+        if(usable && same_kind && overlaps(start, end, bar->address, bar->address + bar->length)) {
             *taken_end = bar->address + bar->length;
             return true;
         }

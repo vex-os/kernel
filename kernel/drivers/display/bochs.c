@@ -177,7 +177,9 @@ static bool mode_supported(const bochsfb_t* restrict bochsfb, const vexfb_mode_t
     bool depth_supported = mode->bpp == 16 || mode->bpp == 32 || (bochsfb->has_vga && (mode->bpp == 8 || mode->bpp == 24));
 
     // DISPI takes widths in steps of 8
-    if(!depth_supported || mode->width == 0 || mode->height == 0 || mode->width % 8) {
+    bool empty = mode->width == 0 || mode->height == 0;
+
+    if(!depth_supported || empty || mode->width % 8) {
         return false;
     }
 

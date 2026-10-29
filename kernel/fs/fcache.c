@@ -140,7 +140,9 @@ static void mark_clean(fcache_t* restrict cache, pframe_t* restrict pframe)
 
 static pframe_t* add_page(fcache_t* restrict cache, uint64_t index, phys_addr_t phys)
 {
-    memset(phys_to_virt(phys), 0, PAGE_SIZE);
+    void* data = phys_to_virt(phys);
+
+    memset(data, 0, PAGE_SIZE);
 
     pframe_t* pframe = pframe_of(phys);
     pframe->owner = cache;
@@ -596,7 +598,8 @@ ssize_t fcache_read(vnode_t* restrict node, fcache_bmap_t bmap, void* restrict b
 
         pframe->flags |= PFRAME_ACCESSED;
 
-        memcpy((uint8_t*)(buffer) + done, (const uint8_t*)(page_data(pframe)) + in_page, chunk);
+        const uint8_t* data = page_data(pframe);
+        memcpy((uint8_t*)(buffer) + done, data + in_page, chunk);
 
         done += chunk;
     }
@@ -673,7 +676,8 @@ ssize_t fcache_write(vnode_t* restrict node, fcache_bmap_t bmap, const void* res
             }
         }
 
-        memcpy((uint8_t*)(page_data(pframe)) + in_page, (const uint8_t*)(buffer) + done, chunk);
+        uint8_t* data = page_data(pframe);
+        memcpy(data + in_page, (const uint8_t*)(buffer) + done, chunk);
 
         pframe->flags |= PFRAME_UPTODATE | PFRAME_ACCESSED;
 
@@ -820,7 +824,8 @@ void fcache_truncate(vnode_t* restrict node, off_t size)
         pframe_t* pframe = radix_lookup(&cache->tree, size / PAGE_SIZE);
 
         if(pframe) {
-            memset((uint8_t*)(page_data(pframe)) + tail, 0, PAGE_SIZE - tail);
+            uint8_t* data = page_data(pframe);
+            memset(data + tail, 0, PAGE_SIZE - tail);
         }
     }
 

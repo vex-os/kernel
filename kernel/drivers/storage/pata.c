@@ -594,7 +594,9 @@ static int identify(pata_drive_t* restrict drive, uint8_t command, ata_identify_
     }
 
     move_data(channel, &cursor, sizeof(ata_identify_t), false);
-    memcpy(identify, phys_to_virt(channel->scratch_phys), sizeof(ata_identify_t));
+
+    void* scratch = phys_to_virt(channel->scratch_phys);
+    memcpy(identify, scratch, sizeof(ata_identify_t));
 
     return wait_done(channel);
 }
@@ -622,7 +624,8 @@ static int atapi_capacity(pata_drive_t* restrict drive, size_t* restrict sector_
         return -EIO;
     }
 
-    memcpy(result, phys_to_virt(channel->scratch_phys), sizeof(result));
+    void* scratch = phys_to_virt(channel->scratch_phys);
+    memcpy(result, scratch, sizeof(result));
 
     *sector_count = (size_t)(result[0]) << 24;
     *sector_count |= (size_t)(result[1]) << 16;
@@ -748,6 +751,7 @@ static unsigned drive_index(const pata_drive_t* restrict drive)
 static int register_ata(pata_drive_t* restrict drive, const ata_identify_t identify)
 {
     pata_channel_t* channel = drive->channel;
+    unsigned index = drive_index(drive);
 
     if(channel->ata_unit == nullptr) {
         int retval = dev_unit_alloc(&dev_prefix_ata, channel->device, &channel->ata_unit);
@@ -769,11 +773,11 @@ static int register_ata(pata_drive_t* restrict drive, const ata_identify_t ident
     set_limits(interface, drive->dma);
 
     if(interface->sector_size == 0 || interface->sector_size > PATA_MAX_TRANSFER) {
-        pr_verbose("pata: %s.%u: unsupported sector size %zu", channel->device->name, drive_index(drive), interface->sector_size);
+        pr_verbose("pata: %s.%u: unsupported sector size %zu", channel->device->name, index, interface->sector_size);
         return -ENOTSUP;
     }
 
-    int retval = block_interface_add_root(interface, channel->ata_unit, drive_index(drive) + 1);
+    int retval = block_interface_add_root(interface, channel->ata_unit, index + 1);
 
     if(retval < 0) {
         return retval;
@@ -792,6 +796,7 @@ static int register_ata(pata_drive_t* restrict drive, const ata_identify_t ident
 static int register_atapi(pata_drive_t* restrict drive)
 {
     pata_channel_t* channel = drive->channel;
+    unsigned index = drive_index(drive);
 
     if(channel->atapi_unit == nullptr) {
         int retval = dev_unit_alloc(&dev_prefix_atapi, channel->device, &channel->atapi_unit);
@@ -813,7 +818,7 @@ static int register_atapi(pata_drive_t* restrict drive)
 
     set_limits(&atapi->base, drive->dma);
 
-    int retval = atapi_interface_add(atapi, channel->atapi_unit, drive_index(drive) + 1);
+    int retval = atapi_interface_add(atapi, channel->atapi_unit, index + 1);
 
     if(retval < 0) {
         return retval;
@@ -830,12 +835,12 @@ static int register_atapi(pata_drive_t* restrict drive)
     mutex_release(&channel->lock);
 
     if(retval < 0) {
-        pr_verbose("pata: %s.%u: no media present", channel->device->name, drive_index(drive));
+        pr_verbose("pata: %s.%u: no media present", channel->device->name, index);
         return 0;
     }
 
     if(sector_size == 0 || sector_size > PATA_MAX_TRANSFER) {
-        pr_verbose("pata: %s.%u: unsupported sector size %zu", channel->device->name, drive_index(drive), sector_size);
+        pr_verbose("pata: %s.%u: unsupported sector size %zu", channel->device->name, index, sector_size);
         return 0;
     }
 
@@ -880,6 +885,7 @@ static int detect_drive(pata_drive_t* restrict drive, ata_identify_t data)
 static void probe_drive(pata_drive_t* restrict drive)
 {
     pata_channel_t* channel = drive->channel;
+    unsigned index = drive_index(drive);
     ata_identify_t data;
 
     mutex_acquire(&channel->lock);
@@ -895,8 +901,8 @@ static void probe_drive(pata_drive_t* restrict drive)
 
     char model[41];
     ata_identify_string(&data[ATA_IDENTIFY_MODEL_WORD], ATA_IDENTIFY_MODEL_NWORDS, model, sizeof(model));
-    pr_verbose("pata: %s.%u: model=%s atapi=%d lba48=%d dma=%d", channel->device->name, drive_index(drive), model, drive->is_atapi,
-        drive->lba48, drive->dma);
+    pr_verbose("pata: %s.%u: model=%s atapi=%d lba48=%d dma=%d", channel->device->name, index, model, drive->is_atapi, drive->lba48,
+        drive->dma);
 
     if(drive->is_atapi) {
         retval = register_atapi(drive);
@@ -906,7 +912,7 @@ static void probe_drive(pata_drive_t* restrict drive)
     }
 
     if(retval < 0) {
-        pr_warning("pata: %s.%u: %s", channel->device->name, drive_index(drive), strerror(retval));
+        pr_warning("pata: %s.%u: %s", channel->device->name, index, strerror(retval));
     }
 }
 

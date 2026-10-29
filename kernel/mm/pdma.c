@@ -116,7 +116,9 @@ void pdma_free_phys(phys_addr_t phys, size_t num_pages)
 void pdma_free_virt(void* restrict virt, size_t num_pages)
 {
     if(virt) {
-        pdma_free_phys(virt_to_phys(virt), num_pages);
+        phys_addr_t phys = virt_to_phys(virt);
+
+        pdma_free_phys(phys, num_pages);
     }
 }
 

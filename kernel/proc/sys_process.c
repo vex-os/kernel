@@ -27,7 +27,8 @@ static int copyin_string_array(user_addr_t array, const char** restrict out, cha
 
     for(; array.value; count += 1) {
         user_addr_t string;
-        ssize_t copied = user_copyin(&string, user_addr_add(array, count * sizeof(uintptr_t)), sizeof(uintptr_t));
+        user_addr_t slot = user_addr_add(array, count * sizeof(uintptr_t));
+        ssize_t copied = user_copyin(&string, slot, sizeof(uintptr_t));
 
         if(copied < 0) {
             return copied;

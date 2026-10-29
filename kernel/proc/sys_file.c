@@ -68,7 +68,8 @@ static int io_cursor_init_vector(io_cursor_t* restrict cursor, user_addr_t iov, 
 
     for(size_t i = 0; i < count; ++i) {
         iovec_t element;
-        ssize_t copied = user_copyin(&element, user_addr_add(iov, i * sizeof(element)), sizeof(element));
+        user_addr_t source = user_addr_add(iov, i * sizeof(element));
+        ssize_t copied = user_copyin(&element, source, sizeof(element));
 
         if(copied < 0) {
             return copied;
@@ -103,7 +104,8 @@ static int io_cursor_fill(io_cursor_t* restrict cursor)
         }
 
         iovec_t iov;
-        ssize_t copied = user_copyin(&iov, user_addr_add(cursor->iov, cursor->index * sizeof(iov)), sizeof(iov));
+        user_addr_t source = user_addr_add(cursor->iov, cursor->index * sizeof(iov));
+        ssize_t copied = user_copyin(&iov, source, sizeof(iov));
 
         if(copied < 0) {
             return copied;

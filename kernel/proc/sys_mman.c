@@ -41,7 +41,11 @@ static bool user_range_end(vmspace_t* restrict vmspace, virt_addr_t start, uintp
 {
     virt_addr_t user_end = pmap_user_end(vmspace->pmap);
 
-    if(length == 0 || page_offset(start) || address_greater_equal(start, user_end) || length > address_diff(user_end, start)) {
+    if(length == 0 || page_offset(start)) {
+        return false;
+    }
+
+    if(address_greater_equal(start, user_end) || length > address_diff(user_end, start)) {
         return false;
     }
 
@@ -82,7 +86,8 @@ static intptr_t map_range(vmspace_t* restrict vmspace, virt_addr_t addr, uintptr
     }
 
     virt_addr_t placed;
-    int retval = vms_map_any(vmspace, page_align_up(length), vprot, vms_flags, backing, &placed);
+    size_t size = page_align_up(length);
+    int retval = vms_map_any(vmspace, size, vprot, vms_flags, backing, &placed);
 
     if(retval < 0) {
         return retval;
@@ -97,7 +102,10 @@ static intptr_t place_mapping(vmspace_t* restrict vmspace, virt_addr_t addr, uin
     intptr_t placed = map_range(vmspace, addr, length, flags, vprot, vms_flags, backing);
 
     if(placed >= 0 && (flags & MAP_POPULATE)) {
-        vms_populate(vmspace, virt_addr(placed), address_add(virt_addr(placed), page_align_up(length)));
+        virt_addr_t start = virt_addr(placed);
+        size_t size = page_align_up(length);
+        virt_addr_t end = address_add(start, size);
+        vms_populate(vmspace, start, end);
     }
 
     return placed;
@@ -112,8 +120,14 @@ static intptr_t sys_mmap(user_addr_t addr, uintptr_t length, uintptr_t prot, uin
         return -ENOSYS;
     }
 
-    if(length == 0 || length > address_diff(pmap_user_end(process->vmspace->pmap), virt_addr(0)) || (prot & ~KNOWN_PROT)
-        || (flags & ~KNOWN_FLAGS)) {
+    virt_addr_t user_end = pmap_user_end(process->vmspace->pmap);
+    size_t user_size = address_diff(user_end, virt_addr(0));
+
+    if(length == 0 || length > user_size) {
+        return -EINVAL;
+    }
+
+    if((prot & ~KNOWN_PROT) || (flags & ~KNOWN_FLAGS)) {
         return -EINVAL;
     }
 
@@ -243,7 +257,9 @@ static intptr_t sys_msync(user_addr_t addr, uintptr_t length, uintptr_t flags)
     virt_addr_t start = user_addr_to_virt(addr);
     virt_addr_t end;
 
-    if(!user_range_end(process->vmspace, start, length, &end) || (flags & ~KNOWN_SYNC) || ((flags & MS_ASYNC) && (flags & MS_SYNC))) {
+    bool both = (flags & MS_ASYNC) && (flags & MS_SYNC);
+
+    if(!user_range_end(process->vmspace, start, length, &end) || (flags & ~KNOWN_SYNC) || both) {
         return -EINVAL;
     }
 
@@ -261,7 +277,11 @@ static intptr_t check_range(vmspace_t* restrict vmspace, virt_addr_t addr, uintp
         return -ENOMEM;
     }
 
-    return vms_check_mapped(vmspace, page_align(addr), page_align_up(address_add(addr, length)));
+    virt_addr_t first = page_align(addr);
+    virt_addr_t end = address_add(addr, length);
+    virt_addr_t last = page_align_up(end);
+
+    return vms_check_mapped(vmspace, first, last);
 }
 
 // UNDONE: MADV_WILLNEED reads ahead
@@ -298,7 +318,9 @@ static intptr_t sys_madvise(user_addr_t addr, uintptr_t length, uintptr_t advice
     intptr_t retval = check_range(process->vmspace, start, length);
 
     if(retval == 0 && advice == MADV_DONTNEED) {
-        return vms_discard(process->vmspace, start, page_align_up(address_add(start, length)));
+        virt_addr_t end = page_align_up(address_add(start, length));
+
+        return vms_discard(process->vmspace, start, end);
     }
 
     return retval;

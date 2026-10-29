@@ -101,7 +101,10 @@ static uint64_t mapped_size(const fb_interface_t* restrict fb)
 
 static bool clip_rect(const fb_interface_t* restrict fb, vexfb_rect_t* restrict rect)
 {
-    if(rect->x >= fb->info.width || rect->y >= fb->info.height || rect->width == 0 || rect->height == 0) {
+    bool outside = rect->x >= fb->info.width || rect->y >= fb->info.height;
+    bool empty = rect->width == 0 || rect->height == 0;
+
+    if(outside || empty) {
         return false;
     }
 

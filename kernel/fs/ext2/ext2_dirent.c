@@ -120,7 +120,9 @@ static int write_record(vnode_t* restrict dir, uint64_t offset, size_t rec_len, 
 
     fill_record(ctx->fs_ctx, buffer, rec_len, ino, name, file_type);
 
-    return write_exact(dir, buffer, ext2_dirent_reclen(strlen(name)), offset);
+    size_t exact_size = ext2_dirent_reclen(strlen(name));
+
+    return write_exact(dir, buffer, exact_size, offset);
 }
 
 static int directory_changed(vnode_t* restrict dir)
@@ -292,7 +294,9 @@ int ext2_dirent_add(vnode_t* restrict dir, const char* restrict name, uint32_t i
 
     fill_record(fs_ctx, record, fs_ctx->block_size, ino, name, file_type);
 
-    return append_block(dir, record, ext2_dirent_reclen(strlen(name)));
+    size_t exact_size = ext2_dirent_reclen(strlen(name));
+
+    return append_block(dir, record, exact_size);
 }
 
 int ext2_dirent_remove(vnode_t* restrict dir, uint64_t offset)

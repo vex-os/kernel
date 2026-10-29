@@ -230,7 +230,9 @@ static void release_block(ext2_vfs_context_t* restrict context, ext2_inode_t* re
     // A freed indirect block may come back as file data, which
     // its dirty pages in the device cache would then overwrite
     if(indirect) {
-        fcache_forget(context->device_node, ext2_block_offset(context, block), context->block_size);
+        uint64_t offset = ext2_block_offset(context, block);
+
+        fcache_forget(context->device_node, offset, context->block_size);
     }
 
     ext2_block_free(context, block);
@@ -446,7 +448,10 @@ bool ext2_inode_set_owner(const ext2_vfs_context_t* restrict context, ext2_inode
         limit = UINT32_MAX;
     }
 
-    if(uid < 0 || gid < 0 || (uint32_t)(uid) > limit || (uint32_t)(gid) > limit) {
+    bool negative = uid < 0 || gid < 0;
+    bool too_big = (uint32_t)(uid) > limit || (uint32_t)(gid) > limit;
+
+    if(negative || too_big) {
         return false;
     }
 

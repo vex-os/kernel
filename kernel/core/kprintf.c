@@ -209,7 +209,9 @@ void kputs(unsigned subsystem, unsigned level, unsigned flags, const char* restr
     bool intr_state = disable_interrupts();
     bool locked = ring_lock();
 
-    append_locked(subsystem, level, flags, record_time_ns(locked), text, size);
+    uint64_t time_ns = record_time_ns(locked);
+
+    append_locked(subsystem, level, flags, time_ns, text, size);
 
     append_done(locked, intr_state);
 }

@@ -12,14 +12,22 @@ static uint64_t entry_offset(const echfs_vfs_context_t* restrict context, uintpt
 
 static void set_entry(echfs_vfs_context_t* restrict context, uintptr_t block, uint64_t value)
 {
-    fcache_dev_write(context->device_node, entry_offset(context, block), &value, sizeof(value));
+    uint64_t offset = entry_offset(context, block);
+
+    fcache_dev_write(context->device_node, offset, &value, sizeof(value));
 }
 
 uint64_t echfs_block_entry(const echfs_vfs_context_t* restrict context, uintptr_t block)
 {
     uint64_t value;
 
-    if(block >= context->total_blocks || fcache_dev_read(context->device_node, entry_offset(context, block), &value, sizeof(value)) < 0) {
+    if(block >= context->total_blocks) {
+        return ECHFS_TABLE_RESERVED;
+    }
+
+    uint64_t offset = entry_offset(context, block);
+
+    if(fcache_dev_read(context->device_node, offset, &value, sizeof(value)) < 0) {
         return ECHFS_TABLE_RESERVED;
     }
 
@@ -57,7 +65,9 @@ uintptr_t echfs_block_alloc(echfs_vfs_context_t* restrict context)
                 count = end - block;
             }
 
-            if(fcache_dev_read(context->device_node, entry_offset(context, block), batch, count * sizeof(uint64_t)) < 0) {
+            uint64_t offset = entry_offset(context, block);
+
+            if(fcache_dev_read(context->device_node, offset, batch, count * sizeof(uint64_t)) < 0) {
                 return UINTPTR_MAX;
             }
 

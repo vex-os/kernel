@@ -30,7 +30,9 @@ static mmio_mapping_t* mmio_head = nullptr;
 static bool type_conflicts_nolock(phys_addr_t phys, size_t size, unsigned vprot)
 {
     for(mmio_mapping_t* it = mmio_head; it; it = it->next) {
-        bool overlaps = address_less(phys, address_add(it->phys, it->size)) && address_less(it->phys, address_add(phys, size));
+        phys_addr_t it_end = address_add(it->phys, it->size);
+        phys_addr_t end = address_add(phys, size);
+        bool overlaps = address_less(phys, it_end) && address_less(it->phys, end);
 
         if(overlaps && (it->vprot & VPROT_CACHE_MASK) != (vprot & VPROT_CACHE_MASK)) {
             return true;
@@ -43,8 +45,11 @@ static bool type_conflicts_nolock(phys_addr_t phys, size_t size, unsigned vprot)
 static mmio_mapping_t* find_reusable_nolock(phys_addr_t phys, size_t size, unsigned vprot)
 {
     for(mmio_mapping_t* it = mmio_head; it; it = it->next) {
-        if(it->refcount && it->vprot == vprot && !address_less(phys, it->phys)
-            && !address_less(address_add(it->phys, it->size), address_add(phys, size))) {
+        phys_addr_t it_end = address_add(it->phys, it->size);
+        phys_addr_t end = address_add(phys, size);
+        bool inside = !address_less(phys, it->phys) && !address_less(it_end, end);
+
+        if(it->refcount && it->vprot == vprot && inside) {
             return it;
         }
     }
@@ -113,7 +118,9 @@ void* mmio_map(phys_addr_t phys, size_t size, unsigned vprot)
     kassert(0 == (vprot & VPROT_USER));
 
     phys_addr_t phys_page = page_align(phys);
-    size_t length = address_diff(page_align_up(address_add(phys, size)), phys_page);
+    phys_addr_t end = address_add(phys, size);
+    phys_addr_t phys_end = page_align_up(end);
+    size_t length = address_diff(phys_end, phys_page);
 
     mmio_mapping_t* mapping = slab_alloc(sizeof(mmio_mapping_t));
 

@@ -253,7 +253,9 @@ static void echo(tty_interface_t* restrict interface, uint8_t byte)
 {
     const termios_t* termios = &interface->priv.termios;
 
-    if((termios->c_lflag & ECHOCTL) && iscntrl(byte) && byte != '\t' && byte != '\n') {
+    bool control = iscntrl(byte) && byte != '\t' && byte != '\n';
+
+    if((termios->c_lflag & ECHOCTL) && control) {
         output_or_drop(interface, '^');
         output_or_drop(interface, byte ^ CONTROL_FLIP);
         return;
@@ -547,7 +549,9 @@ static void end_line(tty_interface_t* restrict interface, uint8_t byte)
         return;
     }
 
-    if(byte && ((termios->c_lflag & ECHO) || (byte == '\n' && (termios->c_lflag & ECHONL)))) {
+    bool echoed = (termios->c_lflag & ECHO) || (byte == '\n' && (termios->c_lflag & ECHONL));
+
+    if(byte && echoed) {
         echo(interface, byte);
     }
 
@@ -689,7 +693,10 @@ static void receive_canonical(tty_interface_t* restrict interface, uint8_t byte)
         return;
     }
 
-    if(byte == '\n' || is_special(termios, byte, VEOL) || ((lflag & IEXTEN) && is_special(termios, byte, VEOL2))) {
+    bool line_end = byte == '\n' || is_special(termios, byte, VEOL);
+    bool extended_end = (lflag & IEXTEN) && is_special(termios, byte, VEOL2);
+
+    if(line_end || extended_end) {
         end_line(interface, byte);
         return;
     }

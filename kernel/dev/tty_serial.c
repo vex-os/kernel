@@ -142,7 +142,9 @@ static int send_break(tty_serial_t* restrict terminal, uintptr_t argument)
 static int tty_serial_ioctl(tty_interface_t* restrict interface, uint32_t request, uintptr_t argument)
 {
     if(request == TCSENDBREAK) {
-        return send_break(tty_serial_of(interface), argument);
+        tty_serial_t* terminal = tty_serial_of(interface);
+
+        return send_break(terminal, argument);
     }
 
     return -ENOTTY;

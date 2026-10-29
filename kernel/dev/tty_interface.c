@@ -335,7 +335,9 @@ static void process_input(tty_interface_t* restrict interface)
             error = tty_ring_take(flip);
         }
 
-        tty_discipline_receive(interface, tty_ring_take(flip), error);
+        uint8_t byte = tty_ring_take(flip);
+
+        tty_discipline_receive(interface, byte, error);
     }
 
     uint32_t signals = interface->priv.signals;
@@ -922,7 +924,10 @@ static uint64_t read_timeout(const termios_t* restrict termios, size_t copied)
 {
     uint64_t tenths = termios->c_cc[VTIME];
 
-    if(0 == (termios->c_lflag & ICANON) && tenths && (termios->c_cc[VMIN] == 0 || copied > 0)) {
+    bool raw = 0 == (termios->c_lflag & ICANON);
+    bool waiting = termios->c_cc[VMIN] == 0 || copied > 0;
+
+    if(raw && tenths && waiting) {
         return tenths * VTIME_UNIT_NSEC;
     }
 

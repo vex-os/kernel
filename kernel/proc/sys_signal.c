@@ -137,7 +137,10 @@ static intptr_t sys_tgkill(pid_t pid, pid_t tid, int sig)
         return -ESRCH;
     }
 
-    if(sig < 0 || sig > NSIG || pid <= 0 || tid <= 0) {
+    bool bad_signal = sig < 0 || sig > NSIG;
+    bool bad_ids = pid <= 0 || tid <= 0;
+
+    if(bad_signal || bad_ids) {
         return -EINVAL;
     }
 

@@ -132,7 +132,9 @@ static bool cursor_pixel(size_t gx, size_t gy, bool glyph)
             return !glyph;
 
         case CURSOR_FRAME:
-            if(gx == 0U || gy == 0U || gx == CURSOR_WIDTH - 1U || gy == CURSOR_HEIGHT - 1U)
+            if(gx == 0U || gx == CURSOR_WIDTH - 1U)
+                return true;
+            if(gy == 0U || gy == CURSOR_HEIGHT - 1U)
                 return true;
             return glyph;
 
