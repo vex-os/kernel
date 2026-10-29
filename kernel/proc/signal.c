@@ -290,6 +290,23 @@ static int queue_signal(process_t* restrict process, pid_t tid, int sig, pending
     return 0;
 }
 
+// Under process_group_lock, so that the exit of a parent either finds the
+// process stopped and hangs its group up, or orphans the group before the check
+static void stop_default(process_t* restrict process, int sig)
+{
+    process_group_lock_acquire();
+
+    // POSIX: the signals of a terminal do not stop a process
+    // of an orphaned group, as nobody could continue it
+    bool from_terminal = sig != SIGSTOP;
+
+    if(!from_terminal || !process_group_orphaned_locked(process->group)) {
+        job_stop(process, sig);
+    }
+
+    process_group_lock_release();
+}
+
 static bool deliver(hart_context_t* restrict ctx, bool handlers)
 {
     thread_t* thread = this_thread();
@@ -366,16 +383,8 @@ static bool deliver(hart_context_t* restrict ctx, bool handlers)
             return true;
         }
 
-        // POSIX: the signals of a terminal do not stop a process
-        // of an orphaned group, as nobody could continue it
-        bool from_terminal = default_stops(sig) && sig != SIGSTOP;
-
-        if(from_terminal && process_group_orphaned(process)) {
-            return true;
-        }
-
         if(default_stops(sig)) {
-            job_stop(process, sig);
+            stop_default(process, sig);
         }
         else {
             process_kill(process, sig);

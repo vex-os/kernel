@@ -235,15 +235,6 @@ bool process_group_orphaned_locked(const process_group_t* restrict group)
     return true;
 }
 
-bool process_group_orphaned(process_t* restrict process)
-{
-    mutex_acquire(&process_group_lock);
-    bool orphaned = process_group_orphaned_locked(process->group);
-    mutex_release(&process_group_lock);
-
-    return orphaned;
-}
-
 static bool has_stopped_member(const process_group_t* restrict group)
 {
     for(process_t* member = group->members; member; member = member->group_next) {
