@@ -41,6 +41,9 @@ and the rule for adding one are in `kernel/proc/syscall_internal.h`.
 - A subsystem split over several files keeps what they share in a local `<name>_internal.h` next to them
   (`kernel/device/device_internal.h`, `fs/fat/fat_internal.h`), included as `"<name>_internal.h"`. It is never included from outside its
   directory.
+- A filesystem has no public header. Other code reaches it through the VFS (`vfs_*`, `vnode_*`, `file_*`) and names its driver with a
+  string. A kernel service that needs files of its own gets a public header under the name of the service (`vex/shmem.h`), and keeps a
+  filesystem that no path leads to, made with `vfs_create`.
 
 ## Generic and arch code
 
