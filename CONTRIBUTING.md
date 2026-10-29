@@ -105,10 +105,12 @@ versions can format differently. `contrib/**` is excluded. Check changed files w
   `uint32_t value = UINT64_C(42);`, needs no cast. Put the operand of a cast in parentheses: `(uint32_t)(address)`, `(void*)(fault)`.
 - Do not dereference the result of a call in place (`this_hart()->caps`, `pframe_of(phys)->flags`). Put the result in a named local first
   (`hart_local_t* hart = this_hart();`), then use its fields. `(*prev)->next` in list walks is a plain pointer dereference and is fine.
-- Do not pass the result of a call as an argument of another call (`pmap_map(pmap, page_align(virt), pframe_phys(pframe), vprot)`). Put each
-  result in a named local first, so that a line has one call and the name says what the value is. A conversion of one value to another type
-  is not a call of this kind: `virt_addr(value)`, `phys_addr(value)`, `user_addr(value)` and `user_addr_to_virt(address)` stay in place,
-  as do `sizeof` and casts.
+- Do not put a call in the middle of the arguments of another call (`pmap_map(pmap, page_align(virt), pframe_phys(pframe), vprot)`), and do
+  not nest calls more than one level deep. Put the result in a named local first, so that the name says what the value is. A call that is the
+  only or the last argument is fine: `kfree(port_of(interface))`, `panic("%s", strerror(retval))`. So is a conversion of one value to another
+  type: `virt_addr(value)`, `phys_addr(value)`, `user_addr(value)`, `user_addr_to_virt(address)`, `sizeof` and casts.
+- Keep a condition short: three operands joined by `&&` or `||` at most, and on one line. Name the parts in `bool` locals
+  (`bool inside = address_less(start, end);`), or split the test into several `if` blocks that each return or continue.
 - Do not pass `int64_t`, `uint64_t`, `time_t` or other fixed-width integers to `%ld` or `%lu`. Cast to the type that the format names
   (`(long long)(x)` with `%lld`, `(unsigned long long)(x)` with `%llu`), or keep the value in that type from the start.
 - `kmalloc` is relatively heavy. Keep it off hot paths (per allocation, per write, per create); mount and setup paths are fine. Slab only
