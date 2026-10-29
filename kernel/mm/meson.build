@@ -11,6 +11,7 @@ kernel_sources += files(
     'pmap.c',
     'pslab.c',
     'rmap.c',
+    'shmem.c',
     'slab.c',
     'tlb.c',
     'uaccess.c',
