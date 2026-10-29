@@ -35,7 +35,8 @@ struct tmpfs_inode_s {
     uid_t uid;
     gid_t gid;
     unsigned nlink;
-    off_t size;
+    off_t size;   // For a symlink, the length of the target
+    char* target; // Of a symlink; no terminator. A slab object up to SLAB_MAX_SIZE bytes long, a pslab page above that
     timespec_t atime;
     timespec_t mtime;
     timespec_t ctime;

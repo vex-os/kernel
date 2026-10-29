@@ -4,6 +4,7 @@
 #include <vex/limits.h>
 #include <vex/mount.h>
 #include <vex/page.h>
+#include <vex/pslab.h>
 #include <vex/slab.h>
 #include <vex/stat.h>
 #include <vex/string.h>
@@ -143,13 +144,47 @@ static int resize_locked(vnode_t* restrict node, tmpfs_inode_t* restrict inode, 
     return 0;
 }
 
+static char* target_alloc(const char* restrict target, size_t length)
+{
+    char* copy;
+
+    if(length > SLAB_MAX_SIZE) {
+        copy = pslab_alloc_virt();
+    }
+    else {
+        copy = slab_alloc(length);
+    }
+
+    if(copy) {
+        memcpy(copy, target, length);
+    }
+
+    return copy;
+}
+
+static void target_free(char* restrict target, size_t length)
+{
+    if(length > SLAB_MAX_SIZE) {
+        pslab_free_virt(target);
+    }
+    else {
+        slab_free(target);
+    }
+}
+
+// A symlink takes the target, a copy of length bytes, and owns it only if this succeeds
 static int create_locked(vnode_t* restrict dir, const char* restrict name, unsigned type, mode_t mode,
-    const credentials_t* restrict credentials, vnode_t** restrict out)
+    const credentials_t* restrict credentials, char* restrict target, size_t length, vnode_t** restrict out)
 {
     tmpfs_inode_t* parent = dir->ctxdata;
     bool directory = type == VNODE_DIRECTORY;
+    bool symlink = type == VNODE_SYM_LINK;
 
-    if(type != VNODE_FILE && !directory) {
+    if(type != VNODE_FILE && !directory && !symlink) {
+        return -EINVAL;
+    }
+
+    if(symlink != (bool)(target)) {
         return -EINVAL;
     }
 
@@ -201,6 +236,12 @@ static int create_locked(vnode_t* restrict dir, const char* restrict name, unsig
     entry->node = node;
     entry_link(parent, entry);
 
+    if(symlink) {
+        tmpfs_inode_t* inode = node->ctxdata;
+        inode->target = target;
+        inode->size = length;
+    }
+
     if(directory) {
         node->parent = dir;
         vnode_incref(dir);
@@ -245,6 +286,10 @@ static void tmpfs_vnode_release(vnode_t* restrict node)
         tmpfs_entry_t* next = entry->next;
         slab_free(entry);
         entry = next;
+    }
+
+    if(inode->target) {
+        target_free(inode->target, inode->size);
     }
 
     slab_free(inode);
@@ -320,7 +365,7 @@ static int tmpfs_vnode_create(vnode_t* restrict node, const char* restrict name,
     vnode_t* created = nullptr;
 
     mutex_acquire(&tmpfs->lock);
-    int retval = create_locked(node, name, type, mode, credentials, &created);
+    int retval = create_locked(node, name, type, mode, credentials, nullptr, 0, &created);
     mutex_release(&tmpfs->lock);
 
     if(retval < 0) {
@@ -385,6 +430,216 @@ static int tmpfs_vnode_unlink(vnode_t* restrict node, const char* restrict name,
     }
 
     return 0;
+}
+
+static int tmpfs_vnode_link(vnode_t* restrict node, const char* restrict name, vnode_t* restrict target)
+{
+    tmpfs_t* tmpfs = tmpfs_of(node);
+    tmpfs_inode_t* dir = node->ctxdata;
+    tmpfs_inode_t* inode = target->ctxdata;
+
+    if(strlen(name) > NAME_MAX) {
+        return -ENAMETOOLONG;
+    }
+
+    tmpfs_entry_t* entry = entry_alloc(name);
+
+    if(entry == nullptr) {
+        return -ENOMEM;
+    }
+
+    mutex_acquire(&tmpfs->lock);
+
+    int retval = 0;
+
+    // A file unlinked while open has no name to link to
+    if(inode->nlink == 0) {
+        retval = -ENOENT;
+    }
+    else if(find_entry(dir, name)) {
+        retval = -EEXIST;
+    }
+
+    if(retval == 0) {
+        entry->node = target;
+        entry_link(dir, entry);
+        inode->nlink += 1;
+
+        touch(inode, false);
+        touch(dir, true);
+    }
+
+    mutex_release(&tmpfs->lock);
+
+    if(retval < 0) {
+        slab_free(entry);
+    }
+
+    return retval;
+}
+
+static int tmpfs_vnode_symlink(vnode_t* restrict node, const char* restrict name, const char* restrict target,
+    const credentials_t* restrict credentials, vnode_t** restrict out)
+{
+    tmpfs_t* tmpfs = tmpfs_of(node);
+    size_t length = strlen(target);
+
+    // The target and its path must fit the path buffer of a system call
+    if(length >= PATH_MAX) {
+        return -ENAMETOOLONG;
+    }
+
+    char* copy = target_alloc(target, length);
+
+    if(copy == nullptr) {
+        return -ENOMEM;
+    }
+
+    vnode_t* created = nullptr;
+
+    mutex_acquire(&tmpfs->lock);
+    int retval = create_locked(node, name, VNODE_SYM_LINK, S_IRWXU | S_IRWXG | S_IRWXO, credentials, copy, length, &created);
+    mutex_release(&tmpfs->lock);
+
+    if(retval < 0) {
+        target_free(copy, length);
+
+        if(created) {
+            vnode_decref(created);
+        }
+
+        return retval;
+    }
+
+    *out = created;
+
+    return 0;
+}
+
+// Moves the name of source. Returns in nameless whether victim lost its last name
+static int rename_locked(vnode_t* olddir, const char* restrict oldname, vnode_t* restrict source, vnode_t* newdir,
+    const char* restrict newname, vnode_t* restrict victim, tmpfs_entry_t* restrict entry, bool* restrict nameless)
+{
+    tmpfs_inode_t* old_parent = olddir->ctxdata;
+    tmpfs_inode_t* new_parent = newdir->ctxdata;
+    tmpfs_inode_t* moved = source->ctxdata;
+    tmpfs_entry_t* old_entry = find_entry(old_parent, oldname);
+    tmpfs_entry_t* new_entry = find_entry(new_parent, newname);
+
+    if(old_entry == nullptr || old_entry->node != source) {
+        return -ENOENT;
+    }
+
+    if(victim == nullptr && new_entry) {
+        return -EEXIST;
+    }
+
+    if(victim && (new_entry == nullptr || new_entry->node != victim)) {
+        return -ENOENT;
+    }
+
+    tmpfs_inode_t* lost = nullptr;
+
+    if(victim) {
+        lost = victim->ctxdata;
+
+        if(victim->type == VNODE_DIRECTORY && lost->first_entry) {
+            return -ENOTEMPTY;
+        }
+    }
+
+    // Nothing fails from here on
+    if(victim) {
+        entry_unlink(new_parent, new_entry);
+        slab_free(new_entry);
+    }
+
+    entry_unlink(old_parent, old_entry);
+    slab_free(old_entry);
+
+    entry->node = source;
+    entry_link(new_parent, entry);
+
+    // The links of a directory come from the ".." of its subdirectories
+    if(source->type == VNODE_DIRECTORY && old_parent != new_parent) {
+        old_parent->nlink -= 1;
+        new_parent->nlink += 1;
+    }
+
+    if(victim) {
+        if(victim->type == VNODE_DIRECTORY) {
+            lost->nlink = 0;
+            new_parent->nlink -= 1;
+        }
+        else {
+            lost->nlink -= 1;
+        }
+
+        *nameless = lost->nlink == 0;
+
+        if(*nameless) {
+            vcache_remove(victim);
+        }
+
+        touch(lost, false);
+    }
+
+    touch(old_parent, true);
+    touch(new_parent, true);
+    touch(moved, false);
+
+    return 0;
+}
+
+static int tmpfs_vnode_rename(vnode_t* olddir, const char* oldname, vnode_t* source, vnode_t* newdir, const char* newname, vnode_t* victim)
+{
+    tmpfs_t* tmpfs = tmpfs_of(olddir);
+
+    if(strlen(newname) > NAME_MAX) {
+        return -ENAMETOOLONG;
+    }
+
+    tmpfs_entry_t* entry = entry_alloc(newname);
+
+    if(entry == nullptr) {
+        return -ENOMEM;
+    }
+
+    bool nameless = false;
+
+    mutex_acquire(&tmpfs->lock);
+    int retval = rename_locked(olddir, oldname, source, newdir, newname, victim, entry, &nameless);
+    mutex_release(&tmpfs->lock);
+
+    if(retval < 0) {
+        slab_free(entry);
+        return retval;
+    }
+
+    // The caller holds a reference, so the node stays until it lets go
+    if(nameless) {
+        vnode_decref(victim);
+    }
+
+    return 0;
+}
+
+static ssize_t tmpfs_vnode_readlink(vnode_t* restrict node, char* restrict buf, size_t size)
+{
+    const tmpfs_inode_t* inode = node->ctxdata;
+
+    if(node->type != VNODE_SYM_LINK) {
+        return -EINVAL;
+    }
+
+    // The target never changes, so it needs no lock
+    if(size > (size_t)(inode->size)) {
+        size = inode->size;
+    }
+
+    memcpy(buf, inode->target, size);
+
+    return size;
 }
 
 static ssize_t tmpfs_vnode_read(vnode_t* restrict node, file_t* restrict file, void* restrict buffer, size_t size, off_t offset)
@@ -489,7 +744,10 @@ static int tmpfs_vnode_stat(vnode_t* restrict node, stat_t* restrict out)
     out->st_mtim = inode->mtime;
     out->st_ctim = inode->ctime;
     out->st_blksize = PAGE_SIZE;
-    out->st_blocks = pages_of(inode->size) * (PAGE_SIZE / 512);
+
+    if(node->type == VNODE_FILE) {
+        out->st_blocks = pages_of(inode->size) * (PAGE_SIZE / 512);
+    }
 
     mutex_release(&tmpfs->lock);
 
@@ -562,6 +820,10 @@ const vnode_ops_t tmpfs_vnode_ops = {
     .iterate = &tmpfs_vnode_iterate,
     .create = &tmpfs_vnode_create,
     .unlink = &tmpfs_vnode_unlink,
+    .rename = &tmpfs_vnode_rename,
+    .link = &tmpfs_vnode_link,
+    .symlink = &tmpfs_vnode_symlink,
+    .readlink = &tmpfs_vnode_readlink,
     .read = &tmpfs_vnode_read,
     .write = &tmpfs_vnode_write,
     .stat = &tmpfs_vnode_stat,

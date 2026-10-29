@@ -76,6 +76,31 @@ static long create_file(const char* directory, const char* name)
     return ktest_open(path, __k_O_RDWR | __k_O_CREAT | __k_O_EXCL, FILE_MODE);
 }
 
+static long link_file(const char* old_path, const char* new_path)
+{
+    return ktest_syscall5(__k_SYS_LINKAT, __k_AT_FDCWD, (long)(old_path), __k_AT_FDCWD, (long)(new_path), 0);
+}
+
+static long make_symlink(const char* target, const char* path)
+{
+    return ktest_syscall3(__k_SYS_SYMLINKAT, (long)(target), __k_AT_FDCWD, (long)(path));
+}
+
+static long read_symlink(const char* path, char* buffer, size_t size)
+{
+    return ktest_syscall4(__k_SYS_READLINKAT, __k_AT_FDCWD, (long)(path), (long)(buffer), (long)(size));
+}
+
+static long rename_path(const char* old_path, const char* new_path)
+{
+    return ktest_syscall4(__k_SYS_RENAMEAT, __k_AT_FDCWD, (long)(old_path), __k_AT_FDCWD, (long)(new_path));
+}
+
+static long stat_path(const char* path, struct __k_stat* restrict info, unsigned flags)
+{
+    return ktest_syscall4(__k_SYS_FSTATAT, __k_AT_FDCWD, (long)(path), (long)(info), flags);
+}
+
 static void get_statvfs(const char* path, struct __k_statvfs* restrict info)
 {
     long fd = ktest_open(path, __k_O_RDONLY, 0);
@@ -270,6 +295,180 @@ static void test_iteration(void)
     ktest_expect(remove_directory(directory), 0);
 }
 
+static void test_links(void)
+{
+    char first[__k_PATH_MAX];
+    char second[__k_PATH_MAX];
+    char buffer[SMALL_BUFFER];
+    struct __k_stat info;
+
+    long fd = create_file(mount_point, "link_a");
+
+    ktest_assert(fd >= 0);
+    ktest_expect(ktest_write(fd, "data", 4), 4);
+
+    path_in(first, mount_point, "link_a");
+    path_in(second, mount_point, "link_b");
+    ktest_expect(link_file(first, second), 0);
+    ktest_expect(link_file(first, second), -__k_EEXIST);
+
+    ktest_expect(stat_path(second, &info, 0), 0);
+    ktest_expect(info.st_nlink, 2);
+    ktest_expect(write_at(fd, "D", 1, 0), 1);
+
+    long other = ktest_open(second, __k_O_RDONLY, 0);
+
+    ktest_assert(other >= 0);
+    ktest_expect(read_at(other, buffer, sizeof(buffer), 0), 4);
+    ktest_expect(buffer[0], 'D');
+    ktest_close(other);
+
+    ktest_expect(remove_file(first), 0);
+    ktest_expect(stat_path(second, &info, 0), 0);
+    ktest_expect(info.st_nlink, 1);
+
+    // The open file lost its last name, and so cannot gain one
+    ktest_expect(remove_file(second), 0);
+    ktest_expect(link_file(second, first), -__k_ENOENT);
+    ktest_close(fd);
+}
+
+static void test_symlinks(void)
+{
+    char path[__k_PATH_MAX];
+    char target[__k_PATH_MAX];
+    char buffer[__k_PATH_MAX];
+    struct __k_stat info;
+
+    path_in(path, mount_point, "sym");
+    ktest_expect(make_symlink("short", path), 0);
+    ktest_expect(make_symlink("short", path), -__k_EEXIST);
+    ktest_expect(stat_path(path, &info, __k_AT_SYMLINK_NOFOLLOW), 0);
+    ktest_expect(info.st_mode & __k_S_IFMT, __k_S_IFLNK);
+    ktest_expect(info.st_size, 5);
+    ktest_expect(read_symlink(path, buffer, sizeof(buffer)), 5);
+    ktest_expect(read_symlink(path, buffer, 3), 3);
+    ktest_expect(remove_file(path), 0);
+
+    // The longest target takes a page, the next length is too long
+    memset(target, 'x', sizeof(target));
+    target[PAGE_SIZE - 1] = 0;
+    ktest_expect(make_symlink(target, path), 0);
+    ktest_expect(read_symlink(path, buffer, sizeof(buffer)), PAGE_SIZE - 1);
+    ktest_expect(memcmp(buffer, target, PAGE_SIZE - 1), 0);
+    ktest_expect(remove_file(path), 0);
+
+    // The largest target in a slab object, and the smallest one above
+    for(size_t length = PAGE_SIZE / 2; length <= PAGE_SIZE / 2 + 1; ++length) {
+        target[length] = 0;
+        ktest_expect(make_symlink(target, path), 0);
+        ktest_expect(read_symlink(path, buffer, sizeof(buffer)), (long)(length));
+        ktest_expect(memcmp(buffer, target, length), 0);
+        ktest_expect(remove_file(path), 0);
+        target[length] = 'x';
+    }
+
+    // The link leads to the file it names
+    char file[__k_PATH_MAX];
+
+    path_in(file, mount_point, "sym_file");
+    long fd = create_file(mount_point, "sym_file");
+
+    ktest_assert(fd >= 0);
+    ktest_expect(ktest_write(fd, "via", 3), 3);
+    ktest_close(fd);
+
+    ktest_expect(make_symlink(file, path), 0);
+    fd = ktest_open(path, __k_O_RDONLY, 0);
+    ktest_assert(fd >= 0);
+    ktest_expect(read_at(fd, buffer, sizeof(buffer), 0), 3);
+    ktest_close(fd);
+
+    ktest_expect(remove_file(path), 0);
+    ktest_expect(remove_file(file), 0);
+}
+
+static void test_rename(void)
+{
+    char first[__k_PATH_MAX];
+    char second[__k_PATH_MAX];
+    char directory[__k_PATH_MAX];
+    char other[__k_PATH_MAX];
+    char buffer[SMALL_BUFFER];
+    struct __k_stat info;
+    struct __k_stat parent_info;
+
+    long fd = create_file(mount_point, "ren_a");
+
+    ktest_assert(fd >= 0);
+    ktest_expect(ktest_write(fd, "one", 3), 3);
+    ktest_close(fd);
+
+    path_in(first, mount_point, "ren_a");
+    path_in(second, mount_point, "ren_b");
+    ktest_expect(rename_path(first, second), 0);
+    ktest_expect(ktest_open(first, __k_O_RDONLY, 0), -__k_ENOENT);
+    ktest_expect(rename_path(first, second), -__k_ENOENT);
+
+    // A file replaces another, and the open victim stays readable
+    fd = create_file(mount_point, "ren_c");
+    ktest_assert(fd >= 0);
+    ktest_expect(ktest_write(fd, "two", 3), 3);
+
+    path_in(other, mount_point, "ren_c");
+    ktest_expect(rename_path(second, other), 0);
+    ktest_expect(read_at(fd, buffer, sizeof(buffer), 0), 3);
+    ktest_expect(buffer[0], 't');
+    ktest_close(fd);
+
+    fd = ktest_open(other, __k_O_RDONLY, 0);
+    ktest_assert(fd >= 0);
+    ktest_expect(read_at(fd, buffer, sizeof(buffer), 0), 3);
+    ktest_expect(buffer[0], 'o');
+    ktest_close(fd);
+
+    // A directory moves between directories, and takes the link of ".." along
+    path_in(directory, mount_point, "ren_d");
+    path_in(first, mount_point, "ren_e");
+    path_in(second, directory, "moved");
+    ktest_expect(make_directory(directory), 0);
+    ktest_expect(make_directory(first), 0);
+    ktest_expect(stat_path(directory, &parent_info, 0), 0);
+    ktest_expect(parent_info.st_nlink, 2);
+
+    char moved[__k_PATH_MAX];
+
+    path_in(moved, first, "sub");
+    ktest_expect(make_directory(moved), 0);
+    ktest_expect(rename_path(moved, second), 0);
+    ktest_expect(stat_path(directory, &parent_info, 0), 0);
+    ktest_expect(parent_info.st_nlink, 3);
+    ktest_expect(stat_path(first, &info, 0), 0);
+    ktest_expect(info.st_nlink, 2);
+
+    // An empty directory replaces another, a full one does not
+    path_in(moved, first, "sub");
+    ktest_expect(make_directory(moved), 0);
+    char inner[__k_PATH_MAX];
+
+    path_in(inner, second, "inner");
+    ktest_close(create_file(second, "inner"));
+    ktest_expect(rename_path(moved, second), -__k_ENOTEMPTY);
+    ktest_expect(remove_file(inner), 0);
+    ktest_expect(rename_path(moved, second), 0);
+    ktest_expect(stat_path(directory, &parent_info, 0), 0);
+    ktest_expect(parent_info.st_nlink, 3);
+
+    // The file kinds do not mix
+    ktest_expect(rename_path(other, directory), -__k_EISDIR);
+    ktest_expect(rename_path(directory, other), -__k_ENOTDIR);
+
+    ktest_expect(remove_directory(second), 0);
+    ktest_expect(remove_directory(directory), 0);
+    ktest_expect(remove_directory(first), 0);
+    ktest_expect(remove_file(other), 0);
+}
+
 static void test_accounting(void)
 {
     long before = free_blocks(mount_point);
@@ -348,6 +547,9 @@ int main(void)
     test_mapping();
     test_directories();
     test_iteration();
+    test_links();
+    test_symlinks();
+    test_rename();
     test_accounting();
 
     path_in(path, mount_point, "map");
