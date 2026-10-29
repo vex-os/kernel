@@ -152,6 +152,9 @@ sigset_t signal_mask(thread_t* restrict thread, int how, sigset_t set);
 /// @note A handler that runs puts the mask back through sigreturn
 void signal_restore_mask(thread_t* restrict thread);
 sigset_t signal_pending(thread_t* restrict thread);
+
+/// Whether a signal that the thread could take now has a handler, so that it would return to user mode through the handler
+bool signal_handler_pending(thread_t* restrict thread) __nodiscard;
 void signal_flush(pending_signal_t* restrict queue);
 bool signal_on_altstack(const thread_t* restrict thread, uintptr_t sp) __nodiscard;
 void signal_altstack_get(const thread_t* restrict thread, uintptr_t sp, stack_t* restrict out);

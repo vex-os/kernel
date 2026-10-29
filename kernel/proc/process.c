@@ -237,6 +237,8 @@ static void begin_exit(process_t* restrict process, int exit_code, int exit_sign
         sched_kick(thread);
     }
 
+    job_wake_locked(process);
+
     spinlock_release_intr(&process->lock, intr_state);
 
     // A zombie must not keep filesystems
@@ -302,6 +304,7 @@ process_t* process_create(process_t* restrict parent)
     process->lock = SPINLOCK_INIT;
     process->fd_lock = SPINLOCK_INIT;
     event_init(&process->child_exited);
+    event_init(&process->job.resume);
     mutex_init(&process->credentials_lock);
 
     if(parent) {
@@ -458,6 +461,7 @@ void process_decref(process_t* process)
         slab_free(process->exit_note);
         signal_actions_destroy(process->signal_actions);
         mutex_deinit(&process->credentials_lock);
+        event_deinit(&process->job.resume);
         event_deinit(&process->child_exited);
         slab_free(process);
     }
@@ -518,6 +522,8 @@ int process_dethread(process_t* process, thread_t* thread)
             sched_kick(other);
         }
     }
+
+    job_wake_locked(process);
 
     // Uninterruptible: an exit meanwhile takes the other threads too,
     // so the wakeup from process_thread_reaped comes either way

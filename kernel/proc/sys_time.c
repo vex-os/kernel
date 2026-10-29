@@ -115,10 +115,24 @@ static intptr_t sys_gettimeres(uintptr_t clock, user_addr_t resolution)
 
 define_syscall(sys_gettimeres, SYS_GETTIMERES, 2);
 
+// A stop does not end the sleep: the thread parks, and the time that passed while it was stopped counts
 static ssize_t sleep_relative(uint64_t timeout, user_addr_t remaining_address)
 {
+    thread_t* thread = this_thread();
     uint64_t start = clock_source_now_ns();
-    ssize_t result = event_sleep(timeout);
+    uint64_t left = timeout;
+    ssize_t result = event_sleep(left);
+
+    while(result == -ERESTART && job_resume_wait(thread)) {
+        uint64_t elapsed = clock_source_now_ns() - start;
+
+        if(elapsed >= timeout) {
+            return 0;
+        }
+
+        left = timeout - elapsed;
+        result = event_sleep(left);
+    }
 
     if(result != -ERESTART) {
         return result;
@@ -144,24 +158,37 @@ static ssize_t sleep_relative(uint64_t timeout, user_addr_t remaining_address)
 
 static ssize_t sleep_until_monotonic(uint64_t target)
 {
-    uint64_t now = clock_source_now_ns();
+    thread_t* thread = this_thread();
 
-    if(target <= now) {
-        return 0;
+    for(;;) {
+        uint64_t now = clock_source_now_ns();
+
+        if(target <= now) {
+            return 0;
+        }
+
+        ssize_t result = event_sleep(target - now);
+
+        if(result == -ERESTART && job_resume_wait(thread)) {
+            continue;
+        }
+
+        if(result == -ERESTART) {
+            return -EINTR;
+        }
+
+        return result;
     }
-
-    ssize_t result = event_sleep(target - now);
-
-    if(result == -ERESTART) {
-        return -EINTR;
-    }
-
-    return result;
 }
 
 static ssize_t sleep_until_realtime(const timespec_t* restrict target)
 {
+    thread_t* thread = this_thread();
     ssize_t result = wallclock_wait_until(target);
+
+    while(result == -ERESTART && job_resume_wait(thread)) {
+        result = wallclock_wait_until(target);
+    }
 
     if(result == -ERESTART) {
         return -EINTR;

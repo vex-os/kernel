@@ -370,6 +370,16 @@ static intptr_t sys_sigsuspend(user_addr_t set)
     // way out, and the handler's return restores the mask
     ssize_t result = event_sleep(0);
 
+    while(result == -ERESTART && job_resume_wait(thread)) {
+        // A signal that was ignored by now has put the old mask back
+        if(!thread->sig_saved_valid) {
+            thread->sig_saved = signal_mask(thread, SIG_SETMASK, new_mask);
+            thread->sig_saved_valid = true;
+        }
+
+        result = event_sleep(0);
+    }
+
     if(result == -ERESTART) {
         return -EINTR;
     }

@@ -4,6 +4,7 @@ kernel_sources += files(
     'event.c',
     'futex.c',
     'hart.c',
+    'job.c',
     'mutex.c',
     'pgrp.c',
     'process.c',

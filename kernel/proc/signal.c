@@ -47,6 +47,18 @@ static bool default_kills(int sig)
     return action == DEFAULT_TERM || action == DEFAULT_CORE;
 }
 
+static bool default_stops(int sig)
+{
+    return default_actions[sig - 1] == DEFAULT_STOP;
+}
+
+// Nothing is left to do for these once they are sent: a continue acts at send time
+static bool default_ignores(int sig)
+{
+    uint8_t action = default_actions[sig - 1];
+    return action == DEFAULT_IGNORE || action == DEFAULT_CONT;
+}
+
 static bool ignored_locked(const process_t* restrict process, int sig)
 {
     signal_actions_t* signal_actions = process->signal_actions;
@@ -62,7 +74,7 @@ static bool ignored_locked(const process_t* restrict process, int sig)
         return true;
     }
 
-    return handler == SIG_DFL && !default_kills(sig);
+    return handler == SIG_DFL && default_ignores(sig);
 }
 
 static void queue_append(pending_signal_t** restrict queue, pending_signal_t* restrict node)
@@ -147,8 +159,69 @@ static void drop_locked(sigset_t* restrict pending, pending_signal_t** restrict 
 
 // A target thread is looked up under the locks the signal is queued under,
 // so it cannot be reaped in between; one already leaving counts as gone
+#define STOP_SIGNALS (sigbit(SIGSTOP) | sigbit(SIGTSTP) | sigbit(SIGTTIN) | sigbit(SIGTTOU))
+
+/// Drops what is pending of the signals in the mask, for the process and for each of its threads
+/// @pre Both locks are held
+static void purge_locked(process_t* restrict process, sigset_t mask, pending_signal_t** restrict dropped)
+{
+    for(int sig = 1; sig <= NSIG; sig += 1) {
+        if(mask & sigbit(sig)) {
+            drop_locked(&process->sig_pending, &process->sig_queue, sig, dropped);
+        }
+    }
+
+    for(thread_t* thread = process->threads; thread; thread = thread->process_next) {
+        for(int sig = 1; sig <= NSIG; sig += 1) {
+            if(mask & sigbit(sig)) {
+                drop_locked(&thread->sig_pending, &thread->sig_queue, sig, dropped);
+            }
+        }
+
+        recalc_locked(thread);
+    }
+}
+
+// A continue acts when it is sent, whether it is blocked,
+// ignored or caught; it and the stop signals cancel each other
+static void job_effects(process_t* restrict process, int sig)
+{
+    bool stop = sigbit(sig) & STOP_SIGNALS;
+
+    if(sig != SIGCONT && !stop) {
+        return;
+    }
+
+    signal_actions_t* signal_actions = process->signal_actions;
+    pending_signal_t* dropped = nullptr;
+    bool continued = false;
+
+    bool intr_state = spinlock_acquire_intr(&signal_actions->lock);
+    bool proc_intr_state = spinlock_acquire_intr(&process->lock);
+
+    if(stop) {
+        sigset_t continues = sigbit(SIGCONT);
+        purge_locked(process, continues, &dropped);
+    }
+    else {
+        purge_locked(process, STOP_SIGNALS, &dropped);
+        continued = job_continue_locked(process);
+    }
+
+    spinlock_release_intr(&process->lock, proc_intr_state);
+    spinlock_release_intr(&signal_actions->lock, intr_state);
+
+    signal_flush(dropped);
+
+    if(continued) {
+        job_notify_continued(process);
+    }
+}
+
 static int queue_signal(process_t* restrict process, pid_t tid, int sig, pending_signal_t* restrict node)
 {
+    job_effects(process, sig);
+
     signal_actions_t* signal_actions = process->signal_actions;
     sigset_t bit = sigbit(sig);
 
@@ -433,9 +506,19 @@ void signal_deliver(hart_context_t* restrict ctx)
     }
 
     if(!caught) {
-        signal_restore_mask(thread);
+        // A process that stops in sigsuspend is still in it when it continues
+        if(!default_stops(sig) || ignored) {
+            signal_restore_mask(thread);
+        }
 
-        if(!ignored) {
+        if(ignored) {
+            return;
+        }
+
+        if(default_stops(sig)) {
+            job_stop(process, sig);
+        }
+        else {
             process_kill(process, sig);
         }
 
@@ -534,6 +617,28 @@ sigset_t signal_pending(thread_t* restrict thread)
     spinlock_release_intr(&signal_actions->lock, intr_state);
 
     return pending;
+}
+
+bool signal_handler_pending(thread_t* restrict thread)
+{
+    process_t* process = thread->process;
+    signal_actions_t* signal_actions = process->signal_actions;
+    bool found = false;
+
+    bool intr_state = spinlock_acquire_intr(&signal_actions->lock);
+    sigset_t deliverable = (thread->sig_pending | process->sig_pending) & ~thread->sig_blocked;
+
+    for(int sig = 1; sig <= NSIG && !found; sig += 1) {
+        sighandler_t handler = signal_actions->actions[sig - 1].sa_handler;
+
+        if((deliverable & sigbit(sig)) && handler != SIG_DFL && handler != SIG_IGN) {
+            found = true;
+        }
+    }
+
+    spinlock_release_intr(&signal_actions->lock, intr_state);
+
+    return found;
 }
 
 bool signal_on_altstack(const thread_t* restrict thread, uintptr_t sp)

@@ -22,6 +22,14 @@
 
 #include "syscall_internal.h"
 
+typedef struct job_report_s job_report_t;
+
+// A stop or a continue that a waiter took from a child of the caller
+struct job_report_s {
+    pid_t pid;
+    int status;
+};
+
 static int copyin_string_array(user_addr_t array, const char** restrict out, char** restrict cursor, const char* restrict limit)
 {
     size_t count = 0;
@@ -280,6 +288,37 @@ static intptr_t collect_child(process_t* restrict target, user_addr_t wstatus)
     return retval;
 }
 
+// A stop or a continue is reported once, and the child stays where it is
+static intptr_t report_child(pid_t pid, int status, user_addr_t wstatus)
+{
+    if(wstatus.value) {
+        ssize_t copied = user_copyout(wstatus, &status, sizeof(status));
+
+        if(copied < 0) {
+            return copied;
+        }
+    }
+
+    return pid;
+}
+
+static bool take_job_report(process_t* restrict child, uintptr_t options, job_report_t* restrict out)
+{
+    if((options & WUNTRACED) && job_claim_report(child, JOB_REPORT_STOPPED)) {
+        out->pid = child->pid;
+        out->status = W_STOPCODE(child->job.stop_signal);
+        return true;
+    }
+
+    if((options & WCONTINUED) && job_claim_report(child, JOB_REPORT_CONTINUED)) {
+        out->pid = child->pid;
+        out->status = W_CONTINUED;
+        return true;
+    }
+
+    return false;
+}
+
 // A group to wait for is compared by address, which the
 // caller's reference keeps from going to another group
 static bool wait_matches(process_t* restrict child, pid_t pid, const process_group_t* restrict group)
@@ -297,6 +336,7 @@ static intptr_t wait_child(process_t* restrict caller, pid_t pid, const process_
     for(;;) {
         process_t* target = nullptr;
         bool has_match = false;
+        job_report_t report = {};
 
         bool intr_state = spinlock_acquire_intr(&caller->lock);
 
@@ -317,6 +357,15 @@ static intptr_t wait_child(process_t* restrict caller, pid_t pid, const process_
                 target = it;
                 break;
             }
+
+            if(take_job_report(it, options, &report)) {
+                break;
+            }
+        }
+
+        if(report.pid) {
+            spinlock_release_intr(&caller->lock, intr_state);
+            return report_child(report.pid, report.status, wstatus);
         }
 
         if(target == nullptr && has_match) {
@@ -435,7 +484,7 @@ define_syscall(sys_exec, SYS_EXEC, 3);
 
 static intptr_t sys_waitpid(pid_t pid, user_addr_t wstatus, uintptr_t options)
 {
-    if(options & ~(uintptr_t)(WNOHANG)) {
+    if(options & ~(uintptr_t)(WNOHANG | WUNTRACED | WCONTINUED)) {
         return -EINVAL;
     }
 

@@ -16,6 +16,7 @@ typedef struct runqueue_s runqueue_t;
 
 #define THREAD_WORK_EXIT   UINT32_C(0x00000001)
 #define THREAD_WORK_SIGNAL UINT32_C(0x00000002)
+#define THREAD_WORK_STOP   UINT32_C(0x00000004)
 
 enum {
     THREAD_RUNNABLE,

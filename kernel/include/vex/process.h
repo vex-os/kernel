@@ -22,8 +22,22 @@ typedef struct vnode_s vnode_t;
 #define PROCESS_COLLECTED 0x04U // A waiter claimed the zombie
 #define PROCESS_DID_EXEC  0x08U // Its parent can no longer move it to another group
 
+#define JOB_RUNNING 0
+#define JOB_STOPPED 1
+
+#define JOB_REPORT_STOPPED   0x01U // A stop that wait has not reported yet
+#define JOB_REPORT_CONTINUED 0x02U // A continue that wait has not reported yet
+
 typedef struct fd_slot_s fd_slot_t;
+typedef struct job_control_s job_control_t;
 typedef struct process_s process_t;
+
+struct job_control_s {
+    uint8_t state;       // Under the lock of the process
+    uint8_t stop_signal; // Under the lock; wait reads it once it holds the report
+    uint8_t report;      // Atomic operations only: a waiter takes a bit without the lock
+    event_t resume;      // Triggered under the lock of the process
+};
 
 struct fd_slot_s {
     file_t* file;
@@ -66,6 +80,8 @@ struct process_s {
 
     rlimits_t* rlimits; // Shared with the parent until one of them changes a limit, under lock
 
+    job_control_t job;
+
     signal_actions_t* signal_actions;
     pending_signal_t* exit_note;
     pending_signal_t* adopt_note;
@@ -99,6 +115,30 @@ process_t* process_locate_or_self(process_t* restrict caller, pid_t pid) __nodis
 void process_for_each(void (*callback)(process_t* restrict process, void* restrict arg), void* restrict arg);
 void process_incref(process_t* process);
 void process_decref(process_t* process);
+
+/// @note Does nothing for a process that is stopped or exiting
+void job_stop(process_t* process, int sig);
+
+/// @pre The caller holds the lock of the process
+/// @return Whether the process was stopped; if so, the caller calls job_notify_continued once it has dropped its locks
+bool job_continue_locked(process_t* process);
+void job_notify_continued(process_t* process);
+
+/// @pre The caller holds the lock of the process and has posted THREAD_WORK_EXIT to the threads that have to leave
+void job_wake_locked(process_t* process);
+
+/// @pre The thread is on its way back to user mode, with interrupts on
+void job_park(thread_t* thread);
+
+/// For a wait that ends with -ERESTART and does not restart on its own: takes the pending signals that run no handler,
+/// and parks while the process is stopped
+/// @pre The thread is in a system call
+/// @return Whether the wait goes on; if not, a handler is due or the thread has to leave, and the call returns -EINTR
+bool job_resume_wait(thread_t* thread) __nodiscard;
+
+/// @param bit JOB_REPORT_STOPPED or JOB_REPORT_CONTINUED
+/// @return Whether the caller took the report, and so tells it to the waiter
+bool job_claim_report(process_t* process, unsigned bit) __nodiscard;
 
 void process_exit(process_t* process, int exit_code);
 void process_kill(process_t* process, int sig);

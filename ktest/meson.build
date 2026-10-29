@@ -23,6 +23,7 @@ ktest_programs = [
     'process',
     'sigsuspend',
     'process_group',
+    'job',
     'exec_threads',
     'tlb_shootdown',
     'mmap_flags',
