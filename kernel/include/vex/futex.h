@@ -1,6 +1,7 @@
 #pragma once
 
 #include <usr/vex/futex.h>
+#include <vex/address.h>
 #include <vex/compiler.h>
 #include <vex/types.h>
 
@@ -19,10 +20,10 @@ typedef struct vmspace_s vmspace_t;
 /// @retval -EFAULT The address isn't mapped
 /// @retval -EINVAL The address isn't 4-byte aligned
 /// @note A shared waiter keeps its frame pinned while it sleeps
-int futex_wait(vmspace_t* restrict vmspace, uintptr_t address, uint32_t expected, uint64_t deadline, bool shared);
+int futex_wait(vmspace_t* restrict vmspace, virt_addr_t address, uint32_t expected, uint64_t deadline, bool shared);
 
 /// Wakes up to count waiters on the word, the longest waiting first
 /// @param shared As for futex_wait; wakes only the waiters that used the same kind of key
 /// @retval >=0 The number of threads woken
 /// @retval -EFAULT A shared word isn't mapped
-ssize_t futex_wake(vmspace_t* restrict vmspace, uintptr_t address, size_t count, bool shared);
+ssize_t futex_wake(vmspace_t* restrict vmspace, virt_addr_t address, size_t count, bool shared);

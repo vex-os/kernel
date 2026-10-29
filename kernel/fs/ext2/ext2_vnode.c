@@ -1059,7 +1059,7 @@ static int ext2_vnode_fsync(vnode_t* restrict node)
     return retval;
 }
 
-static int ext2_vnode_fault(vnode_t* restrict node, off_t offset, pmap_t* restrict pmap, uintptr_t virt, unsigned vprot)
+static int ext2_vnode_fault(vnode_t* restrict node, off_t offset, pmap_t* restrict pmap, virt_addr_t virt, unsigned vprot)
 {
     ext2_vnode_context_t* ctx = node->ctxdata;
 

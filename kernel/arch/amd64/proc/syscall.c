@@ -30,7 +30,7 @@ void __used amd64_syscall_handler(hart_context_t* restrict ctx)
     thread_t* thread = this_thread();
     process_t* process = thread->process;
 
-    if(process && ctx->amd64_rip >= pmap_user_end(process->vmspace->pmap)) {
+    if(process && address_greater_equal(virt_addr(ctx->amd64_rip), pmap_user_end(process->vmspace->pmap))) {
         process_kill(process, SIGSEGV);
         sched_terminate();
         unreachable();

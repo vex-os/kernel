@@ -43,7 +43,7 @@ void fcache_set_memory(fcache_t* restrict cache);
 
 ssize_t fcache_read(vnode_t* restrict node, fcache_bmap_t bmap, void* restrict buffer, size_t count, off_t offset, off_t file_size);
 ssize_t fcache_write(vnode_t* restrict node, fcache_bmap_t bmap, const void* restrict buffer, size_t count, off_t offset, off_t file_size);
-int fcache_fault(vnode_t* restrict node, fcache_bmap_t bmap, off_t offset, off_t size, pmap_t* restrict pmap, uintptr_t virt,
+int fcache_fault(vnode_t* restrict node, fcache_bmap_t bmap, off_t offset, off_t size, pmap_t* restrict pmap, virt_addr_t virt,
     unsigned vprot);
 int fcache_writeback(vnode_t* restrict node, fcache_bmap_t bmap, off_t size);
 void fcache_truncate(vnode_t* restrict node, off_t size);

@@ -22,9 +22,9 @@ pmap_t sys_pmap;
 
 static unsigned max_leaf_level = 1;
 
-static size_t pte_index(uintptr_t virt, unsigned level)
+static size_t pte_index(virt_addr_t virt, unsigned level)
 {
-    return (virt >> pmentry_level_shift(level)) & PMENTRY_LEVEL_MASK;
+    return (virt.value >> pmentry_level_shift(level)) & PMENTRY_LEVEL_MASK;
 }
 
 static pmentry_t* pmentry_get(pmentry_t* restrict table, size_t index, bool allocate)
@@ -47,7 +47,7 @@ static pmentry_t* pmentry_get(pmentry_t* restrict table, size_t index, bool allo
     return nullptr;
 }
 
-static pmentry_t* pmentry_walk(pmap_t* restrict pmap, uintptr_t virt, unsigned leaf_level, bool allocate, unsigned* restrict out_level)
+static pmentry_t* pmentry_walk(pmap_t* restrict pmap, virt_addr_t virt, unsigned leaf_level, bool allocate, unsigned* restrict out_level)
 {
     pmentry_t* table = pmap_root(pmap, virt);
     unsigned level = pmap->num_levels;
@@ -101,7 +101,7 @@ static int split_large_nolock(pmentry_t* restrict entry, unsigned level)
     return 0;
 }
 
-static int pmentry_walk_page_nolock(pmap_t* restrict pmap, uintptr_t virt, pmentry_t** restrict out)
+static int pmentry_walk_page_nolock(pmap_t* restrict pmap, virt_addr_t virt, pmentry_t** restrict out)
 {
     for(;;) {
         unsigned level;
@@ -124,7 +124,7 @@ static int pmentry_walk_page_nolock(pmap_t* restrict pmap, uintptr_t virt, pment
     }
 }
 
-static unsigned pick_leaf_level(uintptr_t virt, phys_addr_t phys, size_t size, unsigned vprot)
+static unsigned pick_leaf_level(virt_addr_t virt, phys_addr_t phys, size_t size, unsigned vprot)
 {
     if(vprot & VPROT_USER) {
         return 1;
@@ -133,7 +133,7 @@ static unsigned pick_leaf_level(uintptr_t virt, phys_addr_t phys, size_t size, u
     for(unsigned level = max_leaf_level; level > 1; level -= 1) {
         uintptr_t mask = pmentry_level_size(level) - 1;
 
-        if(0 == ((virt | phys.value) & mask) && size > mask) {
+        if(0 == ((virt.value | phys.value) & mask) && size > mask) {
             return level;
         }
     }
@@ -154,13 +154,13 @@ static void pmap_table_free(pmentry_t* restrict table, size_t begin, size_t end,
     }
 }
 
-static phys_addr_t pmap_resolve_address_nolock(pmap_t* restrict pmap, uintptr_t virt)
+static phys_addr_t pmap_resolve_address_nolock(pmap_t* restrict pmap, virt_addr_t virt)
 {
     unsigned level;
     pmentry_t* entry = pmentry_walk(pmap, virt, 1, false, &level);
 
     if(entry && pmentry_valid(*entry)) {
-        return address_add(pmentry_address(*entry, level), virt & (pmentry_level_size(level) - 1));
+        return address_add(pmentry_address(*entry, level), virt.value & (pmentry_level_size(level) - 1));
     }
 
     return phys_addr(0);
@@ -168,16 +168,16 @@ static phys_addr_t pmap_resolve_address_nolock(pmap_t* restrict pmap, uintptr_t 
 
 static int map_kernel_section(const void* restrict start, const void* restrict end, unsigned vprot)
 {
-    uintptr_t virt = page_align((uintptr_t)(start));
-    uintptr_t virt_end = page_align_up((uintptr_t)(end));
-    phys_addr_t phys = phys_addr(virt - kernel_base_virt + kernel_base_phys);
+    virt_addr_t virt = page_align(virt_addr_from_pointer(start));
+    virt_addr_t virt_end = page_align_up(virt_addr_from_pointer(end));
+    phys_addr_t phys = phys_addr(virt.value - kernel_base_virt + kernel_base_phys);
 
-    return pmap_map_range(&sys_pmap, virt, phys, virt_end - virt, vprot);
+    return pmap_map_range(&sys_pmap, virt, phys, address_diff(virt_end, virt), vprot);
 }
 
 static void map_hhdm_run(uintptr_t start, uintptr_t end)
 {
-    if(end > start && pmap_map_range(&sys_pmap, start + hhdm_base, phys_addr(start), end - start, VPROT_RW) < 0) {
+    if(end > start && pmap_map_range(&sys_pmap, virt_addr(start + hhdm_base), phys_addr(start), end - start, VPROT_RW) < 0) {
         panic("mmu: failed to map %#zx-%#zx into the HHDM", start, end);
     }
 }
@@ -233,12 +233,12 @@ pmap_t* pmap_create(void)
 
 void pmap_release(pmap_t* restrict pmap)
 {
-    pmap_table_free(pmap_root(pmap, 0), 0, PAGEMAP_USER_END, pmap->num_levels - 1);
+    pmap_table_free(pmap_root(pmap, virt_addr(0)), 0, PAGEMAP_USER_END, pmap->num_levels - 1);
     arch_pmap_free(pmap);
     slab_free(pmap);
 }
 
-int pmap_map(pmap_t* restrict pmap, uintptr_t virt, phys_addr_t phys, unsigned vprot)
+int pmap_map(pmap_t* restrict pmap, virt_addr_t virt, phys_addr_t phys, unsigned vprot)
 {
     bool intr_state = spinlock_acquire_intr(&pmap->lock);
 
@@ -262,9 +262,9 @@ int pmap_map(pmap_t* restrict pmap, uintptr_t virt, phys_addr_t phys, unsigned v
     return retval;
 }
 
-int pmap_map_range(pmap_t* restrict pmap, uintptr_t virt, phys_addr_t phys, size_t size, unsigned vprot)
+int pmap_map_range(pmap_t* restrict pmap, virt_addr_t virt, phys_addr_t phys, size_t size, unsigned vprot)
 {
-    kassert(0 == ((virt | phys.value | size) & (PAGE_SIZE - 1)));
+    kassert(0 == ((virt.value | phys.value | size) & (PAGE_SIZE - 1)));
 
     bool intr_state = spinlock_acquire_intr(&pmap->lock);
 
@@ -288,7 +288,7 @@ int pmap_map_range(pmap_t* restrict pmap, uintptr_t virt, phys_addr_t phys, size
         pmap_flush(virt);
 
         uintptr_t step = pmentry_level_size(level);
-        virt += step;
+        virt = address_add(virt, step);
         phys = address_add(phys, step);
         size -= step;
     }
@@ -298,7 +298,7 @@ int pmap_map_range(pmap_t* restrict pmap, uintptr_t virt, phys_addr_t phys, size
     return retval;
 }
 
-int pmap_patch_noflush(pmap_t* restrict pmap, uintptr_t virt, unsigned vprot)
+int pmap_patch_noflush(pmap_t* restrict pmap, virt_addr_t virt, unsigned vprot)
 {
     bool intr_state = spinlock_acquire_intr(&pmap->lock);
 
@@ -319,7 +319,7 @@ int pmap_patch_noflush(pmap_t* restrict pmap, uintptr_t virt, unsigned vprot)
     return retval;
 }
 
-int pmap_patch(pmap_t* restrict pmap, uintptr_t virt, unsigned vprot)
+int pmap_patch(pmap_t* restrict pmap, virt_addr_t virt, unsigned vprot)
 {
     int retval = pmap_patch_noflush(pmap, virt, vprot);
 
@@ -330,7 +330,7 @@ int pmap_patch(pmap_t* restrict pmap, uintptr_t virt, unsigned vprot)
     return retval;
 }
 
-int pmap_unmap_noflush(pmap_t* restrict pmap, uintptr_t virt)
+int pmap_unmap_noflush(pmap_t* restrict pmap, virt_addr_t virt)
 {
     bool intr_state = spinlock_acquire_intr(&pmap->lock);
 
@@ -347,7 +347,7 @@ int pmap_unmap_noflush(pmap_t* restrict pmap, uintptr_t virt)
     return retval;
 }
 
-int pmap_unmap(pmap_t* restrict pmap, uintptr_t virt)
+int pmap_unmap(pmap_t* restrict pmap, virt_addr_t virt)
 {
     int retval = pmap_unmap_noflush(pmap, virt);
 
@@ -358,29 +358,29 @@ int pmap_unmap(pmap_t* restrict pmap, uintptr_t virt)
     return retval;
 }
 
-int pmap_unmap_range_noflush(pmap_t* restrict pmap, uintptr_t virt, size_t size)
+int pmap_unmap_range_noflush(pmap_t* restrict pmap, virt_addr_t virt, size_t size)
 {
-    kassert(0 == ((virt | size) & (PAGE_SIZE - 1)));
+    kassert(0 == ((virt.value | size) & (PAGE_SIZE - 1)));
 
     bool intr_state = spinlock_acquire_intr(&pmap->lock);
 
-    uintptr_t end = virt + size;
+    virt_addr_t end = address_add(virt, size);
     int retval = 0;
 
-    while(virt < end) {
+    while(address_less(virt, end)) {
         unsigned level;
         pmentry_t* entry = pmentry_walk(pmap, virt, 1, false, &level);
         uintptr_t mask = pmentry_level_size(level) - 1;
 
         if(entry == nullptr || !pmentry_valid(*entry)) {
-            virt = (virt | mask) + 1;
+            virt = virt_addr((virt.value | mask) + 1);
             continue;
         }
 
-        if(0 == (virt & mask) && end - virt > mask) {
+        if(0 == (virt.value & mask) && address_diff(end, virt) > mask) {
             *entry = PMENTRY_NULL;
             pmap_flush(virt);
-            virt += mask + 1;
+            virt = address_add(virt, mask + 1);
             continue;
         }
 
@@ -396,7 +396,7 @@ int pmap_unmap_range_noflush(pmap_t* restrict pmap, uintptr_t virt, size_t size)
     return retval;
 }
 
-phys_addr_t pmap_resolve_address(pmap_t* restrict pmap, uintptr_t virt)
+phys_addr_t pmap_resolve_address(pmap_t* restrict pmap, virt_addr_t virt)
 {
     bool intr_state = spinlock_acquire_intr(&pmap->lock);
     phys_addr_t result = pmap_resolve_address_nolock(pmap, virt);
@@ -404,7 +404,7 @@ phys_addr_t pmap_resolve_address(pmap_t* restrict pmap, uintptr_t virt)
     return result;
 }
 
-unsigned pmap_resolve_vprot(pmap_t* restrict pmap, uintptr_t virt)
+unsigned pmap_resolve_vprot(pmap_t* restrict pmap, virt_addr_t virt)
 {
     bool intr_state = spinlock_acquire_intr(&pmap->lock);
 

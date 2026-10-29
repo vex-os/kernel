@@ -77,9 +77,9 @@ static void unlink_locked(futex_bucket_t* restrict bucket, futex_waiter_t* restr
     waiter->queued = false;
 }
 
-int futex_wait(vmspace_t* restrict vmspace, uintptr_t address, uint32_t expected, uint64_t deadline, bool shared)
+int futex_wait(vmspace_t* restrict vmspace, virt_addr_t address, uint32_t expected, uint64_t deadline, bool shared)
 {
-    if(address % sizeof(uint32_t)) {
+    if(address.value % sizeof(uint32_t)) {
         return -EINVAL;
     }
 
@@ -101,7 +101,7 @@ int futex_wait(vmspace_t* restrict vmspace, uintptr_t address, uint32_t expected
     }
     else {
         waiter.vmspace = vmspace;
-        waiter.address = address;
+        waiter.address = address.value;
     }
 
     futex_bucket_t* bucket = bucket_of(waiter.vmspace, waiter.address);
@@ -174,10 +174,10 @@ int futex_wait(vmspace_t* restrict vmspace, uintptr_t address, uint32_t expected
     return 0; // Spurious, the caller looks at the word again anyway
 }
 
-ssize_t futex_wake(vmspace_t* restrict vmspace, uintptr_t address, size_t count, bool shared)
+ssize_t futex_wake(vmspace_t* restrict vmspace, virt_addr_t address, size_t count, bool shared)
 {
     const vmspace_t* key_vmspace = vmspace;
-    uintptr_t key_address = address;
+    uintptr_t key_address = address.value;
     phys_addr_t phys = phys_addr(0);
 
     if(shared) {

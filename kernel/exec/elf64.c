@@ -76,7 +76,7 @@ static bool segment_loads_range(const elf64_phdr_t* restrict phdr, uint64_t offs
 
 static int copy_page(vmspace_t* restrict vmspace, file_t* restrict file, const elf64_phdr_t* restrict phdr, uintptr_t page)
 {
-    phys_addr_t phys = vms_touch(vmspace, page);
+    phys_addr_t phys = vms_touch(vmspace, virt_addr(page));
 
     if(address_null(phys)) {
         return -ENOMEM;
@@ -147,7 +147,7 @@ static int map_segment(vmspace_t* restrict vmspace, file_t* restrict file, const
 
         *mapped_vprot |= vprot;
 
-        int retval = vms_protect(vmspace, seg_start, *mapped_end, *mapped_vprot);
+        int retval = vms_protect(vmspace, virt_addr(seg_start), virt_addr(*mapped_end), *mapped_vprot);
 
         if(retval == 0) {
             retval = copy_page(vmspace, file, phdr, seg_start);
@@ -168,7 +168,7 @@ static int map_segment(vmspace_t* restrict vmspace, file_t* restrict file, const
         backing.may_write = true;
         backing.device = false;
 
-        int retval = vms_map(vmspace, map_start, file_end, vprot, 0, &backing);
+        int retval = vms_map(vmspace, virt_addr(map_start), virt_addr(file_end), vprot, 0, &backing);
 
         if(retval < 0) {
             return retval;
@@ -182,7 +182,7 @@ static int map_segment(vmspace_t* restrict vmspace, file_t* restrict file, const
     }
 
     if(anon_start < seg_end) {
-        int retval = vms_map(vmspace, anon_start, seg_end, vprot, 0, nullptr);
+        int retval = vms_map(vmspace, virt_addr(anon_start), virt_addr(seg_end), vprot, 0, nullptr);
 
         if(retval < 0) {
             return retval;
@@ -364,7 +364,7 @@ static int elf64_setup(vmspace_t* restrict vmspace, file_t* restrict file, const
         return -ENOEXEC;
     }
 
-    uintptr_t user_end = pmap_user_end(vmspace->pmap);
+    uintptr_t user_end = pmap_user_end(vmspace->pmap).value;
 
     // A kernel or non-canonical entry point
     // faults in kernel mode on the way to user mode
@@ -428,14 +428,14 @@ static int elf64_setup(vmspace_t* restrict vmspace, file_t* restrict file, const
         }
     }
 
-    retval = vms_map(vmspace, ELF64_STACK_TOP - ELF64_STACK_SIZE, ELF64_STACK_TOP, VPROT_RW, 0, nullptr);
+    retval = vms_map(vmspace, virt_addr(ELF64_STACK_TOP - ELF64_STACK_SIZE), virt_addr(ELF64_STACK_TOP), VPROT_RW, 0, nullptr);
 
     if(retval < 0) {
         goto error;
     }
 
     // Arguments only get the topmost page, the rest is zeroed on first touch
-    phys_addr_t args_phys = vms_touch(vmspace, ELF64_STACK_TOP - PAGE_SIZE);
+    phys_addr_t args_phys = vms_touch(vmspace, virt_addr(ELF64_STACK_TOP - PAGE_SIZE));
 
     if(address_null(args_phys)) {
         retval = -ENOMEM;

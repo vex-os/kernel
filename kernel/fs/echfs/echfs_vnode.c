@@ -970,7 +970,7 @@ static ssize_t echfs_vnode_write(vnode_t* restrict node, file_t* restrict file, 
     return retval;
 }
 
-static int echfs_vnode_fault(vnode_t* restrict node, off_t offset, pmap_t* restrict pmap, uintptr_t virt, unsigned vprot)
+static int echfs_vnode_fault(vnode_t* restrict node, off_t offset, pmap_t* restrict pmap, virt_addr_t virt, unsigned vprot)
 {
     echfs_vnode_context_t* ctx = node->ctxdata;
 

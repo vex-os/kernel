@@ -58,8 +58,8 @@ static void unmap_pages(uintptr_t stack_bottom, size_t count)
 
     for(size_t i = 0U; i < count; ++i) {
         uintptr_t virt = stack_bottom + i * PAGE_SIZE;
-        phys[i] = page_align(pmap_resolve_address(&sys_pmap, virt));
-        pmap_unmap_noflush(&sys_pmap, virt);
+        phys[i] = page_align(pmap_resolve_address(&sys_pmap, virt_addr(virt)));
+        pmap_unmap_noflush(&sys_pmap, virt_addr(virt));
     }
 
     tlb_shootdown();
@@ -82,7 +82,7 @@ void* kstack_alloc(void)
     for(size_t i = 0U; i < KSTACK_PAGES; ++i) {
         phys_addr_t phys = pslab_alloc_phys();
 
-        if(address_null(phys) || pmap_map(&sys_pmap, stack_bottom + i * PAGE_SIZE, phys, VPROT_RW) < 0) {
+        if(address_null(phys) || pmap_map(&sys_pmap, virt_addr(stack_bottom + i * PAGE_SIZE), phys, VPROT_RW) < 0) {
             pslab_free_phys(phys);
             unmap_pages(stack_bottom, i);
             release_slot(slot);

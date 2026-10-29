@@ -12,33 +12,33 @@ typedef struct rmap_entry_s rmap_entry_t;
 struct rmap_entry_s {
     rmap_entry_t* next;
     pmap_t* pmap;
-    uintptr_t virt;
+    virt_addr_t virt;
 };
 
 /// Maps the frame, which hands the new mapping one of the caller's references to it
 /// @pre The caller holds the vmspace lock of the page table
-int rmap_map(pmap_t* restrict pmap, uintptr_t virt, phys_addr_t phys, unsigned vprot);
+int rmap_map(pmap_t* restrict pmap, virt_addr_t virt, phys_addr_t phys, unsigned vprot);
 
 /// @pre The caller holds the vmspace lock of the page table
 /// @post The caller runs tlb_shootdown, which this leaves out
 /// @return The frame that was mapped, its mapping's reference now the caller's, or zero when nothing was
-phys_addr_t rmap_unmap(pmap_t* restrict pmap, uintptr_t virt) __nodiscard;
+phys_addr_t rmap_unmap(pmap_t* restrict pmap, virt_addr_t virt) __nodiscard;
 
 /// Moves the mapping at virt to another frame, the mapping's reference going with it
 /// @pre The caller holds the vmspace lock of the page table
 /// @post The caller runs tlb_shootdown, which this leaves out
 /// @retval -EAGAIN A walker took the mapping of old_phys away meanwhile
-int rmap_replace(pmap_t* restrict pmap, uintptr_t virt, phys_addr_t old_phys, phys_addr_t new_phys, unsigned vprot);
+int rmap_replace(pmap_t* restrict pmap, virt_addr_t virt, phys_addr_t old_phys, phys_addr_t new_phys, unsigned vprot);
 
 /// @pre The caller holds the vmspace lock of the page table
 /// @post The caller runs tlb_shootdown, which this leaves out
 /// @retval -EAGAIN The page at virt is no longer the one at phys
-int rmap_patch(pmap_t* restrict pmap, uintptr_t virt, phys_addr_t phys, unsigned vprot);
+int rmap_patch(pmap_t* restrict pmap, virt_addr_t virt, phys_addr_t phys, unsigned vprot);
 
 /// @pre The caller holds the vmspace lock of the page table
 /// @param sole Set when this mapping is the frame's only one and no file cache owns it, nullptr if unwanted
 /// @return The frame mapped at virt with a new reference to it, or zero when nothing is mapped
-phys_addr_t rmap_pin(pmap_t* restrict pmap, uintptr_t virt, bool* restrict sole) __nodiscard;
+phys_addr_t rmap_pin(pmap_t* restrict pmap, virt_addr_t virt, bool* restrict sole) __nodiscard;
 
 /// Takes every mapping of the frame away, from any page table and without its vmspace lock
 /// @post The caller runs tlb_shootdown, which this leaves out

@@ -42,10 +42,10 @@ static vm_region_t* device_regions = nullptr;
 static_assert(sizeof(vm_region_t) <= SLAB_MAX_SIZE);
 static_assert(sizeof(vmspace_t) <= SLAB_MAX_SIZE);
 
-static vm_region_t* find_region(vmspace_t* restrict vmspace, uintptr_t virt)
+static vm_region_t* find_region(vmspace_t* restrict vmspace, virt_addr_t virt)
 {
-    for(vm_region_t* it = vmspace->regions; it && it->start <= virt; it = it->next) {
-        if(virt < it->end) {
+    for(vm_region_t* it = vmspace->regions; it && address_less_equal(it->start, virt); it = it->next) {
+        if(address_less(virt, it->end)) {
             return it;
         }
     }
@@ -53,10 +53,10 @@ static vm_region_t* find_region(vmspace_t* restrict vmspace, uintptr_t virt)
     return nullptr;
 }
 
-static bool range_free(vmspace_t* restrict vmspace, uintptr_t start, uintptr_t end)
+static bool range_free(vmspace_t* restrict vmspace, virt_addr_t start, virt_addr_t end)
 {
-    for(vm_region_t* it = vmspace->regions; it && it->start < end; it = it->next) {
-        if(it->end > start) {
+    for(vm_region_t* it = vmspace->regions; it && address_less(it->start, end); it = it->next) {
+        if(address_greater(it->end, start)) {
             return false;
         }
     }
@@ -99,7 +99,7 @@ static void insert_region(vmspace_t* restrict vmspace, vm_region_t* restrict reg
 {
     vm_region_t** prev = &vmspace->regions;
 
-    while(*prev && (*prev)->start < region->start) {
+    while(*prev && address_less((*prev)->start, region->start)) {
         prev = &(*prev)->next;
     }
 
@@ -109,11 +109,11 @@ static void insert_region(vmspace_t* restrict vmspace, vm_region_t* restrict reg
     track_device_region(vmspace, region);
 }
 
-static int split_region(vmspace_t* restrict vmspace, uintptr_t virt)
+static int split_region(vmspace_t* restrict vmspace, virt_addr_t virt)
 {
     vm_region_t* region = find_region(vmspace, virt);
 
-    if(region == nullptr || region->start == virt) {
+    if(region == nullptr || address_equal(region->start, virt)) {
         return 0;
     }
 
@@ -127,7 +127,7 @@ static int split_region(vmspace_t* restrict vmspace, uintptr_t virt)
     upper->end = region->end;
     upper->vprot = region->vprot;
     upper->file = file_dupe(region->file);
-    upper->file_offset = region->file_offset + (virt - region->start);
+    upper->file_offset = region->file_offset + address_diff(virt, region->start);
     upper->shared = region->shared;
     upper->may_write = region->may_write;
     upper->device = region->device;
@@ -150,24 +150,25 @@ static int split_region(vmspace_t* restrict vmspace, uintptr_t virt)
     return 0;
 }
 
-static bool range_covered(vmspace_t* restrict vmspace, uintptr_t start, uintptr_t end)
+static bool range_covered(vmspace_t* restrict vmspace, virt_addr_t start, virt_addr_t end)
 {
-    uintptr_t covered = start;
+    virt_addr_t covered = start;
 
-    for(vm_region_t* it = find_region(vmspace, start); it && it->start <= covered && covered < end; it = it->next) {
+    for(vm_region_t* it = find_region(vmspace, start); it && address_less_equal(it->start, covered) && address_less(covered, end);
+        it = it->next) {
         covered = it->end;
     }
 
-    return covered >= end;
+    return address_greater_equal(covered, end);
 }
 
-static bool range_valid(vmspace_t* restrict vmspace, uintptr_t start, uintptr_t end)
+static bool range_valid(vmspace_t* restrict vmspace, virt_addr_t start, virt_addr_t end)
 {
     if(page_offset(start) || page_offset(end)) {
         return false;
     }
 
-    return start < end && end <= pmap_user_end(vmspace->pmap);
+    return address_less(start, end) && address_less_equal(end, pmap_user_end(vmspace->pmap));
 }
 
 static void put_frame(phys_addr_t phys)
@@ -190,30 +191,22 @@ static bool region_counted(const vm_region_t* restrict region)
 
 static size_t region_pages(const vm_region_t* restrict region)
 {
-    return page_count(region->end - region->start);
+    return page_count(address_diff(region->end, region->start));
 }
 
-static size_t counted_pages_in(vmspace_t* restrict vmspace, uintptr_t start, uintptr_t end)
+static size_t counted_pages_in(vmspace_t* restrict vmspace, virt_addr_t start, virt_addr_t end)
 {
     size_t pages = 0U;
 
-    for(const vm_region_t* it = vmspace->regions; it && it->start < end; it = it->next) {
-        if(it->end <= start || !region_counted(it)) {
+    for(const vm_region_t* it = vmspace->regions; it && address_less(it->start, end); it = it->next) {
+        if(address_less_equal(it->end, start) || !region_counted(it)) {
             continue;
         }
 
-        uintptr_t overlap_start = it->start;
-        uintptr_t overlap_end = it->end;
+        virt_addr_t overlap_start = address_max(it->start, start);
+        virt_addr_t overlap_end = address_min(it->end, end);
 
-        if(overlap_start < start) {
-            overlap_start = start;
-        }
-
-        if(overlap_end > end) {
-            overlap_end = end;
-        }
-
-        pages += page_count(overlap_end - overlap_start);
+        pages += page_count(address_diff(overlap_end, overlap_start));
     }
 
     return pages;
@@ -247,7 +240,7 @@ static void free_region(vm_region_t* restrict region, bool deferred)
     event_trigger(&stale_wakeup, true);
 }
 
-static int unshare_locked(vmspace_t* restrict vmspace, const vm_region_t* restrict region, uintptr_t page)
+static int unshare_locked(vmspace_t* restrict vmspace, const vm_region_t* restrict region, virt_addr_t page)
 {
     unsigned vprot = region->vprot | VPROT_USER;
     bool sole;
@@ -296,13 +289,13 @@ static int unshare_locked(vmspace_t* restrict vmspace, const vm_region_t* restri
 
 // Device pages have no pframe, so they stay out of the rmap, and no write faults are needed
 // to track them dirty: they map with the region's vprot. The caller holds device_regions_lock
-static int fault_device_locked(vmspace_t* restrict vmspace, const vm_region_t* restrict region, uintptr_t page)
+static int fault_device_locked(vmspace_t* restrict vmspace, const vm_region_t* restrict region, virt_addr_t page)
 {
     if(address_valid(pmap_resolve_address(vmspace->pmap, page))) {
         return 0;
     }
 
-    off_t offset = region->file_offset + (page - region->start);
+    off_t offset = region->file_offset + address_diff(page, region->start);
     phys_addr_t phys;
     unsigned cache;
     int retval = vnode_resolve_page(region->file->node, offset, &phys, &cache);
@@ -314,7 +307,7 @@ static int fault_device_locked(vmspace_t* restrict vmspace, const vm_region_t* r
     return pmap_map(vmspace->pmap, page, phys, region->vprot | (cache & VPROT_CACHE_MASK) | VPROT_USER);
 }
 
-static int fault_locked(vmspace_t* restrict vmspace, uintptr_t page, unsigned access, bool exclusive)
+static int fault_locked(vmspace_t* restrict vmspace, virt_addr_t page, unsigned access, bool exclusive)
 {
     vm_region_t* region = find_region(vmspace, page);
 
@@ -356,7 +349,7 @@ static int fault_locked(vmspace_t* restrict vmspace, uintptr_t page, unsigned ac
 
         // A private page starts out as the file's own, and a write copies it on the next pass;
         // a shared one only becomes writable through a write fault, which marks it dirty
-        off_t offset = region->file_offset + (page - region->start);
+        off_t offset = region->file_offset + address_diff(page, region->start);
         unsigned vprot = region->vprot | VPROT_USER;
 
         if(!region->shared || !exclusive) {
@@ -388,9 +381,9 @@ static int fault_locked(vmspace_t* restrict vmspace, uintptr_t page, unsigned ac
     return 0;
 }
 
-static phys_addr_t pin_locked(vmspace_t* restrict vmspace, uintptr_t virt, unsigned access, bool exclusive)
+static phys_addr_t pin_locked(vmspace_t* restrict vmspace, virt_addr_t virt, unsigned access, bool exclusive)
 {
-    uintptr_t page = page_align(virt);
+    virt_addr_t page = page_align(virt);
     phys_addr_t phys = phys_addr(0);
 
     vm_region_t* region = find_region(vmspace, page);
@@ -421,7 +414,8 @@ static bool vms_current(const vmspace_t* restrict vmspace)
 // Gives where the byte at virt can be reached from the kernel until access_end, which a non-null
 // result needs. Device memory is neither pinnable nor in the HHDM, so it is reached through the
 // user's own mapping, and device_regions_lock keeps vms_revoke from taking it away meanwhile
-static void* access_begin_locked(vmspace_t* restrict vmspace, uintptr_t virt, unsigned access, bool exclusive, user_access_t* restrict out)
+static void* access_begin_locked(vmspace_t* restrict vmspace, virt_addr_t virt, unsigned access, bool exclusive,
+    user_access_t* restrict out)
 {
     vm_region_t* region = find_region(vmspace, virt);
 
@@ -444,7 +438,7 @@ static void* access_begin_locked(vmspace_t* restrict vmspace, uintptr_t virt, un
 
         out->device = true;
 
-        return (void*)(virt);
+        return virt_addr_pointer(virt);
     }
 
     out->pinned = pin_locked(vmspace, virt, access, exclusive);
@@ -490,7 +484,7 @@ static void release_device_pages(vmspace_t* restrict vmspace, const vm_region_t*
 
     bool unmapped = false;
 
-    for(uintptr_t page = region->start; page < region->end; page += PAGE_SIZE) {
+    for(virt_addr_t page = region->start; address_less(page, region->end); page = address_add(page, PAGE_SIZE)) {
         if(0 == pmap_unmap_noflush(vmspace->pmap, page)) {
             unmapped = true;
         }
@@ -501,10 +495,10 @@ static void release_device_pages(vmspace_t* restrict vmspace, const vm_region_t*
     }
 }
 
-static void release_range(vmspace_t* restrict vmspace, uintptr_t start, uintptr_t end, phys_addr_t* restrict batch, size_t* restrict count,
-    bool shootdown)
+static void release_range(vmspace_t* restrict vmspace, virt_addr_t start, virt_addr_t end, phys_addr_t* restrict batch,
+    size_t* restrict count, bool shootdown)
 {
-    for(uintptr_t page = start; page < end; page += PAGE_SIZE) {
+    for(virt_addr_t page = start; address_less(page, end); page = address_add(page, PAGE_SIZE)) {
         phys_addr_t phys = rmap_unmap(vmspace->pmap, page);
 
         if(address_null(phys)) {
@@ -548,7 +542,7 @@ static void unmap_all_locked(vmspace_t* restrict vmspace, bool shootdown, bool d
 }
 
 // Holes in the range are fine, as with munmap
-static int unmap_locked(vmspace_t* restrict vmspace, uintptr_t start, uintptr_t end)
+static int unmap_locked(vmspace_t* restrict vmspace, virt_addr_t start, virt_addr_t end)
 {
     int retval = split_region(vmspace, start);
 
@@ -565,10 +559,10 @@ static int unmap_locked(vmspace_t* restrict vmspace, uintptr_t start, uintptr_t 
 
     vm_region_t** prev = &vmspace->regions;
 
-    while(*prev && (*prev)->start < end) {
+    while(*prev && address_less((*prev)->start, end)) {
         vm_region_t* region = *prev;
 
-        if(region->start < start) {
+        if(address_less(region->start, start)) {
             prev = &region->next;
             continue;
         }
@@ -584,28 +578,29 @@ static int unmap_locked(vmspace_t* restrict vmspace, uintptr_t start, uintptr_t 
     return 0;
 }
 
-static bool find_highest_gap(vmspace_t* restrict vmspace, size_t size, uintptr_t* restrict out)
+static bool find_highest_gap(vmspace_t* restrict vmspace, size_t size, virt_addr_t* restrict out)
 {
-    uintptr_t gap_start = VMS_MMAP_MIN;
+    virt_addr_t gap_start = virt_addr(VMS_MMAP_MIN);
+    virt_addr_t top = virt_addr(VMS_MMAP_TOP);
     bool found = false;
 
     for(vm_region_t* it = vmspace->regions;; it = it->next) {
-        uintptr_t gap_end = VMS_MMAP_TOP;
+        virt_addr_t gap_end = top;
 
-        if(it && it->start < VMS_MMAP_TOP) {
+        if(it && address_less(it->start, top)) {
             gap_end = it->start;
         }
 
-        if(gap_end > gap_start && gap_end - gap_start >= size) {
-            *out = gap_end - size;
+        if(address_greater(gap_end, gap_start) && address_diff(gap_end, gap_start) >= size) {
+            *out = address_sub(gap_end, size);
             found = true;
         }
 
-        if(it == nullptr || it->start >= VMS_MMAP_TOP) {
+        if(it == nullptr || address_greater_equal(it->start, top)) {
             return found;
         }
 
-        if(it->end > gap_start) {
+        if(address_greater(it->end, gap_start)) {
             gap_start = it->end;
         }
     }
@@ -613,7 +608,7 @@ static bool find_highest_gap(vmspace_t* restrict vmspace, size_t size, uintptr_t
 
 // Private writable memory takes its pages from the commit limit, and free_region gives them back.
 // The replaced pages are the ones that the caller unmaps after this call
-static vm_region_t* alloc_region(uintptr_t start, uintptr_t end, unsigned vprot, unsigned flags, const vm_backing_t* restrict backing,
+static vm_region_t* alloc_region(virt_addr_t start, virt_addr_t end, unsigned vprot, unsigned flags, const vm_backing_t* restrict backing,
     size_t replaced)
 {
     vm_region_t* region = slab_alloc(sizeof(vm_region_t));
@@ -698,7 +693,7 @@ void vms_release(vmspace_t* restrict vmspace)
     slab_free(vmspace);
 }
 
-int vms_map(vmspace_t* restrict vmspace, uintptr_t start, uintptr_t end, unsigned vprot, unsigned flags,
+int vms_map(vmspace_t* restrict vmspace, virt_addr_t start, virt_addr_t end, unsigned vprot, unsigned flags,
     const vm_backing_t* restrict backing)
 {
     if(!range_valid(vmspace, start, end)) {
@@ -726,7 +721,7 @@ int vms_map(vmspace_t* restrict vmspace, uintptr_t start, uintptr_t end, unsigne
     return 0;
 }
 
-int vms_map_replace(vmspace_t* restrict vmspace, uintptr_t start, uintptr_t end, unsigned vprot, unsigned flags,
+int vms_map_replace(vmspace_t* restrict vmspace, virt_addr_t start, virt_addr_t end, unsigned vprot, unsigned flags,
     const vm_backing_t* restrict backing)
 {
     if(!range_valid(vmspace, start, end)) {
@@ -758,13 +753,13 @@ int vms_map_replace(vmspace_t* restrict vmspace, uintptr_t start, uintptr_t end,
 }
 
 int vms_map_any(vmspace_t* restrict vmspace, size_t size, unsigned vprot, unsigned flags, const vm_backing_t* restrict backing,
-    uintptr_t* restrict out)
+    virt_addr_t* restrict out)
 {
     if(size == 0 || page_offset(size)) {
         return -EINVAL;
     }
 
-    vm_region_t* region = alloc_region(0, size, vprot, flags, backing, 0U);
+    vm_region_t* region = alloc_region(virt_addr(0), virt_addr(size), vprot, flags, backing, 0U);
 
     if(region == nullptr) {
         return -ENOMEM;
@@ -778,7 +773,7 @@ int vms_map_any(vmspace_t* restrict vmspace, size_t size, unsigned vprot, unsign
         return -ENOMEM;
     }
 
-    region->end = region->start + size;
+    region->end = address_add(region->start, size);
     insert_region(vmspace, region);
 
     *out = region->start;
@@ -788,7 +783,7 @@ int vms_map_any(vmspace_t* restrict vmspace, size_t size, unsigned vprot, unsign
     return 0;
 }
 
-int vms_unmap(vmspace_t* restrict vmspace, uintptr_t start, uintptr_t end)
+int vms_unmap(vmspace_t* restrict vmspace, virt_addr_t start, virt_addr_t end)
 {
     if(!range_valid(vmspace, start, end)) {
         return -EINVAL;
@@ -801,7 +796,7 @@ int vms_unmap(vmspace_t* restrict vmspace, uintptr_t start, uintptr_t end)
     return retval;
 }
 
-int vms_protect(vmspace_t* restrict vmspace, uintptr_t start, uintptr_t end, unsigned vprot)
+int vms_protect(vmspace_t* restrict vmspace, virt_addr_t start, virt_addr_t end, unsigned vprot)
 {
     if(!range_valid(vmspace, start, end)) {
         return -EINVAL;
@@ -816,7 +811,7 @@ int vms_protect(vmspace_t* restrict vmspace, uintptr_t start, uintptr_t end, uns
         return -ENOMEM;
     }
 
-    for(vm_region_t* it = find_region(vmspace, start); it && it->start < end; it = it->next) {
+    for(vm_region_t* it = find_region(vmspace, start); it && address_less(it->start, end); it = it->next) {
         if((vprot & VPROT_WRITE) && !it->may_write) {
             mutex_release(&vmspace->lock);
             return -EACCES;
@@ -837,7 +832,7 @@ int vms_protect(vmspace_t* restrict vmspace, uintptr_t start, uintptr_t end, uns
     size_t gain = 0U;
     size_t loss = 0U;
 
-    for(const vm_region_t* it = find_region(vmspace, start); it && it->start < end; it = it->next) {
+    for(const vm_region_t* it = find_region(vmspace, start); it && address_less(it->start, end); it = it->next) {
         bool counted_before = region_counted(it);
         bool counted_after = counts_commit(it, vprot);
 
@@ -858,10 +853,10 @@ int vms_protect(vmspace_t* restrict vmspace, uintptr_t start, uintptr_t end, uns
 
     bool patched = false;
 
-    for(vm_region_t* it = find_region(vmspace, start); it && it->start < end; it = it->next) {
+    for(vm_region_t* it = find_region(vmspace, start); it && address_less(it->start, end); it = it->next) {
         it->vprot = vprot;
 
-        for(uintptr_t page = it->start; page < it->end; page += PAGE_SIZE) {
+        for(virt_addr_t page = it->start; address_less(page, it->end); page = address_add(page, PAGE_SIZE)) {
             phys_addr_t phys = pmap_resolve_address(vmspace->pmap, page);
 
             if(address_null(phys)) {
@@ -896,7 +891,7 @@ int vms_protect(vmspace_t* restrict vmspace, uintptr_t start, uintptr_t end, uns
     return 0;
 }
 
-int vms_check_mapped(vmspace_t* restrict vmspace, uintptr_t start, uintptr_t end)
+int vms_check_mapped(vmspace_t* restrict vmspace, virt_addr_t start, virt_addr_t end)
 {
     if(!range_valid(vmspace, start, end)) {
         return -EINVAL;
@@ -913,7 +908,7 @@ int vms_check_mapped(vmspace_t* restrict vmspace, uintptr_t start, uintptr_t end
     return 0;
 }
 
-int vms_discard(vmspace_t* restrict vmspace, uintptr_t start, uintptr_t end)
+int vms_discard(vmspace_t* restrict vmspace, virt_addr_t start, virt_addr_t end)
 {
     if(!range_valid(vmspace, start, end)) {
         return -EINVAL;
@@ -926,7 +921,7 @@ int vms_discard(vmspace_t* restrict vmspace, uintptr_t start, uintptr_t end)
         return -ENOMEM;
     }
 
-    for(vm_region_t* it = find_region(vmspace, start); it && it->start < end; it = it->next) {
+    for(vm_region_t* it = find_region(vmspace, start); it && address_less(it->start, end); it = it->next) {
         if(it->device) {
             mutex_release(&vmspace->lock);
             return -EINVAL;
@@ -936,17 +931,9 @@ int vms_discard(vmspace_t* restrict vmspace, uintptr_t start, uintptr_t end)
     phys_addr_t batch[FREE_BATCH];
     size_t count = 0;
 
-    for(vm_region_t* it = find_region(vmspace, start); it && it->start < end; it = it->next) {
-        uintptr_t clipped_start = start;
-        uintptr_t clipped_end = end;
-
-        if(clipped_start < it->start) {
-            clipped_start = it->start;
-        }
-
-        if(clipped_end > it->end) {
-            clipped_end = it->end;
-        }
+    for(vm_region_t* it = find_region(vmspace, start); it && address_less(it->start, end); it = it->next) {
+        virt_addr_t clipped_start = address_max(start, it->start);
+        virt_addr_t clipped_end = address_min(end, it->end);
 
         release_range(vmspace, clipped_start, clipped_end, batch, &count, true);
     }
@@ -957,7 +944,7 @@ int vms_discard(vmspace_t* restrict vmspace, uintptr_t start, uintptr_t end)
     return 0;
 }
 
-int vms_sync(vmspace_t* restrict vmspace, uintptr_t start, uintptr_t end, bool wait)
+int vms_sync(vmspace_t* restrict vmspace, virt_addr_t start, virt_addr_t end, bool wait)
 {
     if(!range_valid(vmspace, start, end)) {
         return -EINVAL;
@@ -972,16 +959,16 @@ int vms_sync(vmspace_t* restrict vmspace, uintptr_t start, uintptr_t end, bool w
     }
 
     int retval = 0;
-    uintptr_t cursor = start;
+    virt_addr_t cursor = start;
 
     // One file at a time, as fsync sleeps on the filesystem
-    while(wait && cursor < end) {
+    while(wait && address_less(cursor, end)) {
         vnode_t* node = nullptr;
 
         mutex_acquire(&vmspace->lock);
 
-        for(vm_region_t* it = vmspace->regions; it && it->start < end && node == nullptr; it = it->next) {
-            if(it->end <= cursor) {
+        for(vm_region_t* it = vmspace->regions; it && address_less(it->start, end) && node == nullptr; it = it->next) {
+            if(address_less_equal(it->end, cursor)) {
                 continue;
             }
 
@@ -1062,7 +1049,7 @@ int vms_clone(vmspace_t* restrict vmspace, vmspace_t* restrict source)
 
         unsigned vprot = (it->vprot & ~VPROT_WRITE) | VPROT_USER;
 
-        for(uintptr_t page = it->start; page < it->end && retval == 0; page += PAGE_SIZE) {
+        for(virt_addr_t page = it->start; address_less(page, it->end) && retval == 0; page = address_add(page, PAGE_SIZE)) {
             phys_addr_t phys = rmap_pin(source->pmap, page, nullptr);
 
             if(address_null(phys)) {
@@ -1100,9 +1087,9 @@ int vms_clone(vmspace_t* restrict vmspace, vmspace_t* restrict source)
     return retval;
 }
 
-int vms_fault(vmspace_t* restrict vmspace, uintptr_t virt, unsigned access)
+int vms_fault(vmspace_t* restrict vmspace, virt_addr_t virt, unsigned access)
 {
-    if(virt >= pmap_user_end(vmspace->pmap)) {
+    if(address_greater_equal(virt, pmap_user_end(vmspace->pmap))) {
         return -EFAULT;
     }
 
@@ -1114,9 +1101,9 @@ int vms_fault(vmspace_t* restrict vmspace, uintptr_t virt, unsigned access)
     return retval;
 }
 
-void vms_populate(vmspace_t* restrict vmspace, uintptr_t start, uintptr_t end)
+void vms_populate(vmspace_t* restrict vmspace, virt_addr_t start, virt_addr_t end)
 {
-    for(uintptr_t page = start; page < end; page += PAGE_SIZE) {
+    for(virt_addr_t page = start; address_less(page, end); page = address_add(page, PAGE_SIZE)) {
         if(vms_fault(vmspace, page, VPROT_NONE) < 0) {
             return;
         }
@@ -1134,7 +1121,7 @@ void vms_revoke(vnode_t* restrict node)
             continue;
         }
 
-        for(uintptr_t page = it->start; page < it->end; page += PAGE_SIZE) {
+        for(virt_addr_t page = it->start; address_less(page, it->end); page = address_add(page, PAGE_SIZE)) {
             if(0 == pmap_unmap_noflush(it->device_pmap, page)) {
                 unmapped = true;
             }
@@ -1148,9 +1135,9 @@ void vms_revoke(vnode_t* restrict node)
     }
 }
 
-phys_addr_t vms_touch(vmspace_t* restrict vmspace, uintptr_t virt)
+phys_addr_t vms_touch(vmspace_t* restrict vmspace, virt_addr_t virt)
 {
-    if(virt >= pmap_user_end(vmspace->pmap)) {
+    if(address_greater_equal(virt, pmap_user_end(vmspace->pmap))) {
         return phys_addr(0);
     }
 
@@ -1168,9 +1155,9 @@ phys_addr_t vms_touch(vmspace_t* restrict vmspace, uintptr_t virt)
     return phys;
 }
 
-phys_addr_t vms_pin(vmspace_t* restrict vmspace, uintptr_t virt)
+phys_addr_t vms_pin(vmspace_t* restrict vmspace, virt_addr_t virt)
 {
-    if(virt >= pmap_user_end(vmspace->pmap)) {
+    if(address_greater_equal(virt, pmap_user_end(vmspace->pmap))) {
         return phys_addr(0);
     }
 
@@ -1197,11 +1184,11 @@ void vms_unpin(phys_addr_t phys)
     put_frame(page_align(phys));
 }
 
-ssize_t vms_copyin(void* restrict dst, vmspace_t* restrict vmspace, uintptr_t src, size_t size)
+ssize_t vms_copyin(void* restrict dst, vmspace_t* restrict vmspace, virt_addr_t src, size_t size)
 {
     uint8_t* ptr = dst;
 
-    if(src >= pmap_user_end(vmspace->pmap) || size > pmap_user_end(vmspace->pmap) - src) {
+    if(address_greater_equal(src, pmap_user_end(vmspace->pmap)) || size > address_diff(pmap_user_end(vmspace->pmap), src)) {
         return -EFAULT;
     }
 
@@ -1226,7 +1213,7 @@ ssize_t vms_copyin(void* restrict dst, vmspace_t* restrict vmspace, uintptr_t sr
 
         access_end(&user_access);
 
-        src += chunk;
+        src = address_add(src, chunk);
         ptr += chunk;
         size -= chunk;
     }
@@ -1236,7 +1223,7 @@ ssize_t vms_copyin(void* restrict dst, vmspace_t* restrict vmspace, uintptr_t sr
     return ptr - (uint8_t*)(dst);
 }
 
-ssize_t vms_copyin_str(char* restrict dst, vmspace_t* restrict vmspace, uintptr_t src, size_t max_sz)
+ssize_t vms_copyin_str(char* restrict dst, vmspace_t* restrict vmspace, virt_addr_t src, size_t max_sz)
 {
     if(max_sz == 0) {
         return -EINVAL;
@@ -1251,7 +1238,7 @@ ssize_t vms_copyin_str(char* restrict dst, vmspace_t* restrict vmspace, uintptr_
         user_access_t user_access;
         const char* page = nullptr;
 
-        if(src < pmap_user_end(vmspace->pmap)) {
+        if(address_less(src, pmap_user_end(vmspace->pmap))) {
             page = access_begin_locked(vmspace, src, VPROT_READ, false, &user_access);
         }
 
@@ -1284,7 +1271,7 @@ ssize_t vms_copyin_str(char* restrict dst, vmspace_t* restrict vmspace, uintptr_
 
         access_end(&user_access);
 
-        src += chunk;
+        src = address_add(src, chunk);
         ptr += chunk;
         remaining -= chunk;
     }
@@ -1296,11 +1283,11 @@ ssize_t vms_copyin_str(char* restrict dst, vmspace_t* restrict vmspace, uintptr_
     return -ENAMETOOLONG;
 }
 
-ssize_t vms_copyout(vmspace_t* restrict vmspace, uintptr_t dst, const void* restrict src, size_t size)
+ssize_t vms_copyout(vmspace_t* restrict vmspace, virt_addr_t dst, const void* restrict src, size_t size)
 {
     const uint8_t* ptr = src;
 
-    if(dst >= pmap_user_end(vmspace->pmap) || size > pmap_user_end(vmspace->pmap) - dst) {
+    if(address_greater_equal(dst, pmap_user_end(vmspace->pmap)) || size > address_diff(pmap_user_end(vmspace->pmap), dst)) {
         return -EFAULT;
     }
 
@@ -1325,7 +1312,7 @@ ssize_t vms_copyout(vmspace_t* restrict vmspace, uintptr_t dst, const void* rest
 
         access_end(&user_access);
 
-        dst += chunk;
+        dst = address_add(dst, chunk);
         ptr += chunk;
         size -= chunk;
     }
@@ -1335,7 +1322,7 @@ ssize_t vms_copyout(vmspace_t* restrict vmspace, uintptr_t dst, const void* rest
     return ptr - (const uint8_t*)(src);
 }
 
-ssize_t vms_copyout_str(vmspace_t* restrict vmspace, uintptr_t dst, const char* restrict src, size_t max_sz)
+ssize_t vms_copyout_str(vmspace_t* restrict vmspace, virt_addr_t dst, const char* restrict src, size_t max_sz)
 {
     if(max_sz == 0) {
         return -EINVAL;

@@ -6,48 +6,73 @@
 // The three kinds of address have the same operations. An address of one kind never takes the place of another:
 // a number becomes an address through the constructor, and an address becomes a number through value
 
-#define DEFINE_ADDRESS_OPS(kind, type)                                                   \
-    static __always_inline __nodiscard type kind##_addr(uintptr_t value)                 \
-    {                                                                                    \
-        type result = {};                                                                \
-        result.value = value;                                                            \
-        return result;                                                                   \
-    }                                                                                    \
-                                                                                         \
-    static __always_inline __nodiscard type kind##_addr_add(type address, size_t offset) \
-    {                                                                                    \
-        return kind##_addr(address.value + offset);                                      \
-    }                                                                                    \
-                                                                                         \
-    static __always_inline __nodiscard type kind##_addr_sub(type address, size_t offset) \
-    {                                                                                    \
-        return kind##_addr(address.value - offset);                                      \
-    }                                                                                    \
-                                                                                         \
-    /* The distance from low up to high; high is not below low */                        \
-    static __always_inline __nodiscard size_t kind##_addr_diff(type high, type low)      \
-    {                                                                                    \
-        return high.value - low.value;                                                   \
-    }                                                                                    \
-                                                                                         \
-    static __always_inline __nodiscard bool kind##_addr_equal(type left, type right)     \
-    {                                                                                    \
-        return left.value == right.value;                                                \
-    }                                                                                    \
-                                                                                         \
-    static __always_inline __nodiscard bool kind##_addr_less(type left, type right)      \
-    {                                                                                    \
-        return left.value < right.value;                                                 \
-    }                                                                                    \
-                                                                                         \
-    static __always_inline __nodiscard bool kind##_addr_null(type address)               \
-    {                                                                                    \
-        return address.value == 0;                                                       \
-    }                                                                                    \
-                                                                                         \
-    static __always_inline __nodiscard bool kind##_addr_valid(type address)              \
-    {                                                                                    \
-        return address.value;                                                            \
+#define DEFINE_ADDRESS_OPS(kind, type)                                                       \
+    static __always_inline __nodiscard type kind##_addr(uintptr_t value)                     \
+    {                                                                                        \
+        type result = {};                                                                    \
+        result.value = value;                                                                \
+        return result;                                                                       \
+    }                                                                                        \
+                                                                                             \
+    static __always_inline __nodiscard type kind##_addr_add(type address, size_t offset)     \
+    {                                                                                        \
+        return kind##_addr(address.value + offset);                                          \
+    }                                                                                        \
+                                                                                             \
+    static __always_inline __nodiscard type kind##_addr_sub(type address, size_t offset)     \
+    {                                                                                        \
+        return kind##_addr(address.value - offset);                                          \
+    }                                                                                        \
+                                                                                             \
+    /* The distance from low up to high; high is not below low */                            \
+    static __always_inline __nodiscard size_t kind##_addr_diff(type high, type low)          \
+    {                                                                                        \
+        return high.value - low.value;                                                       \
+    }                                                                                        \
+                                                                                             \
+    static __always_inline __nodiscard bool kind##_addr_equal(type left, type right)         \
+    {                                                                                        \
+        return left.value == right.value;                                                    \
+    }                                                                                        \
+                                                                                             \
+    static __always_inline __nodiscard bool kind##_addr_less(type left, type right)          \
+    {                                                                                        \
+        return left.value < right.value;                                                     \
+    }                                                                                        \
+                                                                                             \
+    static __always_inline __nodiscard bool kind##_addr_less_equal(type left, type right)    \
+    {                                                                                        \
+        return left.value <= right.value;                                                    \
+    }                                                                                        \
+                                                                                             \
+    static __always_inline __nodiscard bool kind##_addr_greater(type left, type right)       \
+    {                                                                                        \
+        return left.value > right.value;                                                     \
+    }                                                                                        \
+                                                                                             \
+    static __always_inline __nodiscard bool kind##_addr_greater_equal(type left, type right) \
+    {                                                                                        \
+        return left.value >= right.value;                                                    \
+    }                                                                                        \
+                                                                                             \
+    static __always_inline __nodiscard type kind##_addr_min(type left, type right)           \
+    {                                                                                        \
+        return left.value < right.value ? left : right;                                      \
+    }                                                                                        \
+                                                                                             \
+    static __always_inline __nodiscard type kind##_addr_max(type left, type right)           \
+    {                                                                                        \
+        return left.value > right.value ? left : right;                                      \
+    }                                                                                        \
+                                                                                             \
+    static __always_inline __nodiscard bool kind##_addr_null(type address)                   \
+    {                                                                                        \
+        return address.value == 0;                                                           \
+    }                                                                                        \
+                                                                                             \
+    static __always_inline __nodiscard bool kind##_addr_valid(type address)                  \
+    {                                                                                        \
+        return address.value;                                                                \
     }
 
 DEFINE_ADDRESS_OPS(user, user_addr_t)
@@ -69,6 +94,23 @@ DEFINE_ADDRESS_OPS(phys, phys_addr_t)
 #define address_less(left, right) \
     _Generic((left), user_addr_t: user_addr_less, virt_addr_t: virt_addr_less, phys_addr_t: phys_addr_less)((left), (right))
 
+#define address_less_equal(left, right)                                                                                               \
+    _Generic((left), user_addr_t: user_addr_less_equal, virt_addr_t: virt_addr_less_equal, phys_addr_t: phys_addr_less_equal)((left), \
+        (right))
+
+#define address_greater(left, right) \
+    _Generic((left), user_addr_t: user_addr_greater, virt_addr_t: virt_addr_greater, phys_addr_t: phys_addr_greater)((left), (right))
+
+#define address_greater_equal(left, right)                                                                                              \
+    _Generic((left), user_addr_t: user_addr_greater_equal, virt_addr_t: virt_addr_greater_equal, phys_addr_t: phys_addr_greater_equal)( \
+        (left), (right))
+
+#define address_min(left, right) \
+    _Generic((left), user_addr_t: user_addr_min, virt_addr_t: virt_addr_min, phys_addr_t: phys_addr_min)((left), (right))
+
+#define address_max(left, right) \
+    _Generic((left), user_addr_t: user_addr_max, virt_addr_t: virt_addr_max, phys_addr_t: phys_addr_max)((left), (right))
+
 #define address_null(address) \
     _Generic((address), user_addr_t: user_addr_null, virt_addr_t: virt_addr_null, phys_addr_t: phys_addr_null)((address))
 
@@ -85,4 +127,10 @@ static __always_inline __nodiscard virt_addr_t virt_addr_from_pointer(const vola
 static __always_inline __nodiscard void* virt_addr_pointer(virt_addr_t address)
 {
     return (void*)(address.value);
+}
+
+/// Names the address as one in the address space of a vmspace. This checks nothing: the vms functions check the range
+static __always_inline __nodiscard virt_addr_t user_addr_to_virt(user_addr_t address)
+{
+    return virt_addr(address.value);
 }

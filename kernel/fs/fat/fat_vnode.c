@@ -1293,7 +1293,7 @@ static ssize_t fat_vnode_write(vnode_t* restrict node, file_t* restrict file, co
     return retval;
 }
 
-static int fat_vnode_fault(vnode_t* restrict node, off_t offset, pmap_t* restrict pmap, uintptr_t virt, unsigned vprot)
+static int fat_vnode_fault(vnode_t* restrict node, off_t offset, pmap_t* restrict pmap, virt_addr_t virt, unsigned vprot)
 {
     fat_vnode_context_t* context = node->ctxdata;
 

@@ -150,10 +150,10 @@ void* mmio_map(phys_addr_t phys, size_t size, unsigned vprot)
         return nullptr;
     }
 
-    int retval = pmap_map_range(&sys_pmap, mapping->virt, phys_page, length, vprot);
+    int retval = pmap_map_range(&sys_pmap, virt_addr(mapping->virt), phys_page, length, vprot);
 
     if(retval < 0) {
-        int unmapped = pmap_unmap_range_noflush(&sys_pmap, mapping->virt, length);
+        int unmapped = pmap_unmap_range_noflush(&sys_pmap, virt_addr(mapping->virt), length);
         kassert(unmapped == 0); // Nothing was split, so nothing had to be allocated
 
         unlink_nolock(mapping);
@@ -189,7 +189,7 @@ void mmio_unmap(volatile void* virt)
     }
 
     // Whole pages that were mapped as a whole, so nothing gets split
-    int retval = pmap_unmap_range_noflush(&sys_pmap, mapping->virt, mapping->size);
+    int retval = pmap_unmap_range_noflush(&sys_pmap, virt_addr(mapping->virt), mapping->size);
     kassert(retval == 0);
 
     spinlock_release(&mmio_lock);

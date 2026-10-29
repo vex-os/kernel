@@ -73,12 +73,12 @@ int arch_signal_setup(thread_t* restrict thread, hart_context_t* restrict ctx, c
     const siginfo_t* restrict info, sigset_t old_mask)
 {
     process_t* process = thread->process;
-    uintptr_t user_end = pmap_user_end(process->vmspace->pmap);
+    virt_addr_t user_end = pmap_user_end(process->vmspace->pmap);
 
     uintptr_t handler = (uintptr_t)(action->sa_handler);
     uintptr_t restorer = (uintptr_t)(action->sa_restorer);
 
-    if(handler >= user_end || restorer >= user_end) {
+    if(address_greater_equal(virt_addr(handler), user_end) || address_greater_equal(virt_addr(restorer), user_end)) {
         return -EFAULT;
     }
 
@@ -97,7 +97,7 @@ int arch_signal_setup(thread_t* restrict thread, hart_context_t* restrict ctx, c
     uintptr_t fpu_user = align_floor(top - fpu_state_size, FPU_STATE_ALIGN);
     uintptr_t sp = align_floor(fpu_user - sizeof(sigframe_t), 16) - sizeof(uint64_t); // As if call pushed restorer
 
-    if(top > user_end || ctx->amd64_rsp > user_end || sp >= top || sp < bottom) {
+    if(top > user_end.value || ctx->amd64_rsp > user_end.value || sp >= top || sp < bottom) {
         return -EFAULT;
     }
 
@@ -144,7 +144,7 @@ int arch_signal_setup(thread_t* restrict thread, hart_context_t* restrict ctx, c
 int arch_signal_return(thread_t* restrict thread, hart_context_t* restrict ctx, sigset_t* restrict mask)
 {
     process_t* process = thread->process;
-    uintptr_t user_end = pmap_user_end(process->vmspace->pmap);
+    virt_addr_t user_end = pmap_user_end(process->vmspace->pmap);
 
     ucontext_t uc;
 
@@ -154,7 +154,7 @@ int arch_signal_return(thread_t* restrict thread, hart_context_t* restrict ctx, 
 
     mcontext_t* mc = &uc.uc_mcontext;
 
-    if(mc->mc_rip >= user_end) {
+    if(address_greater_equal(virt_addr(mc->mc_rip), user_end)) {
         return -EFAULT;
     }
 

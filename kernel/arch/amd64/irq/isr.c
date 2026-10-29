@@ -84,7 +84,7 @@ static void page_fault_handler(hart_local_t* restrict hart, hart_context_t* rest
     // or signalling may sleep
     enable_interrupts();
 
-    int retval = vms_fault(process->vmspace, fault, access);
+    int retval = vms_fault(process->vmspace, virt_addr(fault), access);
 
     if(retval < 0) {
         siginfo_t info = {};

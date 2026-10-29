@@ -13,7 +13,7 @@ ssize_t user_copyin(void* restrict dst, user_addr_t src, size_t size)
         return -EFAULT;
     }
 
-    return vms_copyin(dst, process->vmspace, src.value, size);
+    return vms_copyin(dst, process->vmspace, user_addr_to_virt(src), size);
 }
 
 ssize_t user_copyin_str(char* restrict dst, user_addr_t src, size_t max_sz)
@@ -25,7 +25,7 @@ ssize_t user_copyin_str(char* restrict dst, user_addr_t src, size_t max_sz)
         return -EFAULT;
     }
 
-    return vms_copyin_str(dst, process->vmspace, src.value, max_sz);
+    return vms_copyin_str(dst, process->vmspace, user_addr_to_virt(src), max_sz);
 }
 
 ssize_t user_copyout(user_addr_t dst, const void* restrict src, size_t size)
@@ -37,7 +37,7 @@ ssize_t user_copyout(user_addr_t dst, const void* restrict src, size_t size)
         return -EFAULT;
     }
 
-    return vms_copyout(process->vmspace, dst.value, src, size);
+    return vms_copyout(process->vmspace, user_addr_to_virt(dst), src, size);
 }
 
 ssize_t user_copyout_str(user_addr_t dst, const char* restrict src, size_t max_sz)
@@ -49,5 +49,5 @@ ssize_t user_copyout_str(user_addr_t dst, const char* restrict src, size_t max_s
         return -EFAULT;
     }
 
-    return vms_copyout_str(process->vmspace, dst.value, src, max_sz);
+    return vms_copyout_str(process->vmspace, user_addr_to_virt(dst), src, max_sz);
 }

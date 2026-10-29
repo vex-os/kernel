@@ -37,23 +37,23 @@ static unsigned prot_to_vprot(uintptr_t prot)
     return vprot;
 }
 
-static bool user_range_end(vmspace_t* restrict vmspace, uintptr_t start, uintptr_t length, uintptr_t* restrict end)
+static bool user_range_end(vmspace_t* restrict vmspace, virt_addr_t start, uintptr_t length, virt_addr_t* restrict end)
 {
-    uintptr_t user_end = pmap_user_end(vmspace->pmap);
+    virt_addr_t user_end = pmap_user_end(vmspace->pmap);
 
-    if(length == 0 || page_offset(start) || start >= user_end || length > user_end - start) {
+    if(length == 0 || page_offset(start) || address_greater_equal(start, user_end) || length > address_diff(user_end, start)) {
         return false;
     }
 
-    *end = start + page_align_up(length);
+    *end = address_add(start, page_align_up(length));
 
-    return *end <= user_end;
+    return address_less_equal(*end, user_end);
 }
 
-static intptr_t map_range(vmspace_t* restrict vmspace, uintptr_t addr, uintptr_t length, uintptr_t flags, unsigned vprot,
+static intptr_t map_range(vmspace_t* restrict vmspace, virt_addr_t addr, uintptr_t length, uintptr_t flags, unsigned vprot,
     unsigned vms_flags, const vm_backing_t* restrict backing)
 {
-    uintptr_t end;
+    virt_addr_t end;
 
     if(flags & (MAP_FIXED | MAP_FIXED_NOREPLACE)) {
         if(!user_range_end(vmspace, addr, length, &end)) {
@@ -73,37 +73,37 @@ static intptr_t map_range(vmspace_t* restrict vmspace, uintptr_t addr, uintptr_t
             return retval;
         }
 
-        return addr;
+        return addr.value;
     }
 
     // The address is a hint taken when it is free
-    if(addr && user_range_end(vmspace, addr, length, &end) && 0 == vms_map(vmspace, addr, end, vprot, vms_flags, backing)) {
-        return addr;
+    if(address_valid(addr) && user_range_end(vmspace, addr, length, &end) && 0 == vms_map(vmspace, addr, end, vprot, vms_flags, backing)) {
+        return addr.value;
     }
 
-    uintptr_t placed;
+    virt_addr_t placed;
     int retval = vms_map_any(vmspace, page_align_up(length), vprot, vms_flags, backing, &placed);
 
     if(retval < 0) {
         return retval;
     }
 
-    return placed;
+    return placed.value;
 }
 
-static intptr_t place_mapping(vmspace_t* restrict vmspace, uintptr_t addr, uintptr_t length, uintptr_t flags, unsigned vprot,
+static intptr_t place_mapping(vmspace_t* restrict vmspace, virt_addr_t addr, uintptr_t length, uintptr_t flags, unsigned vprot,
     unsigned vms_flags, const vm_backing_t* restrict backing)
 {
     intptr_t placed = map_range(vmspace, addr, length, flags, vprot, vms_flags, backing);
 
     if(placed >= 0 && (flags & MAP_POPULATE)) {
-        vms_populate(vmspace, placed, placed + page_align_up(length));
+        vms_populate(vmspace, virt_addr(placed), address_add(virt_addr(placed), page_align_up(length)));
     }
 
     return placed;
 }
 
-static intptr_t sys_mmap(uintptr_t addr, uintptr_t length, uintptr_t prot, uintptr_t flags, int fd, uintptr_t offset)
+static intptr_t sys_mmap(user_addr_t addr, uintptr_t length, uintptr_t prot, uintptr_t flags, int fd, uintptr_t offset)
 {
     thread_t* thread = this_thread();
     process_t* process = thread->process;
@@ -112,7 +112,8 @@ static intptr_t sys_mmap(uintptr_t addr, uintptr_t length, uintptr_t prot, uintp
         return -ENOSYS;
     }
 
-    if(length == 0 || length > pmap_user_end(process->vmspace->pmap) || (prot & ~KNOWN_PROT) || (flags & ~KNOWN_FLAGS)) {
+    if(length == 0 || length > address_diff(pmap_user_end(process->vmspace->pmap), virt_addr(0)) || (prot & ~KNOWN_PROT)
+        || (flags & ~KNOWN_FLAGS)) {
         return -EINVAL;
     }
 
@@ -135,7 +136,7 @@ static intptr_t sys_mmap(uintptr_t addr, uintptr_t length, uintptr_t prot, uintp
             return -ENOSYS; // Shared anonymous memory only differs from private across fork
         }
 
-        return place_mapping(process->vmspace, addr, length, flags, vprot, vms_flags, nullptr);
+        return place_mapping(process->vmspace, user_addr_to_virt(addr), length, flags, vprot, vms_flags, nullptr);
     }
 
     if(page_offset(offset) || (off_t)(offset) < 0) {
@@ -177,7 +178,7 @@ static intptr_t sys_mmap(uintptr_t addr, uintptr_t length, uintptr_t prot, uintp
             backing.may_write = may_write;
             backing.device = device;
 
-            retval = place_mapping(process->vmspace, addr, length, flags, vprot, vms_flags, &backing);
+            retval = place_mapping(process->vmspace, user_addr_to_virt(addr), length, flags, vprot, vms_flags, &backing);
         }
     }
 
@@ -188,7 +189,7 @@ static intptr_t sys_mmap(uintptr_t addr, uintptr_t length, uintptr_t prot, uintp
 
 define_syscall(sys_mmap, SYS_MMAP, 6);
 
-static intptr_t sys_munmap(uintptr_t addr, uintptr_t length)
+static intptr_t sys_munmap(user_addr_t addr, uintptr_t length)
 {
     thread_t* thread = this_thread();
     process_t* process = thread->process;
@@ -197,18 +198,19 @@ static intptr_t sys_munmap(uintptr_t addr, uintptr_t length)
         return -ENOSYS;
     }
 
-    uintptr_t end;
+    virt_addr_t start = user_addr_to_virt(addr);
+    virt_addr_t end;
 
-    if(!user_range_end(process->vmspace, addr, length, &end)) {
+    if(!user_range_end(process->vmspace, start, length, &end)) {
         return -EINVAL;
     }
 
-    return vms_unmap(process->vmspace, addr, end);
+    return vms_unmap(process->vmspace, start, end);
 }
 
 define_syscall(sys_munmap, SYS_MUNMAP, 2);
 
-static intptr_t sys_mprotect(uintptr_t addr, uintptr_t length, uintptr_t prot)
+static intptr_t sys_mprotect(user_addr_t addr, uintptr_t length, uintptr_t prot)
 {
     thread_t* thread = this_thread();
     process_t* process = thread->process;
@@ -217,18 +219,19 @@ static intptr_t sys_mprotect(uintptr_t addr, uintptr_t length, uintptr_t prot)
         return -ENOSYS;
     }
 
-    uintptr_t end;
+    virt_addr_t start = user_addr_to_virt(addr);
+    virt_addr_t end;
 
-    if(!user_range_end(process->vmspace, addr, length, &end) || (prot & ~KNOWN_PROT)) {
+    if(!user_range_end(process->vmspace, start, length, &end) || (prot & ~KNOWN_PROT)) {
         return -EINVAL;
     }
 
-    return vms_protect(process->vmspace, addr, end, prot_to_vprot(prot));
+    return vms_protect(process->vmspace, start, end, prot_to_vprot(prot));
 }
 
 define_syscall(sys_mprotect, SYS_MPROTECT, 3);
 
-static intptr_t sys_msync(uintptr_t addr, uintptr_t length, uintptr_t flags)
+static intptr_t sys_msync(user_addr_t addr, uintptr_t length, uintptr_t flags)
 {
     thread_t* thread = this_thread();
     process_t* process = thread->process;
@@ -237,31 +240,32 @@ static intptr_t sys_msync(uintptr_t addr, uintptr_t length, uintptr_t flags)
         return -ENOSYS;
     }
 
-    uintptr_t end;
+    virt_addr_t start = user_addr_to_virt(addr);
+    virt_addr_t end;
 
-    if(!user_range_end(process->vmspace, addr, length, &end) || (flags & ~KNOWN_SYNC) || ((flags & MS_ASYNC) && (flags & MS_SYNC))) {
+    if(!user_range_end(process->vmspace, start, length, &end) || (flags & ~KNOWN_SYNC) || ((flags & MS_ASYNC) && (flags & MS_SYNC))) {
         return -EINVAL;
     }
 
-    return vms_sync(process->vmspace, addr, end, (flags & MS_SYNC));
+    return vms_sync(process->vmspace, start, end, (flags & MS_SYNC));
 }
 
 define_syscall(sys_msync, SYS_MSYNC, 3);
 
 // The range is rounded out to whole pages, as Linux does, and has to be mapped as a whole
-static intptr_t check_range(vmspace_t* restrict vmspace, uintptr_t addr, uintptr_t length)
+static intptr_t check_range(vmspace_t* restrict vmspace, virt_addr_t addr, uintptr_t length)
 {
-    uintptr_t user_end = pmap_user_end(vmspace->pmap);
+    virt_addr_t user_end = pmap_user_end(vmspace->pmap);
 
-    if(addr >= user_end || length > user_end - addr) {
+    if(address_greater_equal(addr, user_end) || length > address_diff(user_end, addr)) {
         return -ENOMEM;
     }
 
-    return vms_check_mapped(vmspace, page_align(addr), page_align_up(addr + length));
+    return vms_check_mapped(vmspace, page_align(addr), page_align_up(address_add(addr, length)));
 }
 
 // UNDONE: MADV_WILLNEED reads ahead
-static intptr_t sys_madvise(uintptr_t addr, uintptr_t length, uintptr_t advice)
+static intptr_t sys_madvise(user_addr_t addr, uintptr_t length, uintptr_t advice)
 {
     thread_t* thread = this_thread();
     process_t* process = thread->process;
@@ -290,10 +294,11 @@ static intptr_t sys_madvise(uintptr_t addr, uintptr_t length, uintptr_t advice)
         return 0;
     }
 
-    intptr_t retval = check_range(process->vmspace, addr, length);
+    virt_addr_t start = user_addr_to_virt(addr);
+    intptr_t retval = check_range(process->vmspace, start, length);
 
     if(retval == 0 && advice == MADV_DONTNEED) {
-        return vms_discard(process->vmspace, addr, page_align_up(addr + length));
+        return vms_discard(process->vmspace, start, page_align_up(address_add(start, length)));
     }
 
     return retval;
@@ -303,7 +308,7 @@ define_syscall(sys_madvise, SYS_MADVISE, 3);
 
 // UNDONE: Locked pages matter once there is swap. Then
 // this needs a capability and a limit, with RLIMIT_MEMLOCK
-static intptr_t sys_mlock(uintptr_t addr, uintptr_t length)
+static intptr_t sys_mlock(user_addr_t addr, uintptr_t length)
 {
     thread_t* thread = this_thread();
     process_t* process = thread->process;
@@ -316,12 +321,12 @@ static intptr_t sys_mlock(uintptr_t addr, uintptr_t length)
         return 0;
     }
 
-    return check_range(process->vmspace, addr, length);
+    return check_range(process->vmspace, user_addr_to_virt(addr), length);
 }
 
 define_syscall(sys_mlock, SYS_MLOCK, 2);
 
-static intptr_t sys_munlock(uintptr_t addr, uintptr_t length)
+static intptr_t sys_munlock(user_addr_t addr, uintptr_t length)
 {
     return sys_mlock(addr, length); // Nothing is locked, so unlocking only checks the range
 }

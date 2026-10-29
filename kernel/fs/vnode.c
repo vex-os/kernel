@@ -1420,7 +1420,7 @@ int vnode_fsync(vnode_t* restrict node)
     return node->ops->fsync(node);
 }
 
-int vnode_fault(vnode_t* restrict node, off_t offset, pmap_t* restrict pmap, uintptr_t virt, unsigned vprot)
+int vnode_fault(vnode_t* restrict node, off_t offset, pmap_t* restrict pmap, virt_addr_t virt, unsigned vprot)
 {
     kassert(node);
 

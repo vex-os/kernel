@@ -704,7 +704,7 @@ ssize_t fcache_write(vnode_t* restrict node, fcache_bmap_t bmap, const void* res
     return done;
 }
 
-int fcache_fault(vnode_t* restrict node, fcache_bmap_t bmap, off_t offset, off_t size, pmap_t* restrict pmap, uintptr_t virt,
+int fcache_fault(vnode_t* restrict node, fcache_bmap_t bmap, off_t offset, off_t size, pmap_t* restrict pmap, virt_addr_t virt,
     unsigned vprot)
 {
     kassert(0 == page_offset(offset));

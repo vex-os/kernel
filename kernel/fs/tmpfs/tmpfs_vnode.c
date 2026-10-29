@@ -540,7 +540,7 @@ static int tmpfs_vnode_set_attr(vnode_t* restrict node, const vnode_attr_t* rest
     return retval;
 }
 
-static int tmpfs_vnode_fault(vnode_t* restrict node, off_t offset, pmap_t* restrict pmap, uintptr_t virt, unsigned vprot)
+static int tmpfs_vnode_fault(vnode_t* restrict node, off_t offset, pmap_t* restrict pmap, virt_addr_t virt, unsigned vprot)
 {
     tmpfs_t* tmpfs = tmpfs_of(node);
     tmpfs_inode_t* inode = node->ctxdata;

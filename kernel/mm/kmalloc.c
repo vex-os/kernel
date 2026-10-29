@@ -79,7 +79,7 @@ static memblock_t* extend_heap(size_t size)
         }
 
         virt = block->address + i * PAGE_SIZE;
-        int retval = pmap_map(&sys_pmap, virt, phys, VPROT_RW);
+        int retval = pmap_map(&sys_pmap, virt_addr(virt), phys, VPROT_RW);
 
         if(retval < 0) {
             pslab_free_phys(phys);
@@ -103,8 +103,8 @@ static memblock_t* extend_heap(size_t size)
 error_cleanup:
     while(i--) {
         virt = block->address + i * PAGE_SIZE;
-        pslab_free_phys(pmap_resolve_address(&sys_pmap, virt));
-        pmap_unmap_noflush(&sys_pmap, virt); // Mapped a moment ago and never touched, under heap_lock
+        pslab_free_phys(pmap_resolve_address(&sys_pmap, virt_addr(virt)));
+        pmap_unmap_noflush(&sys_pmap, virt_addr(virt)); // Mapped a moment ago and never touched, under heap_lock
     }
 
     slab_free(block);

@@ -66,14 +66,14 @@ void arch_pmap_free(pmap_t* restrict pmap);
 void arch_pmap_zero(pmap_t* restrict pmap);
 void arch_pmap_kcopy(pmap_t* restrict dest, const pmap_t* restrict source);
 
-static __always_inline __nodiscard pmentry_t* pmap_root(const pmap_t* restrict pmap, uintptr_t virt)
+static __always_inline __nodiscard pmentry_t* pmap_root(const pmap_t* restrict pmap, virt_addr_t virt)
 {
     return pmap->virt;
 }
 
-static __always_inline __nodiscard uintptr_t pmap_user_end(const pmap_t* restrict pmap)
+static __always_inline __nodiscard virt_addr_t pmap_user_end(const pmap_t* restrict pmap)
 {
-    return UINT64_C(1) << (PMENTRY_LVL1_SHIFT + PMENTRY_LEVEL_BITS * pmap->num_levels - 1);
+    return virt_addr(UINT64_C(1) << (PMENTRY_LVL1_SHIFT + PMENTRY_LEVEL_BITS * pmap->num_levels - 1));
 }
 
 static __always_inline __nodiscard unsigned pmentry_level_shift(unsigned level)
@@ -213,7 +213,7 @@ static __always_inline void pmap_flush_all(void)
     asm volatile("movq %0, %%cr3" ::"r"(cr3) : "memory");
 }
 
-static __always_inline void pmap_flush(uintptr_t virt)
+static __always_inline void pmap_flush(virt_addr_t virt)
 {
-    asm volatile("invlpg (%0)" ::"r"(virt) : "memory");
+    asm volatile("invlpg (%0)" ::"r"(virt.value) : "memory");
 }

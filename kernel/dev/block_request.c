@@ -72,7 +72,7 @@ static bool map_segments(const block_interface_t* restrict interface, const uint
 
     while(length > 0) {
         uintptr_t virt = (uintptr_t)(buffer);
-        phys_addr_t phys = pmap_resolve_address(&sys_pmap, virt);
+        phys_addr_t phys = pmap_resolve_address(&sys_pmap, virt_addr(virt));
         size_t piece = PAGE_SIZE - (virt % PAGE_SIZE);
 
         if(piece > length) {

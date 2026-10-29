@@ -10,7 +10,7 @@
 
 #include "syscall_internal.h"
 
-static intptr_t sys_thread_create(uintptr_t entry, uintptr_t stack_top, uintptr_t tcb, uintptr_t argument, uintptr_t clear_tid)
+static intptr_t sys_thread_create(user_addr_t entry, user_addr_t stack_top, user_addr_t tcb, uintptr_t argument, user_addr_t clear_tid)
 {
     thread_t* thread = this_thread();
     process_t* process = thread->process;
@@ -19,23 +19,24 @@ static intptr_t sys_thread_create(uintptr_t entry, uintptr_t stack_top, uintptr_
         return -ENOSYS;
     }
 
-    uintptr_t user_end = pmap_user_end(process->vmspace->pmap);
+    virt_addr_t user_end = pmap_user_end(process->vmspace->pmap);
 
-    if(entry >= user_end || stack_top >= user_end || tcb >= user_end || clear_tid >= user_end) {
+    if(address_greater_equal(user_addr_to_virt(entry), user_end) || address_greater_equal(user_addr_to_virt(stack_top), user_end)
+        || address_greater_equal(user_addr_to_virt(tcb), user_end) || address_greater_equal(user_addr_to_virt(clear_tid), user_end)) {
         return -EINVAL;
     }
 
-    if(clear_tid % sizeof(uint32_t)) {
+    if(clear_tid.value % sizeof(uint32_t)) {
         return -EINVAL;
     }
 
-    thread_t* created = thread_create_sibling(thread, entry, stack_top, argument, tcb);
+    thread_t* created = thread_create_sibling(thread, entry.value, stack_top.value, argument, tcb.value);
 
     if(created == nullptr) {
         return -ENOMEM;
     }
 
-    created->clear_tid = clear_tid;
+    created->clear_tid = clear_tid.value;
 
     pid_t tid = created->tid; // The thread may be gone by the time sched_enqueue returns
 
@@ -65,8 +66,8 @@ static intptr_t __noreturn sys_thread_exit(void)
         uint32_t cleared = 0;
 
         if(user_copyout(thread->clear_tid, &cleared, sizeof(cleared)) >= 0) {
-            futex_wake(process->vmspace, thread->clear_tid, SIZE_MAX, false);
-            futex_wake(process->vmspace, thread->clear_tid, SIZE_MAX, true);
+            futex_wake(process->vmspace, virt_addr(thread->clear_tid), SIZE_MAX, false);
+            futex_wake(process->vmspace, virt_addr(thread->clear_tid), SIZE_MAX, true);
         }
     }
 
@@ -89,7 +90,7 @@ static intptr_t sys_gettid(void)
 
 define_syscall(sys_gettid, SYS_GETTID, 0);
 
-static intptr_t sys_tcb_set(uintptr_t tcb)
+static intptr_t sys_tcb_set(user_addr_t tcb)
 {
     thread_t* thread = this_thread();
 
@@ -98,11 +99,11 @@ static intptr_t sys_tcb_set(uintptr_t tcb)
     }
 
     // A kernel address is useless to userspace and may not even be canonical
-    if(tcb >= pmap_user_end(thread->process->vmspace->pmap)) {
+    if(address_greater_equal(user_addr_to_virt(tcb), pmap_user_end(thread->process->vmspace->pmap))) {
         return -EINVAL;
     }
 
-    arch_thread_set_tcb(thread, tcb);
+    arch_thread_set_tcb(thread, tcb.value);
 
     return 0;
 }

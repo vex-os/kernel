@@ -18,7 +18,7 @@ static int check_flags(uintptr_t flags)
     return 0;
 }
 
-static intptr_t sys_futex_wait(uintptr_t address, uint32_t value, user_addr_t timeout, uintptr_t flags)
+static intptr_t sys_futex_wait(user_addr_t address, uint32_t value, user_addr_t timeout, uintptr_t flags)
 {
     thread_t* thread = this_thread();
     process_t* process = thread->process;
@@ -50,12 +50,12 @@ static intptr_t sys_futex_wait(uintptr_t address, uint32_t value, user_addr_t ti
         deadline = deadline_after_nsec(timespec_to_nsec(&relative));
     }
 
-    return futex_wait(process->vmspace, address, value, deadline, flags & FUTEX_SHARED);
+    return futex_wait(process->vmspace, user_addr_to_virt(address), value, deadline, flags & FUTEX_SHARED);
 }
 
 define_syscall(sys_futex_wait, SYS_FUTEX_WAIT, 4);
 
-static intptr_t sys_futex_wake(uintptr_t address, size_t count, uintptr_t flags)
+static intptr_t sys_futex_wake(user_addr_t address, size_t count, uintptr_t flags)
 {
     thread_t* thread = this_thread();
     process_t* process = thread->process;
@@ -70,11 +70,11 @@ static intptr_t sys_futex_wake(uintptr_t address, size_t count, uintptr_t flags)
         return retval;
     }
 
-    if(address % sizeof(uint32_t)) {
+    if(address.value % sizeof(uint32_t)) {
         return -EINVAL;
     }
 
-    return futex_wake(process->vmspace, address, count, flags & FUTEX_SHARED);
+    return futex_wake(process->vmspace, user_addr_to_virt(address), count, flags & FUTEX_SHARED);
 }
 
 define_syscall(sys_futex_wake, SYS_FUTEX_WAKE, 3);
