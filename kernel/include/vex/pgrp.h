@@ -76,6 +76,7 @@ pid_t process_get_sid(process_t* process) __nodiscard;
 /// @return The new session's id
 /// @retval -EPERM A group with the process's id exists, so the process would not lead its group
 /// @retval -ENOMEM No memory for the session or the group
+/// @note Groups that the process tied to its old session are hung up like on an exit, if a member is stopped
 pid_t process_group_new_session(process_t* process) __nodiscard;
 
 /// setpgid: moves the caller or a child of its into another group of the caller's session, or a new one
@@ -86,6 +87,7 @@ pid_t process_group_new_session(process_t* process) __nodiscard;
 /// group is in another session or is not there for a pgid other than the process's id
 /// @retval -EACCES The child has called exec since fork
 /// @retval -ENOMEM No memory for a new group
+/// @note Groups that the process tied to its old group are hung up like on an exit, if a member is stopped
 int process_group_move(process_t* restrict caller, process_t* restrict process, pid_t pgid) __nodiscard;
 
 /// Calls the callback on every member of the group, the zombies among them

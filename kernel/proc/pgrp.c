@@ -109,15 +109,15 @@ static process_group_t* leave_locked(process_t* restrict process)
     return group;
 }
 
-// The process must be attached already
-static void move_locked(process_t* restrict process, process_group_t* restrict group)
+// The process must be attached already. Hands back the process's reference to the group it left
+static process_group_t* move_locked(process_t* restrict process, process_group_t* restrict group)
 {
     process_group_t* old_group = leave_locked(process);
 
     process_group_incref(group);
     join_locked(process, group);
 
-    process_group_decref(old_group);
+    return old_group;
 }
 
 static int check_movable_locked(process_t* restrict caller, process_t* restrict process, session_t* restrict session)
@@ -300,20 +300,22 @@ static bool in_batch(process_group_t* const* restrict batch, size_t count, const
     return false;
 }
 
-void process_group_check_orphans(process_t* restrict process)
+// The groups stay put while the lock is held, so the
+// pointers need no references. The first group is the
+// one that the process was in when it tied other groups to the session
+static void check_orphans_locked(process_t* restrict process, process_group_t* restrict before)
 {
-    mutex_acquire(&process_group_lock);
+    kassert(mutex_held(&process_group_lock));
 
-    // The groups stay put while the lock is held, so the pointers need no references
-    process_group_t* own = process->group;
     size_t skip = 0;
     bool more = true;
 
-    // A group is hung up when the exit takes away its tie to the session, not whenever it is orphaned
+    // A group is hung up when the process cuts its tie
+    // to the session by leaving, not whenever it is orphaned
     process_group_t* parent_group = parent_group_locked(process);
 
-    if(parent_group && ties_session(parent_group, own)) {
-        hang_up_orphaned_locked(own);
+    if(parent_group && ties_session(parent_group, before)) {
+        hang_up_orphaned_locked(before);
     }
 
     while(more) {
@@ -329,7 +331,7 @@ void process_group_check_orphans(process_t* restrict process)
             if(index >= skip) {
                 process_group_t* group = atomic_load_n(&child->group, ATOMIC_ACQUIRE);
 
-                if(ties_session(own, group) && !in_batch(batch, count, group)) {
+                if(ties_session(before, group) && !in_batch(batch, count, group)) {
                     batch[count] = group;
                     count += 1;
                 }
@@ -350,7 +352,12 @@ void process_group_check_orphans(process_t* restrict process)
 
         skip += visited;
     }
+}
 
+void process_group_check_orphans(process_t* restrict process)
+{
+    mutex_acquire(&process_group_lock);
+    check_orphans_locked(process, process->group);
     mutex_release(&process_group_lock);
 }
 
@@ -510,7 +517,10 @@ pid_t process_group_new_session(process_t* process)
     }
 
     if(group) {
-        move_locked(process, group);
+        process_group_t* old_group = move_locked(process, group);
+
+        check_orphans_locked(process, old_group);
+        process_group_decref(old_group);
         process_group_decref(group);
     }
 
@@ -541,7 +551,10 @@ int process_group_move(process_t* restrict caller, process_t* restrict process, 
 
     if(retval == 0) {
         if(group != process->group) {
-            move_locked(process, group);
+            process_group_t* old_group = move_locked(process, group);
+
+            check_orphans_locked(process, old_group);
+            process_group_decref(old_group);
         }
 
         process_group_decref(group);

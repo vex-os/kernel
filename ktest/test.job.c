@@ -291,9 +291,13 @@ static void test_sleep_survives_stop(void)
 }
 
 // A group that loses its last link to the rest of its session while a member is stopped gets SIGHUP and SIGCONT,
-// and the signals of a terminal no longer stop its members
-static void test_orphaned_group(void)
+// and the signals of a terminal no longer stop its members. The link is a process that exits or leaves for a session of its own
+static void test_orphaned_group(bool leaves_session)
 {
+    counters->hangups = 0;
+    counters->continues = 0;
+    counters->after_stop = 0;
+
     int status = 0;
     long middle = ktest_syscall1(__k_SYS_FORK, 0);
 
@@ -317,6 +321,12 @@ static void test_orphaned_group(void)
 
         // The grandchild is in a group of its own, and this process is its only link to the session
         wait_for(grandchild, __k_WUNTRACED, &status);
+
+        if(leaves_session) {
+            ktest_syscall1(__k_SYS_SETSID, 0);
+            wait_for(grandchild, 0, &status);
+        }
+
         ktest_syscall1(__k_SYS_EXIT, 0);
     }
 
@@ -345,7 +355,8 @@ int main(void)
     test_default_actions();
     test_parent_notice();
     test_sleep_survives_stop();
-    test_orphaned_group();
+    test_orphaned_group(false);
+    test_orphaned_group(true);
 
     return ktest_result();
 }
