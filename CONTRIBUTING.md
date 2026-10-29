@@ -141,7 +141,8 @@ versions can format differently. `contrib/**` is excluded. Check changed files w
   designated initializers, or declarations mixed with code. Only `usr/vex/types.h` touches `<stdint.h>`, and only behind its C23/C++
   check.
 - Structs and unions under `include/usr/` use the `__k_`-prefixed fixed-width types (`__k_int32_t`, `__k_uint64_t`, `__k_pid_t`) for every
-  field, never `int` or `long`: C fixes only the minimum sizes of its plain types.
+  field, never `int` or `long`: C fixes only the minimum sizes of its plain types. A field with the address of user memory is a
+  `__k_uintptr_t`, or a pointer. A field with a size in memory is a `__k_size_t`.
 
 ### Order in a file
 
