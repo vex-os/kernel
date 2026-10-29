@@ -168,7 +168,7 @@ static int map_segment(vmspace_t* restrict vmspace, file_t* restrict file, const
         backing.may_write = true;
         backing.device = false;
 
-        int retval = vms_map(vmspace, map_start, file_end, vprot, &backing);
+        int retval = vms_map(vmspace, map_start, file_end, vprot, 0, &backing);
 
         if(retval < 0) {
             return retval;
@@ -182,7 +182,7 @@ static int map_segment(vmspace_t* restrict vmspace, file_t* restrict file, const
     }
 
     if(anon_start < seg_end) {
-        int retval = vms_map(vmspace, anon_start, seg_end, vprot, nullptr);
+        int retval = vms_map(vmspace, anon_start, seg_end, vprot, 0, nullptr);
 
         if(retval < 0) {
             return retval;
@@ -428,7 +428,7 @@ static int elf64_setup(vmspace_t* restrict vmspace, file_t* restrict file, const
         }
     }
 
-    retval = vms_map(vmspace, ELF64_STACK_TOP - ELF64_STACK_SIZE, ELF64_STACK_TOP, VPROT_RW, nullptr);
+    retval = vms_map(vmspace, ELF64_STACK_TOP - ELF64_STACK_SIZE, ELF64_STACK_TOP, VPROT_RW, 0, nullptr);
 
     if(retval < 0) {
         goto error;

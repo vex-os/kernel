@@ -23,8 +23,9 @@
 
 /* Vex-only capabilities start at 48 */
 
-#define __k_CAP_MOUNT  48
-#define __k_CAP_DEVICE 49 /* Rescan, unbind and eject devices through /dev/hwtree */
+#define __k_CAP_MOUNT        48
+#define __k_CAP_DEVICE       49 /* Rescan, unbind and eject devices through /dev/hwtree */
+#define __k_CAP_VM_NORESERVE 50 /* Map memory with MAP_NORESERVE, that takes nothing from the commit limit */
 
 #define __k_CAP_TO_MASK(cap) ((__k_uint64_t)(1) << (cap))
 

@@ -17,6 +17,7 @@
 #define CAP_SYSLOG         __k_CAP_SYSLOG
 #define CAP_MOUNT          __k_CAP_MOUNT
 #define CAP_DEVICE         __k_CAP_DEVICE
+#define CAP_VM_NORESERVE   __k_CAP_VM_NORESERVE
 
 #define CAP_TO_MASK(cap) __k_CAP_TO_MASK(cap)
 #define CAP_FULL_SET     UINT64_MAX

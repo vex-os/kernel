@@ -11,6 +11,8 @@ typedef struct vnode_s vnode_t;
 #define VMS_MMAP_TOP UINT64_C(0x0000600000000000) // Placement without a fixed address searches down from here
 #define VMS_MMAP_MIN UINT64_C(0x0000000000010000) // Keeps null pointer dereferences faulting
 
+#define VMS_NORESERVE 0x1 // The region takes nothing from the commit limit
+
 typedef struct vm_backing_s vm_backing_t;
 typedef struct vm_region_s vm_region_t;
 typedef struct vmspace_s vmspace_t;
@@ -33,6 +35,7 @@ struct vm_region_s {
     bool shared;
     bool may_write;
     bool device;
+    bool noreserve;
     vm_region_t* device_next; // In the list of device regions vms_revoke walks
     pmap_t* device_pmap;      // The page table of a device region, for vms_revoke
 };
@@ -50,12 +53,15 @@ vmspace_t* vms_create(void) __nodiscard;
 void vms_release(vmspace_t* restrict vmspace);
 
 /// @retval -EEXIST The range overlaps an existing mapping; vms_map_replace unmaps it instead
-int vms_map(vmspace_t* restrict vmspace, uintptr_t start, uintptr_t end, unsigned vprot, const vm_backing_t* restrict backing);
+int vms_map(vmspace_t* restrict vmspace, uintptr_t start, uintptr_t end, unsigned vprot, unsigned flags,
+    const vm_backing_t* restrict backing);
 
 /// Maps the range, unmapping whatever was mapped there before
-int vms_map_replace(vmspace_t* restrict vmspace, uintptr_t start, uintptr_t end, unsigned vprot, const vm_backing_t* restrict backing);
+int vms_map_replace(vmspace_t* restrict vmspace, uintptr_t start, uintptr_t end, unsigned vprot, unsigned flags,
+    const vm_backing_t* restrict backing);
 
-int vms_map_any(vmspace_t* restrict vmspace, size_t size, unsigned vprot, const vm_backing_t* restrict backing, uintptr_t* restrict out);
+int vms_map_any(vmspace_t* restrict vmspace, size_t size, unsigned vprot, unsigned flags, const vm_backing_t* restrict backing,
+    uintptr_t* restrict out);
 int vms_unmap(vmspace_t* restrict vmspace, uintptr_t start, uintptr_t end);
 /// Drops the pages of the range and keeps the regions, so the next access faults a fresh page in:
 /// zeros for anonymous memory, the contents of the file for a file mapping

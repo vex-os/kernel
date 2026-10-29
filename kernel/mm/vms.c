@@ -131,6 +131,7 @@ static int split_region(vmspace_t* restrict vmspace, uintptr_t virt)
     upper->shared = region->shared;
     upper->may_write = region->may_write;
     upper->device = region->device;
+    upper->noreserve = region->noreserve;
     upper->next = region->next;
 
     // Under the lock, so vms_revoke finds the pages above virt in one region or the other
@@ -179,7 +180,7 @@ static void put_frame(uintptr_t phys)
 // Private memory that a write can turn into pages of its own
 static bool counts_commit(const vm_region_t* restrict region, unsigned vprot)
 {
-    return !region->device && !region->shared && (vprot & VPROT_WRITE);
+    return !region->device && !region->shared && !region->noreserve && (vprot & VPROT_WRITE);
 }
 
 static bool region_counted(const vm_region_t* restrict region)
@@ -612,7 +613,8 @@ static bool find_highest_gap(vmspace_t* restrict vmspace, size_t size, uintptr_t
 
 // Private writable memory takes its pages from the commit limit, and free_region gives them back.
 // The replaced pages are the ones that the caller unmaps after this call
-static vm_region_t* alloc_region(uintptr_t start, uintptr_t end, unsigned vprot, const vm_backing_t* restrict backing, size_t replaced)
+static vm_region_t* alloc_region(uintptr_t start, uintptr_t end, unsigned vprot, unsigned flags, const vm_backing_t* restrict backing,
+    size_t replaced)
 {
     vm_region_t* region = slab_alloc(sizeof(vm_region_t));
 
@@ -628,6 +630,7 @@ static vm_region_t* alloc_region(uintptr_t start, uintptr_t end, unsigned vprot,
     region->shared = false;
     region->may_write = true;
     region->device = false;
+    region->noreserve = flags & VMS_NORESERVE;
 
     if(backing && backing->file) {
         region->file = file_dupe(backing->file);
@@ -695,13 +698,14 @@ void vms_release(vmspace_t* restrict vmspace)
     slab_free(vmspace);
 }
 
-int vms_map(vmspace_t* restrict vmspace, uintptr_t start, uintptr_t end, unsigned vprot, const vm_backing_t* restrict backing)
+int vms_map(vmspace_t* restrict vmspace, uintptr_t start, uintptr_t end, unsigned vprot, unsigned flags,
+    const vm_backing_t* restrict backing)
 {
     if(!range_valid(vmspace, start, end)) {
         return -EINVAL;
     }
 
-    vm_region_t* region = alloc_region(start, end, vprot, backing, 0U);
+    vm_region_t* region = alloc_region(start, end, vprot, flags, backing, 0U);
 
     if(region == nullptr) {
         return -ENOMEM;
@@ -722,7 +726,8 @@ int vms_map(vmspace_t* restrict vmspace, uintptr_t start, uintptr_t end, unsigne
     return 0;
 }
 
-int vms_map_replace(vmspace_t* restrict vmspace, uintptr_t start, uintptr_t end, unsigned vprot, const vm_backing_t* restrict backing)
+int vms_map_replace(vmspace_t* restrict vmspace, uintptr_t start, uintptr_t end, unsigned vprot, unsigned flags,
+    const vm_backing_t* restrict backing)
 {
     if(!range_valid(vmspace, start, end)) {
         return -EINVAL;
@@ -730,7 +735,7 @@ int vms_map_replace(vmspace_t* restrict vmspace, uintptr_t start, uintptr_t end,
 
     mutex_acquire(&vmspace->lock);
 
-    vm_region_t* region = alloc_region(start, end, vprot, backing, counted_pages_in(vmspace, start, end));
+    vm_region_t* region = alloc_region(start, end, vprot, flags, backing, counted_pages_in(vmspace, start, end));
 
     if(region == nullptr) {
         mutex_release(&vmspace->lock);
@@ -752,13 +757,14 @@ int vms_map_replace(vmspace_t* restrict vmspace, uintptr_t start, uintptr_t end,
     return 0;
 }
 
-int vms_map_any(vmspace_t* restrict vmspace, size_t size, unsigned vprot, const vm_backing_t* restrict backing, uintptr_t* restrict out)
+int vms_map_any(vmspace_t* restrict vmspace, size_t size, unsigned vprot, unsigned flags, const vm_backing_t* restrict backing,
+    uintptr_t* restrict out)
 {
     if(size == 0 || page_offset(size)) {
         return -EINVAL;
     }
 
-    vm_region_t* region = alloc_region(0, size, vprot, backing, 0U);
+    vm_region_t* region = alloc_region(0, size, vprot, flags, backing, 0U);
 
     if(region == nullptr) {
         return -ENOMEM;
@@ -1031,7 +1037,13 @@ int vms_clone(vmspace_t* restrict vmspace, vmspace_t* restrict source)
         backing.may_write = it->may_write;
         backing.device = it->device;
 
-        vm_region_t* region = alloc_region(it->start, it->end, it->vprot, &backing, 0U);
+        unsigned flags = 0;
+
+        if(it->noreserve) {
+            flags |= VMS_NORESERVE;
+        }
+
+        vm_region_t* region = alloc_region(it->start, it->end, it->vprot, flags, &backing, 0U);
 
         if(region == nullptr) {
             retval = -ENOMEM;

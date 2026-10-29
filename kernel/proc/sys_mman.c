@@ -1,3 +1,5 @@
+#include <vex/capability.h>
+#include <vex/cred.h>
 #include <vex/errno.h>
 #include <vex/file.h>
 #include <vex/mman.h>
@@ -47,7 +49,7 @@ static bool user_range_end(vmspace_t* restrict vmspace, uintptr_t start, uintptr
 }
 
 static intptr_t map_range(vmspace_t* restrict vmspace, uintptr_t addr, uintptr_t length, uintptr_t flags, unsigned vprot,
-    const vm_backing_t* restrict backing)
+    unsigned vms_flags, const vm_backing_t* restrict backing)
 {
     uintptr_t end;
 
@@ -59,10 +61,10 @@ static intptr_t map_range(vmspace_t* restrict vmspace, uintptr_t addr, uintptr_t
         int retval;
 
         if(flags & MAP_FIXED_NOREPLACE) {
-            retval = vms_map(vmspace, addr, end, vprot, backing);
+            retval = vms_map(vmspace, addr, end, vprot, vms_flags, backing);
         }
         else {
-            retval = vms_map_replace(vmspace, addr, end, vprot, backing);
+            retval = vms_map_replace(vmspace, addr, end, vprot, vms_flags, backing);
         }
 
         if(retval < 0) {
@@ -73,12 +75,12 @@ static intptr_t map_range(vmspace_t* restrict vmspace, uintptr_t addr, uintptr_t
     }
 
     // The address is a hint taken when it is free
-    if(addr && user_range_end(vmspace, addr, length, &end) && 0 == vms_map(vmspace, addr, end, vprot, backing)) {
+    if(addr && user_range_end(vmspace, addr, length, &end) && 0 == vms_map(vmspace, addr, end, vprot, vms_flags, backing)) {
         return addr;
     }
 
     uintptr_t placed;
-    int retval = vms_map_any(vmspace, page_align_up(length), vprot, backing, &placed);
+    int retval = vms_map_any(vmspace, page_align_up(length), vprot, vms_flags, backing, &placed);
 
     if(retval < 0) {
         return retval;
@@ -88,9 +90,9 @@ static intptr_t map_range(vmspace_t* restrict vmspace, uintptr_t addr, uintptr_t
 }
 
 static intptr_t place_mapping(vmspace_t* restrict vmspace, uintptr_t addr, uintptr_t length, uintptr_t flags, unsigned vprot,
-    const vm_backing_t* restrict backing)
+    unsigned vms_flags, const vm_backing_t* restrict backing)
 {
-    intptr_t placed = map_range(vmspace, addr, length, flags, vprot, backing);
+    intptr_t placed = map_range(vmspace, addr, length, flags, vprot, vms_flags, backing);
 
     if(placed >= 0 && (flags & MAP_POPULATE)) {
         vms_populate(vmspace, placed, placed + page_align_up(length));
@@ -125,13 +127,19 @@ static intptr_t sys_mmap(const uintptr_t* restrict args)
     }
 
     unsigned vprot = prot_to_vprot(prot);
+    unsigned vms_flags = 0;
+
+    // Without the capability the flag does nothing, as programs pass it out of habit
+    if((flags & MAP_NORESERVE) && cred_capable(thread->credentials, CAP_VM_NORESERVE)) {
+        vms_flags |= VMS_NORESERVE;
+    }
 
     if(flags & MAP_ANONYMOUS) {
         if(sharing == MAP_SHARED) {
             return -ENOSYS; // Shared anonymous memory only differs from private across fork
         }
 
-        return place_mapping(process->vmspace, addr, length, flags, vprot, nullptr);
+        return place_mapping(process->vmspace, addr, length, flags, vprot, vms_flags, nullptr);
     }
 
     if(page_offset(offset) || (off_t)(offset) < 0) {
@@ -173,7 +181,7 @@ static intptr_t sys_mmap(const uintptr_t* restrict args)
             backing.may_write = may_write;
             backing.device = device;
 
-            retval = place_mapping(process->vmspace, addr, length, flags, vprot, &backing);
+            retval = place_mapping(process->vmspace, addr, length, flags, vprot, vms_flags, &backing);
         }
     }
 
