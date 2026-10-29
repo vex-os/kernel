@@ -150,7 +150,7 @@ static void test_nofile(void)
         long last = -1;
         long fd = 0;
 
-        if(set_limit(__k_RLIMIT_NOFILE, LOW_DESCRIPTOR, LOW_DESCRIPTOR) != 0) {
+        if(set_limit(__k_RLIMIT_NOFILE, LOW_DESCRIPTOR, LOW_DESCRIPTOR)) {
             ktest_syscall1(__k_SYS_EXIT, 100);
         }
 
@@ -228,7 +228,7 @@ static void test_stack(void)
         const char* envp[] = { 0 };
 
         // Less than the least stack the kernel gives out: the least comes
-        if(set_limit(__k_RLIMIT_STACK, 16 * KIB, __k_RLIM_INFINITY) != 0) {
+        if(set_limit(__k_RLIMIT_STACK, 16 * KIB, __k_RLIM_INFINITY)) {
             ktest_syscall1(__k_SYS_EXIT, 100);
         }
 
@@ -245,7 +245,7 @@ static void test_stack(void)
         const char* argv[] = { program_path, "stack-child", 0 };
         const char* envp[] = { 0 };
 
-        if(set_limit(__k_RLIMIT_STACK, 2 * MIB, __k_RLIM_INFINITY) != 0) {
+        if(set_limit(__k_RLIMIT_STACK, 2 * MIB, __k_RLIM_INFINITY)) {
             ktest_syscall1(__k_SYS_EXIT, 100);
         }
 

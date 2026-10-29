@@ -5,7 +5,7 @@
 
 typedef struct file_s file_t;
 
-/// Makes a file of memory that no name leads to, for a shared mapping that has no file
+/// Makes a file of memory that no name leads to
 /// @param size A multiple of PAGE_SIZE, not zero
 /// @param out Open for reading and writing; its pages exist from the start and count against the commit limit
 /// @post The memory goes away with the last reference to the file

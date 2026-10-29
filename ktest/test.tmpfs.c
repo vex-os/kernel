@@ -359,7 +359,7 @@ static void test_symlinks(void)
     ktest_expect(remove_file(path), 0);
 
     // The largest target in a slab object, and the smallest one above
-    for(size_t length = PAGE_SIZE / 2; length <= PAGE_SIZE / 2 + 1; ++length) {
+    for(size_t length = PAGE_SIZE / 2; length <= PAGE_SIZE / 2 + 1; length += 1) {
         target[length] = 0;
         ktest_expect(make_symlink(target, path), 0);
         ktest_expect(read_symlink(path, buffer, sizeof(buffer)), (long)(length));

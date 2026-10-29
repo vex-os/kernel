@@ -21,6 +21,12 @@ static_assert(sizeof(rlimits_t) <= SLAB_MAX_SIZE);
 
 static_assert(0 == (RLIMIT_STACK_DEFAULT & (RLIMIT_STACK_DEFAULT - 1)), "CONFIG_USER_STACK_SIZE has to be a power of two");
 
+// The hard limit of the number of descriptors is the size that the table may reach
+static bool above_kernel_ceiling(unsigned resource, const rlimit_t* restrict limit)
+{
+    return resource == RLIMIT_NOFILE && limit->rlim_max > CONFIG_MAX_FDS;
+}
+
 rlimits_t* rlimits_create(void)
 {
     rlimits_t* rlimits = slab_alloc(sizeof(rlimits_t));
@@ -31,7 +37,7 @@ rlimits_t* rlimits_create(void)
 
     rlimits->refcount = 1;
 
-    for(unsigned resource = 0; resource < RLIMIT_NLIMITS; ++resource) {
+    for(unsigned resource = 0; resource < RLIMIT_NLIMITS; resource += 1) {
         rlimits->limits[resource].rlim_cur = RLIM_INFINITY;
         rlimits->limits[resource].rlim_max = RLIM_INFINITY;
     }
@@ -87,12 +93,6 @@ rlimit_t process_get_rlimit(process_t* restrict process, unsigned resource)
     spinlock_release_intr(&process->lock, intr_state);
 
     return limit;
-}
-
-// The hard limit of the number of descriptors is the size that the table may reach
-static bool above_kernel_ceiling(unsigned resource, const rlimit_t* restrict limit)
-{
-    return resource == RLIMIT_NOFILE && limit->rlim_max > CONFIG_MAX_FDS;
 }
 
 int process_set_rlimit(process_t* restrict process, unsigned resource, const rlimit_t* restrict limit, bool privileged)

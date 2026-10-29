@@ -147,8 +147,9 @@ void signal_deliver(hart_context_t* restrict ctx);
 void signal_action(process_t* restrict process, int sig, const sigaction_t* restrict act, sigaction_t* restrict old_action);
 sigset_t signal_mask(thread_t* restrict thread, int how, sigset_t set);
 
-/// Puts back the mask that sigsuspend replaced, if it did; the frame of a handler that runs does it on sigreturn instead
+/// Puts back the mask that sigsuspend replaced
 /// @pre The caller is the thread
+/// @note A handler that runs puts the mask back through sigreturn
 void signal_restore_mask(thread_t* restrict thread);
 sigset_t signal_pending(thread_t* restrict thread);
 void signal_flush(pending_signal_t* restrict queue);

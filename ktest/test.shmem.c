@@ -75,7 +75,7 @@ static void test_sharing(void)
     volatile char* memory = (volatile char*)(base);
 
     // New memory is zeroed, in every page
-    for(long page = 0; page < TEST_PAGES; ++page) {
+    for(long page = 0; page < TEST_PAGES; page += 1) {
         ktest_expect(memory[page * PAGE_SIZE], 0);
     }
 

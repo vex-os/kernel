@@ -6,6 +6,9 @@
 #include <vex/rlimit.h>
 #include <vex/spinlock.h>
 
+#define STACK_SIZE_MIN (UINT64_C(64) * 1024)
+#define STACK_SIZE_MAX (UINT64_C(1024) * 1024 * 1024)
+
 static spinlock_t binfmt_lock = SPINLOCK_INIT;
 static binfmt_t* binfmt_head = nullptr;
 
@@ -25,6 +28,24 @@ static binfmt_t* next_binfmt(const binfmt_t* restrict binfmt)
     spinlock_release(&binfmt_lock);
 
     return next;
+}
+
+// The program has all of its stack from the start, and the arguments take the top of it
+static size_t stack_size_of(uint64_t limit)
+{
+    if(limit == RLIM_INFINITY) {
+        limit = RLIMIT_STACK_DEFAULT;
+    }
+
+    if(limit < STACK_SIZE_MIN) {
+        limit = STACK_SIZE_MIN;
+    }
+
+    if(limit > STACK_SIZE_MAX) {
+        limit = STACK_SIZE_MAX;
+    }
+
+    return page_align_up_number(limit);
 }
 
 int binfmt_add(binfmt_t* restrict binfmt)
@@ -63,27 +84,6 @@ int binfmt_remove(binfmt_t* restrict binfmt)
     spinlock_release(&binfmt_lock);
 
     return -ENOENT;
-}
-
-#define STACK_SIZE_MIN (UINT64_C(64) * 1024)
-#define STACK_SIZE_MAX (UINT64_C(1024) * 1024 * 1024)
-
-// The program has all of its stack from the start, and the arguments take the top of it
-static size_t stack_size_of(uint64_t limit)
-{
-    if(limit == RLIM_INFINITY) {
-        limit = RLIMIT_STACK_DEFAULT;
-    }
-
-    if(limit < STACK_SIZE_MIN) {
-        limit = STACK_SIZE_MIN;
-    }
-
-    if(limit > STACK_SIZE_MAX) {
-        limit = STACK_SIZE_MAX;
-    }
-
-    return page_align_up_number(limit);
 }
 
 int load_binary(vmspace_t* restrict vmspace, file_t* restrict file, const char** restrict argv, const char** restrict envp,

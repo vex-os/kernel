@@ -73,7 +73,7 @@ static intptr_t sys_sysinfo(user_addr_t buffer)
     info.free_pages = atomic_load(&pslab_numfree, ATOMIC_RELAXED);
     info.cpus_total = num_harts;
 
-    for(unsigned long index = 0; index < num_harts; ++index) {
+    for(unsigned long index = 0; index < num_harts; index += 1) {
         if(hart_online(index)) {
             info.cpus_online += 1;
         }

@@ -281,8 +281,9 @@ process_t* process_create(process_t* restrict parent)
     process->exit_note = slab_alloc(sizeof(pending_signal_t));
     process->adopt_note = slab_alloc(sizeof(pending_signal_t));
 
-    if(process->signal_actions == nullptr || process->exit_note == nullptr || process->adopt_note == nullptr
-        || process->rlimits == nullptr) {
+    bool notes_missing = process->exit_note == nullptr || process->adopt_note == nullptr;
+
+    if(process->signal_actions == nullptr || process->rlimits == nullptr || notes_missing) {
         rlimits_decref(process->rlimits);
         slab_free(process->adopt_note);
         slab_free(process->exit_note);
@@ -750,7 +751,7 @@ file_t* process_fd_get(process_t* process, int fd)
 int process_fd_alloc(process_t* process, file_t* file, int min_fd, uint32_t fd_flags)
 {
     size_t limit = fd_limit(process);
-    bool beyond_limit = min_fd > 0 && (size_t)(min_fd) >= limit; // A limit of zero turns every call away with EMFILE below
+    bool beyond_limit = min_fd > 0 && min_fd >= limit; // A limit of zero turns every call away with EMFILE below
 
     if(min_fd < 0 || min_fd >= CONFIG_MAX_FDS || beyond_limit) {
         return -EINVAL;
@@ -758,7 +759,7 @@ int process_fd_alloc(process_t* process, file_t* file, int min_fd, uint32_t fd_f
 
     spinlock_acquire(&process->fd_lock);
 
-    for(size_t fd = min_fd; fd < process->max_fds && fd < limit; ++fd) {
+    for(size_t fd = min_fd; fd < process->max_fds && fd < limit; fd += 1) {
         if(process->fds[fd].file == nullptr) {
             process->fds[fd].file = file;
             process->fds[fd].flags = fd_flags;
@@ -817,7 +818,7 @@ int process_fd_dup(process_t* process, int old_fd, int new_fd, uint32_t fd_flags
     // the limit is a bad one rather than one too many
     size_t limit = fd_limit(process);
 
-    if((size_t)(new_fd) >= limit) {
+    if(new_fd >= limit) {
         file_close(copy);
         return -EBADF;
     }

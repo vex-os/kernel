@@ -77,7 +77,8 @@ void* kstack_alloc(void)
         return nullptr;
     }
 
-    virt_addr_t stack_bottom = address_add(slot_base(slot), PAGE_SIZE);
+    virt_addr_t slot_start = slot_base(slot);
+    virt_addr_t stack_bottom = address_add(slot_start, PAGE_SIZE);
 
     for(size_t i = 0U; i < KSTACK_PAGES; ++i) {
         phys_addr_t phys = pslab_alloc_phys();
@@ -117,7 +118,8 @@ void kstack_free(void* restrict top)
         panic("kstack: freeing invalid kernel stack %p", top);
     }
 
-    virt_addr_t slot_end = address_add(slot_base(slot), KSTACK_SLOT_SIZE);
+    virt_addr_t slot_start = slot_base(slot);
+    virt_addr_t slot_end = address_add(slot_start, KSTACK_SLOT_SIZE);
 
     if(!address_equal(slot_end, stack_top)) {
         panic("kstack: freeing invalid kernel stack %p", top);

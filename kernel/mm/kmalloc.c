@@ -225,7 +225,9 @@ void* kmalloc(size_t size)
 
     spinlock_release_intr(&heap_lock, intr_state);
 
-    return memset(virt_addr_pointer(block->address), 0, size);
+    void* memory = virt_addr_pointer(block->address);
+
+    return memset(memory, 0, size);
 }
 
 void* krealloc(void* restrict ptr, size_t size)

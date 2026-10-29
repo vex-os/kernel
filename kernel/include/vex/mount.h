@@ -69,7 +69,7 @@ struct vfs_driver_s {
 int vfs_driver_add(vfs_driver_t* restrict driver);
 int vfs_driver_remove(vfs_driver_t* restrict driver);
 
-/// Makes a filesystem that no path leads to, for kernel objects that need a vfs_t
+/// Makes a filesystem that no path leads to
 /// @param type The name of a driver. The filesystem has no device
 /// @param params Options for the filesystem, or nullptr
 /// @post On success out is mounted but not in the list of mounts, so nothing can unmount it
