@@ -628,6 +628,18 @@ bool signal_handler_pending(thread_t* restrict thread)
     bool intr_state = spinlock_acquire_intr(&signal_actions->lock);
     sigset_t deliverable = (thread->sig_pending | process->sig_pending) & ~thread->sig_blocked;
 
+bool signal_refused(thread_t* restrict thread, int sig)
+{
+    process_t* process = thread->process;
+    signal_actions_t* signal_actions = process->signal_actions;
+
+    bool intr_state = spinlock_acquire_intr(&signal_actions->lock);
+    bool ignored = ignored_locked(process, sig);
+    spinlock_release_intr(&signal_actions->lock, intr_state);
+
+    return ignored || (thread->sig_blocked & sigbit(sig));
+}
+
     for(int sig = 1; sig <= NSIG && !found; sig += 1) {
         sighandler_t handler = signal_actions->actions[sig - 1].sa_handler;
 

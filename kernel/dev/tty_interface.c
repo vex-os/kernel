@@ -422,6 +422,45 @@ static bool is_controlling_locked(const tty_interface_t* restrict interface, pro
     return session->tty == interface;
 }
 
+// -ERESTART makes the call run again once the group continues. As POSIX has it, a refused SIGTTIN and an orphaned group give -EIO,
+// and a refused SIGTTOU lets the access through
+static int check_foreground(tty_interface_t* restrict interface, int sig)
+{
+    thread_t* thread = this_thread();
+    process_t* process = thread->process;
+
+    if(process == nullptr) {
+        return 0;
+    }
+
+    int retval = 0;
+
+    process_group_lock_acquire();
+
+    process_group_t* group = process->group;
+    bool background = is_controlling_locked(interface, process) && group != interface->priv.foreground;
+
+    if(background) {
+        bool refused = signal_refused(thread, sig);
+        bool orphaned = process_group_orphaned_locked(group);
+
+        if(sig == SIGTTOU && refused) {
+            retval = 0;
+        }
+        else if(refused || orphaned) {
+            retval = -EIO;
+        }
+        else {
+            process_group_signal_locked(group, sig);
+            retval = -ERESTART;
+        }
+    }
+
+    process_group_lock_release();
+
+    return retval;
+}
+
 static int make_controlling(tty_interface_t* restrict interface, uintptr_t argument)
 {
     int32_t force;
@@ -1110,6 +1149,20 @@ static void tty_char_close(const char_interface_t* restrict chr)
     }
 }
 
+static bool output_stops_background(tty_interface_t* restrict interface)
+{
+    bool intr_state = spinlock_acquire_intr(&interface->priv.lock);
+    bool tostop = interface->priv.termios.c_lflag & TOSTOP;
+    spinlock_release_intr(&interface->priv.lock, intr_state);
+
+    return tostop;
+}
+
+static bool changes_termios(uint32_t request)
+{
+    return request == TCSETS || request == TCSETSW || request == TCSETSF;
+}
+
 static ssize_t tty_char_read(const char_interface_t* restrict chr, void* restrict file_ctxdata, off_t offset, void* restrict buffer,
     size_t size, unsigned flags)
 {
@@ -1121,6 +1174,13 @@ static ssize_t tty_char_read(const char_interface_t* restrict chr, void* restric
 
     if(!enter(interface)) {
         return 0;
+    }
+
+    int allowed = check_foreground(interface, SIGTTIN);
+
+    if(allowed < 0) {
+        leave(interface);
+        return allowed;
     }
 
     ssize_t retval = read_input(interface, buffer, size, flags);
@@ -1139,6 +1199,15 @@ static ssize_t tty_char_write(const char_interface_t* restrict chr, void* restri
         return -EIO;
     }
 
+    if(output_stops_background(interface)) {
+        int allowed = check_foreground(interface, SIGTTOU);
+
+        if(allowed < 0) {
+            leave(interface);
+            return allowed;
+        }
+    }
+
     ssize_t retval = write_output(interface, buffer, size, flags);
 
     leave(interface);
@@ -1152,6 +1221,15 @@ static int tty_char_ioctl(const char_interface_t* restrict chr, void* restrict f
 
     if(!enter(interface)) {
         return -EIO;
+    }
+
+    if(changes_termios(request)) {
+        int allowed = check_foreground(interface, SIGTTOU);
+
+        if(allowed < 0) {
+            leave(interface);
+            return allowed;
+        }
     }
 
     int retval = handle_ioctl(interface, request, argument);

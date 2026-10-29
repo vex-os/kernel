@@ -32,6 +32,10 @@ void process_group_lock_release(void);
 /// @pre The caller holds process_group_lock, which keeps the group alive without a reference
 process_group_t* process_group_find_locked(pid_t pgid) __nodiscard;
 
+/// Whether no member of the group has a parent outside it in the same session. Exited processes and children of init do not count
+/// @pre The caller holds process_group_lock
+bool process_group_orphaned_locked(const process_group_t* restrict group) __nodiscard;
+
 /// Sends a signal from the kernel to every member of the group
 /// @pre The caller holds process_group_lock
 void process_group_signal_locked(process_group_t* restrict group, int sig);

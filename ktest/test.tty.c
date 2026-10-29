@@ -2,11 +2,13 @@
 #include <vex/fcntl.h>
 #include <vex/futex.h>
 #include <vex/ioctl.h>
+#include <vex/mman.h>
 #include <vex/serial.h>
 #include <vex/signal.h>
 #include <vex/syscall.h>
 #include <vex/termios.h>
 #include <vex/time.h>
+#include <vex/wait.h>
 
 #include "ktest.h"
 
@@ -235,6 +237,193 @@ static void test_serial(void)
     ktest_expect(ktest_syscall3(__k_SYS_IOCTL, serial_fd, __k_SERIAL_EXCHANGE, (long)&exchange), -__k_EBUSY);
 }
 
+// The child waits until it is in a group of its own, which the parent moves it to
+static void wait_for_own_group(void)
+{
+    while(ktest_syscall1(__k_SYS_GETPGID, 0) != ktest_syscall1(__k_SYS_GETPID, 0)) {
+        ktest_syscall1(__k_SYS_YIELD, 0);
+    }
+}
+
+static long start_background(void (*job)(void))
+{
+    long child = ktest_syscall1(__k_SYS_FORK, 0);
+
+    if(child == 0) {
+        wait_for_own_group();
+        job();
+        ktest_syscall1(__k_SYS_EXIT, 6);
+    }
+
+    ktest_syscall2(__k_SYS_SETPGID, child, child);
+
+    return child;
+}
+
+static void read_in_background(void)
+{
+    char buffer[8];
+    long length = ktest_read(tty_fd, buffer, sizeof(buffer));
+
+    if(length == 2 && buffer[0] == 'k') {
+        ktest_syscall1(__k_SYS_EXIT, 7);
+    }
+}
+
+static void write_in_background(void)
+{
+    if(ktest_syscall3(__k_SYS_WRITE, tty_fd, (long)"x", 1) == 1) {
+        ktest_syscall1(__k_SYS_EXIT, 7);
+    }
+}
+
+static void write_ignoring_in_background(void)
+{
+    struct __k_sigaction action = {};
+    action.sa_handler = __k_SIG_IGN;
+    ktest_syscall3(__k_SYS_SIGACTION, __k_SIGTTOU, (long)(&action), 0);
+    write_in_background();
+}
+
+static void read_ignoring_in_background(void)
+{
+    char buffer[8];
+    struct __k_sigaction action = {};
+    action.sa_handler = __k_SIG_IGN;
+    ktest_syscall3(__k_SYS_SIGACTION, __k_SIGTTIN, (long)(&action), 0);
+
+    if(ktest_read(tty_fd, buffer, sizeof(buffer)) == -__k_EIO) {
+        ktest_syscall1(__k_SYS_EXIT, 7);
+    }
+}
+
+static void set_termios_in_background(void)
+{
+    struct __k_termios termios;
+
+    ktest_syscall3(__k_SYS_IOCTL, tty_fd, __k_TCGETS, (long)&termios);
+
+    if(ktest_syscall3(__k_SYS_IOCTL, tty_fd, __k_TCSETS, (long)&termios) == 0) {
+        ktest_syscall1(__k_SYS_EXIT, 7);
+    }
+}
+
+static long wait_for(long child, long options, int* restrict wstatus)
+{
+    return ktest_syscall3(__k_SYS_WAITPID, child, (long)wstatus, options);
+}
+
+static void expect_stop(void (*job)(void), int sig)
+{
+    int wstatus = -1;
+    long child = start_background(job);
+
+    ktest_expect(wait_for(child, __k_WUNTRACED, &wstatus), child);
+    ktest_expect(__k_WIFSTOPPED(wstatus) && __k_WSTOPSIG(wstatus) == sig, 1);
+    ktest_syscall2(__k_SYS_KILL, child, __k_SIGKILL);
+    wait_for(child, 0, &wstatus);
+}
+
+static void expect_exit(void (*job)(void), int code)
+{
+    int wstatus = -1;
+    long child = start_background(job);
+
+    ktest_expect(wait_for(child, 0, &wstatus), child);
+    ktest_expect(wstatus, __k_W_EXITCODE(code, 0));
+}
+
+// The background job of an orphaned group cannot be continued by anyone, so it gets an error instead of a stop
+static void test_tty_orphaned(void)
+{
+    volatile int* result = (volatile int*)(ktest_syscall6(__k_SYS_MMAP, 0, 4096, __k_PROT_READ | __k_PROT_WRITE,
+        __k_MAP_SHARED | __k_MAP_ANONYMOUS, -1, 0));
+    int wstatus = -1;
+    long middle = ktest_syscall1(__k_SYS_FORK, 0);
+
+    if(middle == 0) {
+        long grandchild = ktest_syscall1(__k_SYS_FORK, 0);
+
+        if(grandchild == 0) {
+            char buffer[8];
+
+            ktest_syscall2(__k_SYS_SETPGID, 0, 0);
+
+            // The group is orphaned once the middle process, its only link to the session, is gone
+            while(ktest_syscall1(__k_SYS_GETPPID, 0) != 1) {
+                ktest_syscall1(__k_SYS_YIELD, 0);
+            }
+
+            if(ktest_read(tty_fd, buffer, sizeof(buffer)) == -__k_EIO) {
+                *result = 7;
+            }
+            else {
+                *result = 6;
+            }
+
+            ktest_syscall1(__k_SYS_EXIT, 0);
+        }
+
+        ktest_syscall1(__k_SYS_EXIT, 0);
+    }
+
+    ktest_syscall2(__k_SYS_SETPGID, middle, middle);
+    wait_for(middle, 0, &wstatus);
+
+    struct __k_timespec delay = {};
+    delay.tv_nsec = 20000000;
+
+    for(int round = 0; round < 100 && *result == 0; round += 1) {
+        ktest_syscall4(__k_SYS_NANOSLEEP, __k_CLOCK_MONOTONIC, 0, (long)&delay, 0);
+    }
+
+    ktest_expect(*result, 7);
+}
+
+static void test_tty_background(long pid)
+{
+    struct __k_termios saved;
+    struct __k_termios tostop;
+    __k_pid_t pgid;
+    int wstatus = -1;
+    long child = start_background(&read_in_background);
+
+    // A read stops the job, and it reads once it has the terminal and is continued
+    ktest_expect(wait_for(child, __k_WUNTRACED, &wstatus), child);
+    ktest_expect(__k_WIFSTOPPED(wstatus) && __k_WSTOPSIG(wstatus) == __k_SIGTTIN, 1);
+
+    pgid = child;
+    ktest_expect(ktest_syscall3(__k_SYS_IOCTL, tty_fd, __k_TIOCSPGRP, (long)&pgid), 0);
+    ktest_syscall2(__k_SYS_KILL, -child, __k_SIGCONT);
+    line_send("k\n");
+    line_drain();
+    ktest_expect(wait_for(child, 0, &wstatus), child);
+    ktest_expect(wstatus, __k_W_EXITCODE(7, 0));
+
+    pgid = pid;
+    ktest_expect(ktest_syscall3(__k_SYS_IOCTL, tty_fd, __k_TIOCSPGRP, (long)&pgid), 0);
+
+    expect_exit(&read_ignoring_in_background, 7);
+
+    // Output goes through from the background until the terminal asks for the stop
+    expect_exit(&write_in_background, 7);
+    line_drain();
+
+    ktest_syscall3(__k_SYS_IOCTL, tty_fd, __k_TCGETS, (long)&saved);
+    tostop = saved;
+    tostop.c_lflag |= __k_TOSTOP;
+    ktest_expect(ktest_syscall3(__k_SYS_IOCTL, tty_fd, __k_TCSETS, (long)&tostop), 0);
+
+    expect_stop(&write_in_background, __k_SIGTTOU);
+    expect_stop(&set_termios_in_background, __k_SIGTTOU);
+    expect_exit(&write_ignoring_in_background, 7);
+    line_drain();
+
+    ktest_expect(ktest_syscall3(__k_SYS_IOCTL, tty_fd, __k_TCSETS, (long)&saved), 0);
+
+    test_tty_orphaned();
+}
+
 static void test_tty(void)
 {
     struct __k_termios saved;
@@ -340,6 +529,8 @@ static void test_tty(void)
 
     pgid = pid;
     ktest_expect(ktest_syscall3(__k_SYS_IOCTL, tty_fd, __k_TIOCSPGRP, (long)&pgid), 0);
+
+    test_tty_background(pid);
 
     /* ^T has the kernel print the foreground group, init ignores the SIGINFO */
     line_send("\x14");

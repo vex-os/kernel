@@ -153,6 +153,9 @@ sigset_t signal_mask(thread_t* restrict thread, int how, sigset_t set);
 void signal_restore_mask(thread_t* restrict thread);
 sigset_t signal_pending(thread_t* restrict thread);
 
+/// Whether the thread blocks the signal or its process ignores it
+bool signal_refused(thread_t* restrict thread, int sig) __nodiscard;
+
 /// Whether a signal that the thread could take now has a handler, so that it would return to user mode through the handler
 bool signal_handler_pending(thread_t* restrict thread) __nodiscard;
 void signal_flush(pending_signal_t* restrict queue);

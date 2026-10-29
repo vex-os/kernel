@@ -201,6 +201,39 @@ void process_group_signal_locked(process_group_t* restrict group, int sig)
     }
 }
 
+bool process_group_orphaned_locked(const process_group_t* restrict group)
+{
+    kassert(mutex_held(&process_group_lock));
+
+    for(process_t* member = group->members; member; member = member->group_next) {
+        pid_t ppid = atomic_load_n(&member->ppid, ATOMIC_SEQ_CST);
+        bool exited = atomic_load_n(&member->flags, ATOMIC_ACQUIRE) & PROCESS_EXITING;
+
+        if(exited || ppid == INIT_PID || ppid == 0) {
+            continue;
+        }
+
+        process_t* parent = process_locate(ppid);
+
+        if(parent == nullptr) {
+            continue;
+        }
+
+        // A parent on its way out hands its children to init
+        process_group_t* parent_group = parent->group;
+        bool leaving = atomic_load_n(&parent->flags, ATOMIC_ACQUIRE) & PROCESS_EXITING;
+        bool outside = !leaving && parent_group != group && parent_group->session == group->session;
+
+        process_decref(parent);
+
+        if(outside) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
 void session_incref(session_t* session)
 {
     atomic_fetch_add(&session->refcount, 1, ATOMIC_RELAXED);
