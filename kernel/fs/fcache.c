@@ -430,7 +430,7 @@ static int writeback_locked(vnode_t* restrict node, fcache_bmap_t bmap, off_t si
 
 static bool over_dirty_limit(void)
 {
-    size_t dirtyable_count = pslab_free_count() + atomic_load(&lru_length, ATOMIC_RELAXED);
+    size_t dirtyable_count = atomic_load(&pslab_numfree, ATOMIC_RELAXED) + atomic_load(&lru_length, ATOMIC_RELAXED);
     size_t dirtyable_percent = dirtyable_count / 100 * CONFIG_FCACHE_DIRTY_PERCENT;
     return atomic_load(&dirty_pages, ATOMIC_RELAXED) > dirtyable_percent;
 }

@@ -16,9 +16,10 @@
 #define RESERVE_PAGES 64 // Kept free for callers that hold a spinlock and can't reclaim
 
 static void** pslab_list = nullptr;
-static size_t pslab_numpages = 0U;
-static size_t pslab_numused = 0U;
 static spinlock_t pslab_lock = SPINLOCK_INIT;
+
+size_t pslab_numpages = 0U;
+size_t pslab_numfree = 0U;
 
 static void pslab_add_region(uintptr_t start, size_t length)
 {
@@ -34,6 +35,7 @@ static void pslab_add_region(uintptr_t start, size_t length)
         head_ptr[0] = pslab_list;
         pslab_list = head_ptr;
         pslab_numpages += 1U;
+        pslab_numfree += 1U;
     }
 
     pr_verbose("pslab: adding region: start=%p end=%p", (void*)(start), (void*)(start + length - 1U));
@@ -71,7 +73,7 @@ static void* take_page(void)
     if(pslab_list) {
         head_ptr = pslab_list;
         pslab_list = pslab_list[0];
-        pslab_numused += 1U;
+        pslab_numfree -= 1U;
 
         pframe_t* pframe = pframe_of(virt_to_phys(head_ptr));
         kassert(pframe->refcount == 0);
@@ -107,7 +109,7 @@ void* pslab_alloc_virt(void)
         return ptr;
     }
 
-    if(pslab_free_count() < RESERVE_PAGES) {
+    if(atomic_load(&pslab_numfree, ATOMIC_RELAXED) < RESERVE_PAGES) {
         fcache_reclaim(RECLAIM_BATCH);
     }
 
@@ -137,15 +139,10 @@ void pslab_free_virt(void* restrict virt)
         head_ptr = virt;
         head_ptr[0] = pslab_list;
         pslab_list = head_ptr;
-        pslab_numused -= 1U;
+        pslab_numfree += 1U;
     }
 
     spinlock_release_intr(&pslab_lock, intr_state);
-}
-
-size_t pslab_free_count(void)
-{
-    return pslab_numpages - atomic_load(&pslab_numused, ATOMIC_RELAXED);
 }
 
 static void init_pslab(void)
