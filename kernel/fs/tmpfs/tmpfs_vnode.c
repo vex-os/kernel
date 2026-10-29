@@ -192,6 +192,11 @@ static int create_locked(vnode_t* restrict dir, const char* restrict name, unsig
         return -ENAMETOOLONG;
     }
 
+    // A directory removed while open has no name to put entries under
+    if(parent->nlink == 0) {
+        return -ENOENT;
+    }
+
     if(find_entry(parent, name)) {
         return -EEXIST;
     }
@@ -453,7 +458,7 @@ static int tmpfs_vnode_link(vnode_t* restrict node, const char* restrict name, v
     int retval = 0;
 
     // A file unlinked while open has no name to link to
-    if(inode->nlink == 0) {
+    if(inode->nlink == 0 || dir->nlink == 0) {
         retval = -ENOENT;
     }
     else if(find_entry(dir, name)) {
@@ -526,7 +531,7 @@ static int rename_locked(vnode_t* olddir, const char* restrict oldname, vnode_t*
     tmpfs_entry_t* old_entry = find_entry(old_parent, oldname);
     tmpfs_entry_t* new_entry = find_entry(new_parent, newname);
 
-    if(old_entry == nullptr || old_entry->node != source) {
+    if(old_entry == nullptr || old_entry->node != source || new_parent->nlink == 0) {
         return -ENOENT;
     }
 

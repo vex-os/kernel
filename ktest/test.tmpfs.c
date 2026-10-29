@@ -469,6 +469,32 @@ static void test_rename(void)
     ktest_expect(remove_file(other), 0);
 }
 
+// A directory that was removed while open takes no new names
+static void test_removed_directory(void)
+{
+    char directory[__k_PATH_MAX];
+    char path[__k_PATH_MAX];
+
+    path_in(directory, mount_point, "gone");
+    path_in(path, mount_point, "gone_file");
+    ktest_close(create_file(mount_point, "gone_file"));
+    ktest_expect(make_directory(directory), 0);
+
+    long fd = ktest_open(directory, __k_O_RDONLY, 0);
+
+    ktest_assert(fd >= 0);
+    ktest_expect(remove_directory(directory), 0);
+
+    ktest_expect(ktest_syscall4(__k_SYS_OPENAT, fd, (long)("x"), __k_O_RDWR | __k_O_CREAT, FILE_MODE), -__k_ENOENT);
+    ktest_expect(ktest_syscall3(__k_SYS_MKDIRAT, fd, (long)("x"), DIRECTORY_MODE), -__k_ENOENT);
+    ktest_expect(ktest_syscall3(__k_SYS_SYMLINKAT, (long)("t"), fd, (long)("x")), -__k_ENOENT);
+    ktest_expect(ktest_syscall5(__k_SYS_LINKAT, __k_AT_FDCWD, (long)(path), fd, (long)("x"), 0), -__k_ENOENT);
+    ktest_expect(ktest_syscall4(__k_SYS_RENAMEAT, __k_AT_FDCWD, (long)(path), fd, (long)("x")), -__k_ENOENT);
+
+    ktest_close(fd);
+    ktest_expect(remove_file(path), 0);
+}
+
 static void test_accounting(void)
 {
     long before = free_blocks(mount_point);
@@ -550,6 +576,7 @@ int main(void)
     test_links();
     test_symlinks();
     test_rename();
+    test_removed_directory();
     test_accounting();
 
     path_in(path, mount_point, "map");
