@@ -153,7 +153,7 @@ static void init_pdma(void)
     bitmap_npages = page_count(bitmap_size);
     bitmap_size = bitmap_npages * PAGE_SIZE;
 
-    uintptr_t bitmap_phys = 0U;
+    phys_addr_t bitmap_phys = phys_addr(0);
 
     for(size_t i = 0U; i < memmap->entry_count; ++i) {
         const struct limine_memmap_entry* entry = memmap->entries[i];
@@ -163,9 +163,9 @@ static void init_pdma(void)
             get_memmap_info(entry, &info);
 
             if(info.npages >= bitmap_npages && info.start + bitmap_size <= PDMA_APPROX_END) {
-                bitmap_phys = info.start;
-                pdma_bitmap = phys_to_virt(phys_addr(bitmap_phys));
-                add_region(phys_addr(bitmap_phys), bitmap_size);
+                bitmap_phys = phys_addr(info.start);
+                pdma_bitmap = phys_to_virt(bitmap_phys);
+                add_region(bitmap_phys, bitmap_size);
                 break;
             }
         }
@@ -192,7 +192,7 @@ static void init_pdma(void)
                 info.length = info.end - info.start + 1U;
             }
 
-            if(info.start == bitmap_phys) {
+            if(info.start == bitmap_phys.value) {
                 info.start += bitmap_size;
                 info.length -= bitmap_size;
             }
