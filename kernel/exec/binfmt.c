@@ -2,6 +2,8 @@
 #include <vex/errno.h>
 #include <vex/file.h>
 #include <vex/kprintf.h>
+#include <vex/page.h>
+#include <vex/rlimit.h>
 #include <vex/spinlock.h>
 
 static spinlock_t binfmt_lock = SPINLOCK_INIT;
@@ -63,9 +65,32 @@ int binfmt_remove(binfmt_t* restrict binfmt)
     return -ENOENT;
 }
 
-int load_binary(vmspace_t* restrict vmspace, file_t* restrict file, const char** restrict argv, const char** restrict envp,
-    const credentials_t* restrict credentials, binfmt_entry_t* restrict out)
+#define STACK_SIZE_MIN (UINT64_C(64) * 1024)
+#define STACK_SIZE_MAX (UINT64_C(1024) * 1024 * 1024)
+
+// The program has all of its stack from the start, and the arguments take the top of it
+static size_t stack_size_of(uint64_t limit)
 {
+    if(limit == RLIM_INFINITY) {
+        limit = RLIMIT_STACK_DEFAULT;
+    }
+
+    if(limit < STACK_SIZE_MIN) {
+        limit = STACK_SIZE_MIN;
+    }
+
+    if(limit > STACK_SIZE_MAX) {
+        limit = STACK_SIZE_MAX;
+    }
+
+    return page_align_up_number(limit);
+}
+
+int load_binary(vmspace_t* restrict vmspace, file_t* restrict file, const char** restrict argv, const char** restrict envp,
+    const credentials_t* restrict credentials, uint64_t stack_limit, binfmt_entry_t* restrict out)
+{
+    size_t stack_size = stack_size_of(stack_limit);
+
     uint8_t header[256];
     ssize_t read = file_read(file, header, sizeof(header), &file->offset);
 
@@ -87,7 +112,7 @@ int load_binary(vmspace_t* restrict vmspace, file_t* restrict file, const char**
                 return retval;
             }
 
-            return it->ops->setup(vmspace, file, argv, envp, credentials, out);
+            return it->ops->setup(vmspace, file, argv, envp, credentials, stack_size, out);
         }
     }
 

@@ -11,6 +11,7 @@
 #include <vex/pgrp.h>
 #include <vex/process.h>
 #include <vex/pslab.h>
+#include <vex/rlimit.h>
 #include <vex/sched.h>
 #include <vex/signal.h>
 #include <vex/syscall.h>
@@ -208,6 +209,7 @@ static intptr_t exec_image(thread_t* restrict thread, char* restrict image_path,
 
     credentials_t* new_cred = nullptr;
     binfmt_entry_t entry;
+    rlimit_t stack_limit = process_get_rlimit(process, RLIMIT_STACK);
 
     if(has_caps) {
         retval = exec_cred(process->credentials, &st, &file_caps, &new_cred);
@@ -217,7 +219,7 @@ static intptr_t exec_image(thread_t* restrict thread, char* restrict image_path,
     }
 
     if(retval == 0) {
-        retval = load_binary(vmspace, file, arguments, environment, new_cred, &entry);
+        retval = load_binary(vmspace, file, arguments, environment, new_cred, stack_limit.rlim_cur, &entry);
     }
 
     mutex_release(&process->credentials_lock);

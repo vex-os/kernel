@@ -11,6 +11,7 @@
 #include <vex/mount.h>
 #include <vex/panic.h>
 #include <vex/process.h>
+#include <vex/rlimit.h>
 #include <vex/sched.h>
 #include <vex/string.h>
 #include <vex/version.h>
@@ -87,7 +88,8 @@ static void spawn_init(void)
     const char* envp[] = { nullptr };
 
     binfmt_entry_t entry;
-    retval = load_binary(process->vmspace, file, argv, envp, &kernel_credentials, &entry);
+    rlimit_t stack_limit = process_get_rlimit(process, RLIMIT_STACK);
+    retval = load_binary(process->vmspace, file, argv, envp, &kernel_credentials, stack_limit.rlim_cur, &entry);
 
     file_close(file);
 

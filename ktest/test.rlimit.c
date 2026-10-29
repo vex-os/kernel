@@ -1,14 +1,20 @@
 #include <vex/capability.h>
 #include <vex/errno.h>
 #include <vex/fcntl.h>
+#include <vex/mman.h>
 #include <vex/resource.h>
 #include <vex/syscall.h>
 #include <vex/wait.h>
 
 #include "ktest.h"
 
+#define PAGE_SIZE      4096
+#define KIB            1024UL
+#define MIB            (1024UL * KIB)
 #define MAX_TEST_FDS   64
 #define LOW_DESCRIPTOR 8
+
+static const char* program_path;
 
 static long get_limit(long resource, struct __k_rlimit* restrict limit)
 {
@@ -192,12 +198,78 @@ static void test_nofile(void)
     ktest_expect(wait_status(child), __k_W_EXITCODE(63, 0));
 }
 
+// The probe runs in the program that exec made. It tells which of two places below the top of its stack are mapped:
+// 100 KiB gives 1 when it is, and 300 KiB gives 2 when it is not
+static int stack_child(void)
+{
+    char marker;
+    long top = (long)(&marker);
+    long inside = (top - 100 * KIB) & ~(long)(PAGE_SIZE - 1);
+    long outside = (top - 300 * KIB) & ~(long)(PAGE_SIZE - 1);
+    int code = 0;
+
+    if(ktest_syscall3(__k_SYS_MADVISE, inside, PAGE_SIZE, __k_MADV_NORMAL) == 0) {
+        code += 1;
+    }
+
+    if(ktest_syscall3(__k_SYS_MADVISE, outside, PAGE_SIZE, __k_MADV_NORMAL) == -__k_ENOMEM) {
+        code += 2;
+    }
+
+    return code;
+}
+
+static void test_stack(void)
+{
+    long child = ktest_syscall1(__k_SYS_FORK, 0);
+
+    if(child == 0) {
+        const char* argv[] = { program_path, "stack-child", 0 };
+        const char* envp[] = { 0 };
+
+        // Less than the least stack the kernel gives out: the least comes
+        if(set_limit(__k_RLIMIT_STACK, 16 * KIB, __k_RLIM_INFINITY) != 0) {
+            ktest_syscall1(__k_SYS_EXIT, 100);
+        }
+
+        ktest_syscall3(__k_SYS_EXEC, (long)(program_path), (long)(argv), (long)(envp));
+        ktest_syscall1(__k_SYS_EXIT, 99);
+    }
+
+    // 64 KiB is the least stack, so both places are out of it
+    ktest_expect(wait_status(child), __k_W_EXITCODE(2, 0));
+
+    child = ktest_syscall1(__k_SYS_FORK, 0);
+
+    if(child == 0) {
+        const char* argv[] = { program_path, "stack-child", 0 };
+        const char* envp[] = { 0 };
+
+        if(set_limit(__k_RLIMIT_STACK, 2 * MIB, __k_RLIM_INFINITY) != 0) {
+            ktest_syscall1(__k_SYS_EXIT, 100);
+        }
+
+        ktest_syscall3(__k_SYS_EXEC, (long)(program_path), (long)(argv), (long)(envp));
+        ktest_syscall1(__k_SYS_EXIT, 99);
+    }
+
+    // Both places are in a stack of 2 MiB
+    ktest_expect(wait_status(child), __k_W_EXITCODE(1, 0));
+}
+
 int main(int argc, char** argv)
 {
+    if(argc > 1 && ktest_string_equal(argv[1], "stack-child")) {
+        return stack_child();
+    }
+
+    program_path = argv[0];
+
     test_basics();
     test_privilege();
     test_fork();
     test_nofile();
+    test_stack();
 
     return ktest_result();
 }

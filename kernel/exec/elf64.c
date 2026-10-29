@@ -15,10 +15,7 @@
 #define ELF64_ARCH EM_NONE
 #endif
 
-#define ELF64_STACK_TOP  UINT64_C(0x0000700000000000)
-#define ELF64_STACK_SIZE (UINT64_C(1024) * CONFIG_USER_STACK_SIZE)
-
-static_assert(0 == (ELF64_STACK_SIZE & (ELF64_STACK_SIZE - 1)), "CONFIG_USER_STACK_SIZE has to be a power of two");
+#define ELF64_STACK_TOP UINT64_C(0x0000700000000000)
 
 static bool ehdr_valid(const elf64_ehdr_t* restrict ehdr)
 {
@@ -348,7 +345,7 @@ static int elf64_probe(file_t* restrict file, const uint8_t* restrict header, si
 }
 
 static int elf64_setup(vmspace_t* restrict vmspace, file_t* restrict file, const char** restrict argv, const char** restrict envp,
-    const credentials_t* restrict credentials, binfmt_entry_t* restrict out)
+    const credentials_t* restrict credentials, size_t stack_size, binfmt_entry_t* restrict out)
 {
     elf64_ehdr_t ehdr;
 
@@ -428,7 +425,7 @@ static int elf64_setup(vmspace_t* restrict vmspace, file_t* restrict file, const
         }
     }
 
-    retval = vms_map(vmspace, virt_addr(ELF64_STACK_TOP - ELF64_STACK_SIZE), virt_addr(ELF64_STACK_TOP), VPROT_RW, 0, nullptr);
+    retval = vms_map(vmspace, virt_addr(ELF64_STACK_TOP - stack_size), virt_addr(ELF64_STACK_TOP), VPROT_RW, 0, nullptr);
 
     if(retval < 0) {
         goto error;
