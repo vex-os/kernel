@@ -14,6 +14,8 @@
 #include <vex/uio.h>
 #include <vex/vnode.h>
 
+#include "syscall_internal.h"
+
 #define FCNTL_SETTABLE_FLAGS (O_APPEND | O_NONBLOCK)
 
 static_assert(FILE_IO_CHUNK <= PAGE_SIZE);
@@ -337,44 +339,52 @@ static intptr_t pwrite_chunks(file_t* restrict file, io_cursor_t* restrict curso
     return write_chunks(file, cursor, &position, false);
 }
 
-static intptr_t read_file(file_t* restrict file, const uintptr_t* restrict args)
+static intptr_t sys_read(file_t* restrict file, uintptr_t user_buffer, size_t count)
 {
     io_cursor_t cursor;
-    io_cursor_init_buffer(&cursor, args[1], args[2]);
+    io_cursor_init_buffer(&cursor, user_buffer, count);
 
     return read_chunks(file, &cursor, &file->offset);
 }
 
-static intptr_t write_file(file_t* restrict file, const uintptr_t* restrict args)
+define_syscall_fd(sys_read, SYS_READ, 3);
+
+static intptr_t sys_write(file_t* restrict file, uintptr_t user_buffer, size_t count)
 {
     io_cursor_t cursor;
-    io_cursor_init_buffer(&cursor, args[1], args[2]);
+    io_cursor_init_buffer(&cursor, user_buffer, count);
 
     bool append = file_flags(file) & O_APPEND;
 
     return write_chunks(file, &cursor, &file->offset, append);
 }
 
-static intptr_t pread_file(file_t* restrict file, const uintptr_t* restrict args)
+define_syscall_fd(sys_write, SYS_WRITE, 3);
+
+static intptr_t sys_pread(file_t* restrict file, uintptr_t user_buffer, size_t count, off_t offset)
 {
     io_cursor_t cursor;
-    io_cursor_init_buffer(&cursor, args[1], args[2]);
+    io_cursor_init_buffer(&cursor, user_buffer, count);
 
-    return pread_chunks(file, &cursor, args[3]);
+    return pread_chunks(file, &cursor, offset);
 }
 
-static intptr_t pwrite_file(file_t* restrict file, const uintptr_t* restrict args)
+define_syscall_fd(sys_pread, SYS_PREAD, 4);
+
+static intptr_t sys_pwrite(file_t* restrict file, uintptr_t user_buffer, size_t count, off_t offset)
 {
     io_cursor_t cursor;
-    io_cursor_init_buffer(&cursor, args[1], args[2]);
+    io_cursor_init_buffer(&cursor, user_buffer, count);
 
-    return pwrite_chunks(file, &cursor, args[3]);
+    return pwrite_chunks(file, &cursor, offset);
 }
 
-static intptr_t readv_file(file_t* restrict file, const uintptr_t* restrict args)
+define_syscall_fd(sys_pwrite, SYS_PWRITE, 4);
+
+static intptr_t sys_readv(file_t* restrict file, uintptr_t user_iov, size_t count)
 {
     io_cursor_t cursor;
-    int retval = io_cursor_init_vector(&cursor, args[1], args[2]);
+    int retval = io_cursor_init_vector(&cursor, user_iov, count);
 
     if(retval < 0) {
         return retval;
@@ -383,10 +393,12 @@ static intptr_t readv_file(file_t* restrict file, const uintptr_t* restrict args
     return read_chunks(file, &cursor, &file->offset);
 }
 
-static intptr_t writev_file(file_t* restrict file, const uintptr_t* restrict args)
+define_syscall_fd(sys_readv, SYS_READV, 3);
+
+static intptr_t sys_writev(file_t* restrict file, uintptr_t user_iov, size_t count)
 {
     io_cursor_t cursor;
-    int retval = io_cursor_init_vector(&cursor, args[1], args[2]);
+    int retval = io_cursor_init_vector(&cursor, user_iov, count);
 
     if(retval < 0) {
         return retval;
@@ -397,43 +409,53 @@ static intptr_t writev_file(file_t* restrict file, const uintptr_t* restrict arg
     return write_chunks(file, &cursor, &file->offset, append);
 }
 
-static intptr_t preadv_file(file_t* restrict file, const uintptr_t* restrict args)
+define_syscall_fd(sys_writev, SYS_WRITEV, 3);
+
+static intptr_t sys_preadv(file_t* restrict file, uintptr_t user_iov, size_t count, off_t offset)
 {
     io_cursor_t cursor;
-    int retval = io_cursor_init_vector(&cursor, args[1], args[2]);
+    int retval = io_cursor_init_vector(&cursor, user_iov, count);
 
     if(retval < 0) {
         return retval;
     }
 
-    return pread_chunks(file, &cursor, args[3]);
+    return pread_chunks(file, &cursor, offset);
 }
 
-static intptr_t pwritev_file(file_t* restrict file, const uintptr_t* restrict args)
+define_syscall_fd(sys_preadv, SYS_PREADV, 4);
+
+static intptr_t sys_pwritev(file_t* restrict file, uintptr_t user_iov, size_t count, off_t offset)
 {
     io_cursor_t cursor;
-    int retval = io_cursor_init_vector(&cursor, args[1], args[2]);
+    int retval = io_cursor_init_vector(&cursor, user_iov, count);
 
     if(retval < 0) {
         return retval;
     }
 
-    return pwrite_chunks(file, &cursor, args[3]);
+    return pwrite_chunks(file, &cursor, offset);
 }
 
-static intptr_t seek_file(file_t* restrict file, const uintptr_t* restrict args)
+define_syscall_fd(sys_pwritev, SYS_PWRITEV, 4);
+
+static intptr_t sys_seek(file_t* restrict file, off_t offset, int origin)
 {
-    return file_seek(file, args[1], args[2]);
+    return file_seek(file, offset, origin);
 }
 
-static intptr_t ftruncate_file(file_t* restrict file, const uintptr_t* restrict args)
+define_syscall_fd(sys_seek, SYS_SEEK, 3);
+
+static intptr_t sys_ftruncate(file_t* restrict file, off_t length)
 {
     thread_t* thread = this_thread();
 
-    return file_truncate(file, thread->credentials, args[1]);
+    return file_truncate(file, thread->credentials, length);
 }
 
-static intptr_t fstat_file(file_t* restrict file, const uintptr_t* restrict args)
+define_syscall_fd(sys_ftruncate, SYS_FTRUNCATE, 2);
+
+static intptr_t sys_fstat(file_t* restrict file, uintptr_t user_stat)
 {
     stat_t st;
     int retval = vnode_stat(file->node, &st);
@@ -442,7 +464,7 @@ static intptr_t fstat_file(file_t* restrict file, const uintptr_t* restrict args
         return retval;
     }
 
-    ssize_t copied = user_copyout(args[1], &st, sizeof(st));
+    ssize_t copied = user_copyout(user_stat, &st, sizeof(st));
 
     if(copied < 0) {
         return copied;
@@ -451,12 +473,16 @@ static intptr_t fstat_file(file_t* restrict file, const uintptr_t* restrict args
     return 0;
 }
 
-static intptr_t ioctl_file(file_t* restrict file, const uintptr_t* restrict args)
+define_syscall_fd(sys_fstat, SYS_FSTAT, 2);
+
+static intptr_t sys_ioctl(file_t* restrict file, uint32_t request, uintptr_t argument)
 {
-    return file_ioctl(file, args[1], args[2]);
+    return file_ioctl(file, request, argument);
 }
 
-static intptr_t fsync_file(file_t* restrict file, const uintptr_t* restrict args)
+define_syscall_fd(sys_ioctl, SYS_IOCTL, 3);
+
+static intptr_t sys_fsync(file_t* restrict file)
 {
     vnode_t* node;
     int retval = vfs_cross_mount(file->node, &node);
@@ -477,6 +503,8 @@ static intptr_t fsync_file(file_t* restrict file, const uintptr_t* restrict args
 
     return retval;
 }
+
+define_syscall_fd(sys_fsync, SYS_FSYNC, 1);
 
 static intptr_t fcntl_setfl(file_t* restrict file, uintptr_t value)
 {
@@ -510,30 +538,46 @@ static intptr_t fcntl_dupfd(file_t* restrict file, uintptr_t min_fd, uint32_t fd
     return fd;
 }
 
-static intptr_t fcntl_file(file_t* restrict file, const uintptr_t* restrict args)
+static intptr_t fcntl_command(file_t* restrict file, int fd, unsigned command, uintptr_t argument)
 {
     thread_t* thread = this_thread();
-    unsigned command = args[1];
 
     switch(command) {
         case F_DUPFD:
-            return fcntl_dupfd(file, args[2], 0);
+            return fcntl_dupfd(file, argument, 0);
         case F_DUPFD_CLOEXEC:
-            return fcntl_dupfd(file, args[2], FD_CLOEXEC);
+            return fcntl_dupfd(file, argument, FD_CLOEXEC);
         case F_GETFD:
-            return process_fd_get_flags(thread->process, args[0]);
+            return process_fd_get_flags(thread->process, fd);
         case F_SETFD:
-            return process_fd_set_flags(thread->process, args[0], args[2] & FD_CLOEXEC);
+            return process_fd_set_flags(thread->process, fd, argument & FD_CLOEXEC);
         case F_GETFL:
             return file_flags(file);
         case F_SETFL:
-            return fcntl_setfl(file, args[2]);
+            return fcntl_setfl(file, argument);
         default:
             return -EINVAL;
     }
 }
 
-static intptr_t sys_openat(const uintptr_t* restrict args)
+static intptr_t sys_fcntl(int fd, unsigned command, uintptr_t argument)
+{
+    file_t* file;
+    intptr_t retval = syscall_fd_get(fd, &file);
+
+    if(retval < 0) {
+        return retval;
+    }
+
+    retval = fcntl_command(file, fd, command, argument);
+    file_close(file);
+
+    return retval;
+}
+
+define_syscall(sys_fcntl, SYS_FCNTL, 3);
+
+static intptr_t sys_openat(int dirfd, const char* restrict path, uintptr_t flags, mode_t mode)
 {
     thread_t* thread = this_thread();
     process_t* process = thread->process;
@@ -542,15 +586,8 @@ static intptr_t sys_openat(const uintptr_t* restrict args)
         return -ENOSYS;
     }
 
-    char path[PATH_MAX];
-    ssize_t copied = user_copyin_str(path, args[1], sizeof(path));
-
-    if(copied < 0) {
-        return copied;
-    }
-
     vnode_t* base_dir;
-    int retval = syscall_dirfd(args[0], path, &base_dir);
+    int retval = syscall_dirfd(dirfd, path, &base_dir);
 
     if(retval < 0) {
         return retval;
@@ -561,12 +598,12 @@ static intptr_t sys_openat(const uintptr_t* restrict args)
 
     uint32_t fd_flags = 0;
 
-    if(args[2] & O_CLOEXEC) {
+    if(flags & O_CLOEXEC) {
         fd_flags = FD_CLOEXEC;
     }
 
     file_t* file;
-    retval = file_open(base_dir, path, args[2] & ~(uintptr_t)(O_CLOEXEC), args[3] & ~umask, credentials, &file);
+    retval = file_open(base_dir, path, flags & ~(uintptr_t)(O_CLOEXEC), mode & ~umask, credentials, &file);
 
     if(base_dir) {
         vnode_decref(base_dir);
@@ -586,9 +623,9 @@ static intptr_t sys_openat(const uintptr_t* restrict args)
     return fd;
 }
 
-define_syscall(sys_openat, SYS_OPENAT);
+define_syscall_dirfd(sys_openat, SYS_OPENAT, 4);
 
-static intptr_t sys_close(const uintptr_t* restrict args)
+static intptr_t sys_close(int fd)
 {
     thread_t* thread = this_thread();
     process_t* process = thread->process;
@@ -597,82 +634,12 @@ static intptr_t sys_close(const uintptr_t* restrict args)
         return -ENOSYS;
     }
 
-    return process_fd_release(process, args[0]);
+    return process_fd_release(process, fd);
 }
 
-define_syscall(sys_close, SYS_CLOSE);
+define_syscall(sys_close, SYS_CLOSE, 1);
 
-static intptr_t sys_read(const uintptr_t* restrict args)
-{
-    return syscall_with_fd(args, &read_file);
-}
-
-define_syscall(sys_read, SYS_READ);
-
-static intptr_t sys_write(const uintptr_t* restrict args)
-{
-    return syscall_with_fd(args, &write_file);
-}
-
-define_syscall(sys_write, SYS_WRITE);
-
-static intptr_t sys_pread(const uintptr_t* restrict args)
-{
-    return syscall_with_fd(args, &pread_file);
-}
-
-define_syscall(sys_pread, SYS_PREAD);
-
-static intptr_t sys_pwrite(const uintptr_t* restrict args)
-{
-    return syscall_with_fd(args, &pwrite_file);
-}
-
-define_syscall(sys_pwrite, SYS_PWRITE);
-
-static intptr_t sys_readv(const uintptr_t* restrict args)
-{
-    return syscall_with_fd(args, &readv_file);
-}
-
-define_syscall(sys_readv, SYS_READV);
-
-static intptr_t sys_writev(const uintptr_t* restrict args)
-{
-    return syscall_with_fd(args, &writev_file);
-}
-
-define_syscall(sys_writev, SYS_WRITEV);
-
-static intptr_t sys_preadv(const uintptr_t* restrict args)
-{
-    return syscall_with_fd(args, &preadv_file);
-}
-
-define_syscall(sys_preadv, SYS_PREADV);
-
-static intptr_t sys_pwritev(const uintptr_t* restrict args)
-{
-    return syscall_with_fd(args, &pwritev_file);
-}
-
-define_syscall(sys_pwritev, SYS_PWRITEV);
-
-static intptr_t sys_seek(const uintptr_t* restrict args)
-{
-    return syscall_with_fd(args, &seek_file);
-}
-
-define_syscall(sys_seek, SYS_SEEK);
-
-static intptr_t sys_ioctl(const uintptr_t* restrict args)
-{
-    return syscall_with_fd(args, &ioctl_file);
-}
-
-define_syscall(sys_ioctl, SYS_IOCTL);
-
-static intptr_t sys_dup(const uintptr_t* restrict args)
+static intptr_t sys_dup(int fd)
 {
     thread_t* thread = this_thread();
     process_t* process = thread->process;
@@ -681,12 +648,12 @@ static intptr_t sys_dup(const uintptr_t* restrict args)
         return -ENOSYS;
     }
 
-    return process_fd_dup(process, args[0], -1, 0);
+    return process_fd_dup(process, fd, -1, 0);
 }
 
-define_syscall(sys_dup, SYS_DUP);
+define_syscall(sys_dup, SYS_DUP, 1);
 
-static intptr_t sys_dup2(const uintptr_t* restrict args)
+static intptr_t sys_dup2(int old_fd, int new_fd)
 {
     thread_t* thread = this_thread();
     process_t* process = thread->process;
@@ -694,9 +661,6 @@ static intptr_t sys_dup2(const uintptr_t* restrict args)
     if(process == nullptr) {
         return -ENOSYS;
     }
-
-    int old_fd = args[0];
-    int new_fd = args[1];
 
     if(new_fd < 0) {
         return -EBADF;
@@ -705,9 +669,9 @@ static intptr_t sys_dup2(const uintptr_t* restrict args)
     return process_fd_dup(process, old_fd, new_fd, 0);
 }
 
-define_syscall(sys_dup2, SYS_DUP2);
+define_syscall(sys_dup2, SYS_DUP2, 2);
 
-static intptr_t sys_dup3(const uintptr_t* restrict args)
+static intptr_t sys_dup3(int old_fd, int new_fd, uintptr_t flags)
 {
     thread_t* thread = this_thread();
     process_t* process = thread->process;
@@ -715,10 +679,6 @@ static intptr_t sys_dup3(const uintptr_t* restrict args)
     if(process == nullptr) {
         return -ENOSYS;
     }
-
-    int old_fd = args[0];
-    int new_fd = args[1];
-    uintptr_t flags = args[2];
 
     if(flags & ~(uintptr_t)(O_CLOEXEC)) {
         return -EINVAL;
@@ -743,32 +703,4 @@ static intptr_t sys_dup3(const uintptr_t* restrict args)
     return process_fd_dup(process, old_fd, new_fd, fd_flags);
 }
 
-define_syscall(sys_dup3, SYS_DUP3);
-
-static intptr_t sys_fstat(const uintptr_t* restrict args)
-{
-    return syscall_with_fd(args, &fstat_file);
-}
-
-define_syscall(sys_fstat, SYS_FSTAT);
-
-static intptr_t sys_ftruncate(const uintptr_t* restrict args)
-{
-    return syscall_with_fd(args, &ftruncate_file);
-}
-
-define_syscall(sys_ftruncate, SYS_FTRUNCATE);
-
-static intptr_t sys_fsync(const uintptr_t* restrict args)
-{
-    return syscall_with_fd(args, &fsync_file);
-}
-
-define_syscall(sys_fsync, SYS_FSYNC);
-
-static intptr_t sys_fcntl(const uintptr_t* restrict args)
-{
-    return syscall_with_fd(args, &fcntl_file);
-}
-
-define_syscall(sys_fcntl, SYS_FCNTL);
+define_syscall(sys_dup3, SYS_DUP3, 3);

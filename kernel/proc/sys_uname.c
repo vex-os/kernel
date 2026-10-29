@@ -10,7 +10,9 @@
 #include <vex/utsname.h>
 #include <vex/version.h>
 
-static intptr_t sys_uname(const uintptr_t* restrict args)
+#include "syscall_internal.h"
+
+static intptr_t sys_uname(uintptr_t buffer)
 {
     utsname_t uname;
     kstrncpy(uname.sysname, k_sysname, sizeof(uname.sysname));
@@ -19,7 +21,7 @@ static intptr_t sys_uname(const uintptr_t* restrict args)
     kstrncpy(uname.machine, k_machine, sizeof(uname.machine));
     hostname_get(uname.nodename, sizeof(uname.nodename));
 
-    ssize_t copied = user_copyout(args[0], &uname, sizeof(uname));
+    ssize_t copied = user_copyout(buffer, &uname, sizeof(uname));
 
     if(copied < 0) {
         return copied;
@@ -28,9 +30,9 @@ static intptr_t sys_uname(const uintptr_t* restrict args)
     return 0;
 }
 
-define_syscall(sys_uname, SYS_UNAME);
+define_syscall(sys_uname, SYS_UNAME, 1);
 
-static intptr_t sys_sethostname(const uintptr_t* restrict args)
+static intptr_t sys_sethostname(uintptr_t user_name, size_t length)
 {
     thread_t* thread = this_thread();
 
@@ -42,14 +44,12 @@ static intptr_t sys_sethostname(const uintptr_t* restrict args)
         return -EPERM;
     }
 
-    size_t length = args[1];
-
     if(length > HOSTNAME_MAX) {
         return -EINVAL;
     }
 
     char name[HOSTNAME_MAX];
-    ssize_t copied = user_copyin(name, args[0], length);
+    ssize_t copied = user_copyin(name, user_name, length);
 
     if(copied < 0) {
         return copied;
@@ -58,4 +58,4 @@ static intptr_t sys_sethostname(const uintptr_t* restrict args)
     return hostname_set(name, length);
 }
 
-define_syscall(sys_sethostname, SYS_SETHOSTNAME);
+define_syscall(sys_sethostname, SYS_SETHOSTNAME, 2);

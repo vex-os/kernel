@@ -8,7 +8,9 @@
 #include <vex/uaccess.h>
 #include <vex/vms.h>
 
-static intptr_t sys_thread_create(const uintptr_t* restrict args)
+#include "syscall_internal.h"
+
+static intptr_t sys_thread_create(uintptr_t entry, uintptr_t stack_top, uintptr_t tcb, uintptr_t argument, uintptr_t clear_tid)
 {
     thread_t* thread = this_thread();
     process_t* process = thread->process;
@@ -19,21 +21,21 @@ static intptr_t sys_thread_create(const uintptr_t* restrict args)
 
     uintptr_t user_end = pmap_user_end(process->vmspace->pmap);
 
-    if(args[0] >= user_end || args[1] >= user_end || args[2] >= user_end || args[4] >= user_end) {
+    if(entry >= user_end || stack_top >= user_end || tcb >= user_end || clear_tid >= user_end) {
         return -EINVAL;
     }
 
-    if(args[4] % sizeof(uint32_t)) {
+    if(clear_tid % sizeof(uint32_t)) {
         return -EINVAL;
     }
 
-    thread_t* created = thread_create_sibling(thread, args[0], args[1], args[3], args[2]);
+    thread_t* created = thread_create_sibling(thread, entry, stack_top, argument, tcb);
 
     if(created == nullptr) {
         return -ENOMEM;
     }
 
-    created->clear_tid = args[4];
+    created->clear_tid = clear_tid;
 
     pid_t tid = created->tid; // The thread may be gone by the time sched_enqueue returns
 
@@ -42,9 +44,9 @@ static intptr_t sys_thread_create(const uintptr_t* restrict args)
     return tid;
 }
 
-define_syscall(sys_thread_create, SYS_THREAD_CREATE);
+define_syscall(sys_thread_create, SYS_THREAD_CREATE, 5);
 
-static intptr_t __noreturn sys_thread_exit(const uintptr_t* restrict args)
+static intptr_t __noreturn sys_thread_exit(void)
 {
     thread_t* thread = this_thread();
     process_t* process = thread->process;
@@ -72,9 +74,9 @@ static intptr_t __noreturn sys_thread_exit(const uintptr_t* restrict args)
     unreachable();
 }
 
-define_syscall(sys_thread_exit, SYS_THREAD_EXIT);
+define_syscall(sys_thread_exit, SYS_THREAD_EXIT, 0);
 
-static intptr_t sys_gettid(const uintptr_t* restrict args)
+static intptr_t sys_gettid(void)
 {
     thread_t* thread = this_thread();
 
@@ -85,9 +87,9 @@ static intptr_t sys_gettid(const uintptr_t* restrict args)
     return thread->tid;
 }
 
-define_syscall(sys_gettid, SYS_GETTID);
+define_syscall(sys_gettid, SYS_GETTID, 0);
 
-static intptr_t sys_tcb_set(const uintptr_t* restrict args)
+static intptr_t sys_tcb_set(uintptr_t tcb)
 {
     thread_t* thread = this_thread();
 
@@ -96,21 +98,21 @@ static intptr_t sys_tcb_set(const uintptr_t* restrict args)
     }
 
     // A kernel address is useless to userspace and may not even be canonical
-    if(args[0] >= pmap_user_end(thread->process->vmspace->pmap)) {
+    if(tcb >= pmap_user_end(thread->process->vmspace->pmap)) {
         return -EINVAL;
     }
 
-    arch_thread_set_tcb(thread, args[0]);
+    arch_thread_set_tcb(thread, tcb);
 
     return 0;
 }
 
-define_syscall(sys_tcb_set, SYS_TCB_SET);
+define_syscall(sys_tcb_set, SYS_TCB_SET, 1);
 
-static intptr_t sys_yield(const uintptr_t* restrict args)
+static intptr_t sys_yield(void)
 {
     sched_yield();
     return 0;
 }
 
-define_syscall(sys_yield, SYS_YIELD);
+define_syscall(sys_yield, SYS_YIELD, 0);

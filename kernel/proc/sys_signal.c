@@ -8,6 +8,8 @@
 #include <vex/thread.h>
 #include <vex/uaccess.h>
 
+#include "syscall_internal.h"
+
 #define SA_KNOWN (SA_NOCLDSTOP | SA_NOCLDWAIT | SA_SIGINFO | SA_ONSTACK | SA_RESTART | SA_NODEFER | SA_RESETHAND | SA_RESTORER)
 
 typedef struct group_kill_s group_kill_t;
@@ -82,11 +84,8 @@ static intptr_t kill_group(thread_t* restrict thread, pid_t pgid, int sig)
     return kill.retval;
 }
 
-static intptr_t sys_kill(const uintptr_t* restrict args)
+static intptr_t sys_kill(pid_t pid, int sig)
 {
-    pid_t pid = args[0];
-    int sig = args[1];
-
     thread_t* thread = this_thread();
     process_t* sender = thread->process;
 
@@ -127,14 +126,10 @@ static intptr_t sys_kill(const uintptr_t* restrict args)
     return retval;
 }
 
-define_syscall(sys_kill, SYS_KILL);
+define_syscall(sys_kill, SYS_KILL, 2);
 
-static intptr_t sys_tgkill(const uintptr_t* restrict args)
+static intptr_t sys_tgkill(pid_t pid, pid_t tid, int sig)
 {
-    pid_t pid = args[0];
-    pid_t tid = args[1];
-    int sig = args[2];
-
     thread_t* thread = this_thread();
     process_t* sender = thread->process;
 
@@ -180,14 +175,10 @@ static intptr_t sys_tgkill(const uintptr_t* restrict args)
     return retval;
 }
 
-define_syscall(sys_tgkill, SYS_TGKILL);
+define_syscall(sys_tgkill, SYS_TGKILL, 3);
 
-static intptr_t sys_sigaction(const uintptr_t* restrict args)
+static intptr_t sys_sigaction(int sig, uintptr_t user_act, uintptr_t user_oact)
 {
-    int sig = args[0];
-    uintptr_t user_act = args[1];
-    uintptr_t user_oact = args[2];
-
     thread_t* thread = this_thread();
     process_t* process = thread->process;
 
@@ -234,14 +225,10 @@ static intptr_t sys_sigaction(const uintptr_t* restrict args)
     return 0;
 }
 
-define_syscall(sys_sigaction, SYS_SIGACTION);
+define_syscall(sys_sigaction, SYS_SIGACTION, 3);
 
-static intptr_t sys_sigprocmask(const uintptr_t* restrict args)
+static intptr_t sys_sigprocmask(int how, uintptr_t user_set, uintptr_t user_oset)
 {
-    int how = args[0];
-    uintptr_t user_set = args[1];
-    uintptr_t user_oset = args[2];
-
     thread_t* thread = this_thread();
 
     if(thread->process == nullptr) {
@@ -278,9 +265,9 @@ static intptr_t sys_sigprocmask(const uintptr_t* restrict args)
     return 0;
 }
 
-define_syscall(sys_sigprocmask, SYS_SIGPROCMASK);
+define_syscall(sys_sigprocmask, SYS_SIGPROCMASK, 3);
 
-static intptr_t sys_sigpending(const uintptr_t* restrict args)
+static intptr_t sys_sigpending(uintptr_t user_set)
 {
     thread_t* thread = this_thread();
 
@@ -289,7 +276,7 @@ static intptr_t sys_sigpending(const uintptr_t* restrict args)
     }
 
     sigset_t pending = signal_pending(thread);
-    ssize_t copied = user_copyout(args[0], &pending, sizeof(pending));
+    ssize_t copied = user_copyout(user_set, &pending, sizeof(pending));
 
     if(copied < 0) {
         return copied;
@@ -298,9 +285,9 @@ static intptr_t sys_sigpending(const uintptr_t* restrict args)
     return 0;
 }
 
-define_syscall(sys_sigpending, SYS_SIGPENDING);
+define_syscall(sys_sigpending, SYS_SIGPENDING, 1);
 
-static intptr_t sys_sigreturn(const uintptr_t* restrict args)
+static intptr_t sys_sigreturn(void)
 {
     thread_t* thread = this_thread();
     process_t* process = thread->process;
@@ -323,13 +310,10 @@ static intptr_t sys_sigreturn(const uintptr_t* restrict args)
     return ctx->syscall_retval;
 }
 
-define_syscall(sys_sigreturn, SYS_SIGRETURN);
+define_syscall(sys_sigreturn, SYS_SIGRETURN, 0);
 
-static intptr_t sys_sigaltstack(const uintptr_t* restrict args)
+static intptr_t sys_sigaltstack(uintptr_t user_ss, uintptr_t user_old)
 {
-    uintptr_t user_ss = args[0];
-    uintptr_t user_old = args[1];
-
     thread_t* thread = this_thread();
 
     if(thread->process == nullptr) {
@@ -388,4 +372,4 @@ static intptr_t sys_sigaltstack(const uintptr_t* restrict args)
     return 0;
 }
 
-define_syscall(sys_sigaltstack, SYS_SIGALTSTACK);
+define_syscall(sys_sigaltstack, SYS_SIGALTSTACK, 2);

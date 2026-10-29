@@ -10,64 +10,9 @@
 #include <vex/uaccess.h>
 #include <vex/vnode.h>
 
-static intptr_t syncfs_file(file_t* restrict file, const uintptr_t* restrict args)
-{
-    vnode_t* node;
-    int retval = vfs_cross_mount(file->node, &node);
+#include "syscall_internal.h"
 
-    if(retval < 0) {
-        return retval;
-    }
-
-    vfs_t* fs = node->fs;
-
-    if(fs == nullptr) {
-        retval = -EINVAL;
-    }
-    else {
-        retval = vfs_sync_fs(fs);
-    }
-
-    vnode_decref(node);
-
-    return retval;
-}
-
-static intptr_t statvfs_file(file_t* restrict file, const uintptr_t* restrict args)
-{
-    vnode_t* node;
-    int retval = vfs_cross_mount(file->node, &node);
-
-    if(retval < 0) {
-        return retval;
-    }
-
-    vfs_t* fs = node->fs;
-    statvfs_t st;
-
-    if(fs == nullptr) {
-        retval = -EINVAL;
-    }
-    else {
-        retval = vfs_statvfs(fs, &st);
-    }
-
-    vnode_decref(node);
-
-    if(retval < 0) {
-        return retval;
-    }
-
-    ssize_t copied = user_copyout(args[1], &st, sizeof(st));
-
-    if(copied < 0) {
-        return copied;
-    }
-
-    return 0;
-}
-
-static intptr_t sys_mount(const uintptr_t* restrict args)
+static intptr_t sys_mount(uintptr_t user_source, uintptr_t user_target, uintptr_t user_type, uintptr_t flags, uintptr_t user_params)
 {
     thread_t* thread = this_thread();
     process_t* process = thread->process;
@@ -82,14 +27,12 @@ static intptr_t sys_mount(const uintptr_t* restrict args)
         return -EPERM;
     }
 
-    uintptr_t flags = args[3];
-
     if(flags & ~(uintptr_t)(MNT_RDONLY)) {
         return -EINVAL;
     }
 
     char target[PATH_MAX];
-    ssize_t copied = user_copyin_str(target, args[1], sizeof(target));
+    ssize_t copied = user_copyin_str(target, user_target, sizeof(target));
 
     if(copied < 0) {
         return copied;
@@ -98,8 +41,8 @@ static intptr_t sys_mount(const uintptr_t* restrict args)
     char fstype[64];
     const char* fstype_ptr = nullptr;
 
-    if(args[2]) {
-        copied = user_copyin_str(fstype, args[2], sizeof(fstype));
+    if(user_type) {
+        copied = user_copyin_str(fstype, user_type, sizeof(fstype));
 
         if(copied < 0) {
             return copied;
@@ -111,8 +54,8 @@ static intptr_t sys_mount(const uintptr_t* restrict args)
     char params[256];
     const char* params_ptr = nullptr;
 
-    if(args[4]) {
-        copied = user_copyin_str(params, args[4], sizeof(params));
+    if(user_params) {
+        copied = user_copyin_str(params, user_params, sizeof(params));
 
         if(copied < 0) {
             return copied;
@@ -123,9 +66,9 @@ static intptr_t sys_mount(const uintptr_t* restrict args)
 
     const block_interface_t* interface = nullptr;
 
-    if(args[0]) {
+    if(user_source) {
         char source[PATH_MAX];
-        copied = user_copyin_str(source, args[0], sizeof(source));
+        copied = user_copyin_str(source, user_source, sizeof(source));
 
         if(copied < 0) {
             return copied;
@@ -175,9 +118,9 @@ static intptr_t sys_mount(const uintptr_t* restrict args)
     return retval;
 }
 
-define_syscall(sys_mount, SYS_MOUNT);
+define_syscall(sys_mount, SYS_MOUNT, 5);
 
-static intptr_t sys_umount(const uintptr_t* restrict args)
+static intptr_t sys_umount(uintptr_t user_path)
 {
     thread_t* thread = this_thread();
     process_t* process = thread->process;
@@ -193,7 +136,7 @@ static intptr_t sys_umount(const uintptr_t* restrict args)
     }
 
     char path[PATH_MAX];
-    ssize_t copied = user_copyin_str(path, args[0], sizeof(path));
+    ssize_t copied = user_copyin_str(path, user_path, sizeof(path));
 
     if(copied < 0) {
         return copied;
@@ -202,25 +145,72 @@ static intptr_t sys_umount(const uintptr_t* restrict args)
     return vfs_unmount(path);
 }
 
-define_syscall(sys_umount, SYS_UMOUNT);
+define_syscall(sys_umount, SYS_UMOUNT, 1);
 
-static intptr_t sys_sync(const uintptr_t* restrict args)
+static intptr_t sys_sync(void)
 {
     return vfs_sync_all();
 }
 
-define_syscall(sys_sync, SYS_SYNC);
+define_syscall(sys_sync, SYS_SYNC, 0);
 
-static intptr_t sys_syncfs(const uintptr_t* restrict args)
+static intptr_t sys_syncfs(file_t* restrict file)
 {
-    return syscall_with_fd(args, &syncfs_file);
+    vnode_t* node;
+    int retval = vfs_cross_mount(file->node, &node);
+
+    if(retval < 0) {
+        return retval;
+    }
+
+    vfs_t* fs = node->fs;
+
+    if(fs == nullptr) {
+        retval = -EINVAL;
+    }
+    else {
+        retval = vfs_sync_fs(fs);
+    }
+
+    vnode_decref(node);
+
+    return retval;
 }
 
-define_syscall(sys_syncfs, SYS_SYNCFS);
+define_syscall_fd(sys_syncfs, SYS_SYNCFS, 1);
 
-static intptr_t sys_statvfs(const uintptr_t* restrict args)
+static intptr_t sys_statvfs(file_t* restrict file, uintptr_t buffer)
 {
-    return syscall_with_fd(args, &statvfs_file);
+    vnode_t* node;
+    int retval = vfs_cross_mount(file->node, &node);
+
+    if(retval < 0) {
+        return retval;
+    }
+
+    vfs_t* fs = node->fs;
+    statvfs_t st;
+
+    if(fs == nullptr) {
+        retval = -EINVAL;
+    }
+    else {
+        retval = vfs_statvfs(fs, &st);
+    }
+
+    vnode_decref(node);
+
+    if(retval < 0) {
+        return retval;
+    }
+
+    ssize_t copied = user_copyout(buffer, &st, sizeof(st));
+
+    if(copied < 0) {
+        return copied;
+    }
+
+    return 0;
 }
 
-define_syscall(sys_statvfs, SYS_STATVFS);
+define_syscall_fd(sys_statvfs, SYS_STATVFS, 2);

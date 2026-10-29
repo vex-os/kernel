@@ -18,6 +18,8 @@
 #include <vex/vms.h>
 #include <vex/wait.h>
 
+#include "syscall_internal.h"
+
 static int copyin_string_array(uintptr_t user_array, const char** restrict out, char** restrict cursor, const char* restrict limit)
 {
     size_t count = 0;
@@ -127,9 +129,10 @@ static int exec_cred(const credentials_t* restrict credentials, const stat_t* re
     return 0;
 }
 
-static intptr_t exec_image(thread_t* restrict thread, char* restrict path, char* restrict strings, const uintptr_t* restrict args)
+static intptr_t exec_image(thread_t* restrict thread, char* restrict path, char* restrict strings, uintptr_t user_path, uintptr_t user_argv,
+    uintptr_t user_envp)
 {
-    ssize_t copied = user_copyin_str(path, args[0], PATH_MAX);
+    ssize_t copied = user_copyin_str(path, user_path, PATH_MAX);
 
     if(copied < 0) {
         return copied;
@@ -139,10 +142,10 @@ static intptr_t exec_image(thread_t* restrict thread, char* restrict path, char*
     const char* envp[BINFMT_ARGS_MAX + 1];
     char* cursor = strings;
 
-    int retval = copyin_string_array(args[1], argv, &cursor, strings + PAGE_SIZE);
+    int retval = copyin_string_array(user_argv, argv, &cursor, strings + PAGE_SIZE);
 
     if(retval == 0) {
-        retval = copyin_string_array(args[2], envp, &cursor, strings + PAGE_SIZE);
+        retval = copyin_string_array(user_envp, envp, &cursor, strings + PAGE_SIZE);
     }
 
     if(retval < 0) {
@@ -338,21 +341,21 @@ static intptr_t wait_child(process_t* restrict caller, pid_t pid, const process_
     }
 }
 
-static intptr_t __noreturn sys_exit(const uintptr_t* restrict args)
+static intptr_t __noreturn sys_exit(int code)
 {
     thread_t* thread = this_thread();
 
     if(thread->process) {
-        process_exit(thread->process, args[0]);
+        process_exit(thread->process, code);
     }
 
     sched_terminate();
     unreachable();
 }
 
-define_syscall(sys_exit, SYS_EXIT);
+define_syscall(sys_exit, SYS_EXIT, 1);
 
-static intptr_t sys_fork(const uintptr_t* restrict args)
+static intptr_t sys_fork(void)
 {
     thread_t* thread = this_thread();
     process_t* process = thread->process;
@@ -399,9 +402,9 @@ static intptr_t sys_fork(const uintptr_t* restrict args)
     return pid;
 }
 
-define_syscall(sys_fork, SYS_FORK);
+define_syscall(sys_fork, SYS_FORK, 0);
 
-static intptr_t sys_exec(const uintptr_t* restrict args)
+static intptr_t sys_exec(uintptr_t user_path, uintptr_t user_argv, uintptr_t user_envp)
 {
     thread_t* thread = this_thread();
 
@@ -415,7 +418,7 @@ static intptr_t sys_exec(const uintptr_t* restrict args)
     intptr_t retval = -ENOMEM;
 
     if(path && strings) {
-        retval = exec_image(thread, path, strings, args);
+        retval = exec_image(thread, path, strings, user_path, user_argv, user_envp);
     }
 
     pslab_free_virt(strings);
@@ -424,14 +427,10 @@ static intptr_t sys_exec(const uintptr_t* restrict args)
     return retval;
 }
 
-define_syscall(sys_exec, SYS_EXEC);
+define_syscall(sys_exec, SYS_EXEC, 3);
 
-static intptr_t sys_waitpid(const uintptr_t* restrict args)
+static intptr_t sys_waitpid(pid_t pid, uintptr_t wstatus, uintptr_t options)
 {
-    pid_t pid = args[0];
-    uintptr_t wstatus = args[1];
-    uintptr_t options = args[2];
-
     if(options & ~(uintptr_t)(WNOHANG)) {
         return -EINVAL;
     }
@@ -470,9 +469,9 @@ static intptr_t sys_waitpid(const uintptr_t* restrict args)
     return retval;
 }
 
-define_syscall(sys_waitpid, SYS_WAITPID);
+define_syscall(sys_waitpid, SYS_WAITPID, 3);
 
-static intptr_t sys_getpid(const uintptr_t* restrict args)
+static intptr_t sys_getpid(void)
 {
     thread_t* thread = this_thread();
     process_t* process = thread->process;
@@ -484,9 +483,9 @@ static intptr_t sys_getpid(const uintptr_t* restrict args)
     return process->pid;
 }
 
-define_syscall(sys_getpid, SYS_GETPID);
+define_syscall(sys_getpid, SYS_GETPID, 0);
 
-static intptr_t sys_getppid(const uintptr_t* restrict args)
+static intptr_t sys_getppid(void)
 {
     thread_t* thread = this_thread();
     process_t* process = thread->process;
@@ -498,9 +497,9 @@ static intptr_t sys_getppid(const uintptr_t* restrict args)
     return atomic_load_n(&process->ppid, ATOMIC_RELAXED);
 }
 
-define_syscall(sys_getppid, SYS_GETPPID);
+define_syscall(sys_getppid, SYS_GETPPID, 0);
 
-static intptr_t sys_setsid(const uintptr_t* restrict args)
+static intptr_t sys_setsid(void)
 {
     thread_t* thread = this_thread();
     process_t* process = thread->process;
@@ -512,13 +511,10 @@ static intptr_t sys_setsid(const uintptr_t* restrict args)
     return process_group_new_session(process);
 }
 
-define_syscall(sys_setsid, SYS_SETSID);
+define_syscall(sys_setsid, SYS_SETSID, 0);
 
-static intptr_t sys_setpgid(const uintptr_t* restrict args)
+static intptr_t sys_setpgid(pid_t pid, pid_t pgid)
 {
-    pid_t pid = args[0];
-    pid_t pgid = args[1];
-
     thread_t* thread = this_thread();
     process_t* caller = thread->process;
 
@@ -546,12 +542,10 @@ static intptr_t sys_setpgid(const uintptr_t* restrict args)
     return retval;
 }
 
-define_syscall(sys_setpgid, SYS_SETPGID);
+define_syscall(sys_setpgid, SYS_SETPGID, 2);
 
-static intptr_t sys_getpgid(const uintptr_t* restrict args)
+static intptr_t sys_getpgid(pid_t pid)
 {
-    pid_t pid = args[0];
-
     thread_t* thread = this_thread();
     process_t* caller = thread->process;
 
@@ -571,12 +565,10 @@ static intptr_t sys_getpgid(const uintptr_t* restrict args)
     return pgid;
 }
 
-define_syscall(sys_getpgid, SYS_GETPGID);
+define_syscall(sys_getpgid, SYS_GETPGID, 1);
 
-static intptr_t sys_getsid(const uintptr_t* restrict args)
+static intptr_t sys_getsid(pid_t pid)
 {
-    pid_t pid = args[0];
-
     thread_t* thread = this_thread();
     process_t* caller = thread->process;
 
@@ -596,4 +588,4 @@ static intptr_t sys_getsid(const uintptr_t* restrict args)
     return sid;
 }
 
-define_syscall(sys_getsid, SYS_GETSID);
+define_syscall(sys_getsid, SYS_GETSID, 1);

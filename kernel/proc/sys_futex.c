@@ -7,6 +7,8 @@
 #include <vex/time.h>
 #include <vex/uaccess.h>
 
+#include "syscall_internal.h"
+
 static int check_flags(uintptr_t flags)
 {
     if(flags & ~(uintptr_t)(FUTEX_SHARED)) {
@@ -16,7 +18,7 @@ static int check_flags(uintptr_t flags)
     return 0;
 }
 
-static intptr_t sys_futex_wait(const uintptr_t* restrict args)
+static intptr_t sys_futex_wait(uintptr_t address, uint32_t value, uintptr_t user_timeout, uintptr_t flags)
 {
     thread_t* thread = this_thread();
     process_t* process = thread->process;
@@ -25,7 +27,7 @@ static intptr_t sys_futex_wait(const uintptr_t* restrict args)
         return -ENOSYS;
     }
 
-    int retval = check_flags(args[3]);
+    int retval = check_flags(flags);
 
     if(retval < 0) {
         return retval;
@@ -33,9 +35,9 @@ static intptr_t sys_futex_wait(const uintptr_t* restrict args)
 
     uint64_t deadline = 0;
 
-    if(args[2]) {
+    if(user_timeout) {
         timespec_t timeout;
-        ssize_t copied = user_copyin(&timeout, args[2], sizeof(timeout));
+        ssize_t copied = user_copyin(&timeout, user_timeout, sizeof(timeout));
 
         if(copied < 0) {
             return copied;
@@ -48,12 +50,12 @@ static intptr_t sys_futex_wait(const uintptr_t* restrict args)
         deadline = deadline_after_nsec(timespec_to_nsec(&timeout));
     }
 
-    return futex_wait(process->vmspace, args[0], (uint32_t)(args[1]), deadline, args[3] & FUTEX_SHARED);
+    return futex_wait(process->vmspace, address, value, deadline, flags & FUTEX_SHARED);
 }
 
-define_syscall(sys_futex_wait, SYS_FUTEX_WAIT);
+define_syscall(sys_futex_wait, SYS_FUTEX_WAIT, 4);
 
-static intptr_t sys_futex_wake(const uintptr_t* restrict args)
+static intptr_t sys_futex_wake(uintptr_t address, size_t count, uintptr_t flags)
 {
     thread_t* thread = this_thread();
     process_t* process = thread->process;
@@ -62,17 +64,17 @@ static intptr_t sys_futex_wake(const uintptr_t* restrict args)
         return -ENOSYS;
     }
 
-    int retval = check_flags(args[2]);
+    int retval = check_flags(flags);
 
     if(retval < 0) {
         return retval;
     }
 
-    if(args[0] % sizeof(uint32_t)) {
+    if(address % sizeof(uint32_t)) {
         return -EINVAL;
     }
 
-    return futex_wake(process->vmspace, args[0], args[1], args[2] & FUTEX_SHARED);
+    return futex_wake(process->vmspace, address, count, flags & FUTEX_SHARED);
 }
 
-define_syscall(sys_futex_wake, SYS_FUTEX_WAKE);
+define_syscall(sys_futex_wake, SYS_FUTEX_WAKE, 3);

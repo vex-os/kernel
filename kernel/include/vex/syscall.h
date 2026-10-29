@@ -127,18 +127,15 @@ struct syscall_s {
     unsigned long number;
 };
 
-#define define_syscall(sc_function, sc_number)                                       \
-    static const __used __section(".syscalls") syscall_t __syscall_##sc_function = { \
-        .function = &(sc_function),                                                  \
-        .name = #sc_function,                                                        \
-        .number = (sc_number),                                                       \
-    }
-
 extern const syscall_t unsorted_syscalls_start[];
 extern const syscall_t unsorted_syscalls_end[];
 
 void syscall_dispatch(hart_context_t* restrict regs);
 
-intptr_t syscall_with_fd(const uintptr_t* restrict args, intptr_t (*op)(file_t* restrict file, const uintptr_t* restrict args));
+/// Gets the file that a descriptor argument names
+/// @retval -EBADF The process has no such descriptor
+/// @post On success the caller owns a reference that file_close gives back
+intptr_t syscall_fd_get(uintptr_t fd, file_t** restrict out);
+
 int syscall_dirfd(int dirfd, const char* restrict path, vnode_t** restrict out) __nodiscard;
 int syscall_resolve_at(int dirfd, const char* restrict path, unsigned flags, vnode_t** restrict out) __nodiscard;

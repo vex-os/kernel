@@ -9,19 +9,9 @@
 #include <vex/vnode.h>
 #include <vex/xattr.h>
 
+#include "syscall_internal.h"
+
 #define RESOLVE_FLAGS (AT_SYMLINK_NOFOLLOW | AT_EMPTY_PATH)
-
-static int resolve(const uintptr_t* restrict args, unsigned flags, vnode_t** restrict out)
-{
-    char path[PATH_MAX];
-    ssize_t copied = user_copyin_str(path, args[1], sizeof(path));
-
-    if(copied < 0) {
-        return copied;
-    }
-
-    return syscall_resolve_at(args[0], path, flags, out);
-}
 
 static int copyin_name(char* restrict name, uintptr_t user_name)
 {
@@ -38,12 +28,9 @@ static int copyin_name(char* restrict name, uintptr_t user_name)
     return 0;
 }
 
-static intptr_t sys_getxattrat(const uintptr_t* restrict args)
+static intptr_t sys_getxattrat(int dirfd, const char* restrict path, uintptr_t user_name, uintptr_t user_value, size_t size, unsigned flags)
 {
     thread_t* thread = this_thread();
-    unsigned flags = args[5];
-    size_t size = args[4];
-
     if(thread->process == nullptr) {
         return -ENOSYS;
     }
@@ -57,14 +44,14 @@ static intptr_t sys_getxattrat(const uintptr_t* restrict args)
     }
 
     char name[XATTR_NAME_MAX + 1];
-    int retval = copyin_name(name, args[2]);
+    int retval = copyin_name(name, user_name);
 
     if(retval < 0) {
         return retval;
     }
 
     vnode_t* node;
-    retval = resolve(args, flags, &node);
+    retval = syscall_resolve_at(dirfd, path, flags, &node);
 
     if(retval < 0) {
         return retval;
@@ -85,7 +72,7 @@ static intptr_t sys_getxattrat(const uintptr_t* restrict args)
     vnode_decref(node);
 
     if(length > 0 && size > 0) {
-        ssize_t copied = user_copyout(args[3], value, length);
+        ssize_t copied = user_copyout(user_value, value, length);
 
         if(copied < 0) {
             length = copied;
@@ -99,14 +86,11 @@ static intptr_t sys_getxattrat(const uintptr_t* restrict args)
     return length;
 }
 
-define_syscall(sys_getxattrat, SYS_GETXATTRAT);
+define_syscall_dirfd(sys_getxattrat, SYS_GETXATTRAT, 6);
 
-static intptr_t sys_setxattrat(const uintptr_t* restrict args)
+static intptr_t sys_setxattrat(int dirfd, const char* restrict path, uintptr_t user_name, uintptr_t user_value, size_t size, unsigned flags)
 {
     thread_t* thread = this_thread();
-    unsigned flags = args[5];
-    size_t size = args[4];
-
     if(thread->process == nullptr) {
         return -ENOSYS;
     }
@@ -120,7 +104,7 @@ static intptr_t sys_setxattrat(const uintptr_t* restrict args)
     }
 
     char name[XATTR_NAME_MAX + 1];
-    int retval = copyin_name(name, args[2]);
+    int retval = copyin_name(name, user_name);
 
     if(retval < 0) {
         return retval;
@@ -135,7 +119,7 @@ static intptr_t sys_setxattrat(const uintptr_t* restrict args)
             return -ENOMEM;
         }
 
-        ssize_t copied = user_copyin(value, args[3], size);
+        ssize_t copied = user_copyin(value, user_value, size);
 
         if(copied < 0) {
             kfree(value);
@@ -144,7 +128,7 @@ static intptr_t sys_setxattrat(const uintptr_t* restrict args)
     }
 
     vnode_t* node;
-    retval = resolve(args, flags & RESOLVE_FLAGS, &node);
+    retval = syscall_resolve_at(dirfd, path, flags & RESOLVE_FLAGS, &node);
 
     if(retval == 0) {
         retval = vnode_set_xattr(node, thread->credentials, name, value, size, flags & (XATTR_CREATE | XATTR_REPLACE));
@@ -158,14 +142,11 @@ static intptr_t sys_setxattrat(const uintptr_t* restrict args)
     return retval;
 }
 
-define_syscall(sys_setxattrat, SYS_SETXATTRAT);
+define_syscall_dirfd(sys_setxattrat, SYS_SETXATTRAT, 6);
 
-static intptr_t sys_listxattrat(const uintptr_t* restrict args)
+static intptr_t sys_listxattrat(int dirfd, const char* restrict path, uintptr_t user_list, size_t size, unsigned flags)
 {
     thread_t* thread = this_thread();
-    unsigned flags = args[4];
-    size_t size = args[3];
-
     if(thread->process == nullptr) {
         return -ENOSYS;
     }
@@ -179,7 +160,7 @@ static intptr_t sys_listxattrat(const uintptr_t* restrict args)
     }
 
     vnode_t* node;
-    int retval = resolve(args, flags, &node);
+    int retval = syscall_resolve_at(dirfd, path, flags, &node);
 
     if(retval < 0) {
         return retval;
@@ -200,7 +181,7 @@ static intptr_t sys_listxattrat(const uintptr_t* restrict args)
     vnode_decref(node);
 
     if(length > 0 && size > 0) {
-        ssize_t copied = user_copyout(args[2], list, length);
+        ssize_t copied = user_copyout(user_list, list, length);
 
         if(copied < 0) {
             length = copied;
@@ -214,13 +195,11 @@ static intptr_t sys_listxattrat(const uintptr_t* restrict args)
     return length;
 }
 
-define_syscall(sys_listxattrat, SYS_LISTXATTRAT);
+define_syscall_dirfd(sys_listxattrat, SYS_LISTXATTRAT, 5);
 
-static intptr_t sys_removexattrat(const uintptr_t* restrict args)
+static intptr_t sys_removexattrat(int dirfd, const char* restrict path, uintptr_t user_name, unsigned flags)
 {
     thread_t* thread = this_thread();
-    unsigned flags = args[3];
-
     if(thread->process == nullptr) {
         return -ENOSYS;
     }
@@ -230,14 +209,14 @@ static intptr_t sys_removexattrat(const uintptr_t* restrict args)
     }
 
     char name[XATTR_NAME_MAX + 1];
-    int retval = copyin_name(name, args[2]);
+    int retval = copyin_name(name, user_name);
 
     if(retval < 0) {
         return retval;
     }
 
     vnode_t* node;
-    retval = resolve(args, flags, &node);
+    retval = syscall_resolve_at(dirfd, path, flags, &node);
 
     if(retval < 0) {
         return retval;
@@ -250,4 +229,4 @@ static intptr_t sys_removexattrat(const uintptr_t* restrict args)
     return retval;
 }
 
-define_syscall(sys_removexattrat, SYS_REMOVEXATTRAT);
+define_syscall_dirfd(sys_removexattrat, SYS_REMOVEXATTRAT, 4);

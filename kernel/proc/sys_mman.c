@@ -11,6 +11,8 @@
 #include <vex/thread.h>
 #include <vex/vms.h>
 
+#include "syscall_internal.h"
+
 #define KNOWN_PROT    (PROT_READ | PROT_WRITE | PROT_EXEC)
 #define KNOWN_FLAGS   (MAP_SHARED | MAP_PRIVATE | MAP_FIXED | MAP_ANONYMOUS | MAP_NORESERVE | MAP_POPULATE | MAP_STACK | MAP_FIXED_NOREPLACE)
 #define KNOWN_SYNC    (MS_ASYNC | MS_INVALIDATE | MS_SYNC)
@@ -101,7 +103,7 @@ static intptr_t place_mapping(vmspace_t* restrict vmspace, uintptr_t addr, uintp
     return placed;
 }
 
-static intptr_t sys_mmap(const uintptr_t* restrict args)
+static intptr_t sys_mmap(uintptr_t addr, uintptr_t length, uintptr_t prot, uintptr_t flags, int fd, uintptr_t offset)
 {
     thread_t* thread = this_thread();
     process_t* process = thread->process;
@@ -109,12 +111,6 @@ static intptr_t sys_mmap(const uintptr_t* restrict args)
     if(process == nullptr) {
         return -ENOSYS;
     }
-
-    uintptr_t addr = args[0];
-    uintptr_t length = args[1];
-    uintptr_t prot = args[2];
-    uintptr_t flags = args[3];
-    uintptr_t offset = args[5];
 
     if(length == 0 || length > pmap_user_end(process->vmspace->pmap) || (prot & ~KNOWN_PROT) || (flags & ~KNOWN_FLAGS)) {
         return -EINVAL;
@@ -146,7 +142,7 @@ static intptr_t sys_mmap(const uintptr_t* restrict args)
         return -EINVAL;
     }
 
-    file_t* file = process_fd_get(process, args[4]);
+    file_t* file = process_fd_get(process, fd);
 
     if(file == nullptr) {
         return -EBADF;
@@ -190,9 +186,9 @@ static intptr_t sys_mmap(const uintptr_t* restrict args)
     return retval;
 }
 
-define_syscall(sys_mmap, SYS_MMAP);
+define_syscall(sys_mmap, SYS_MMAP, 6);
 
-static intptr_t sys_munmap(const uintptr_t* restrict args)
+static intptr_t sys_munmap(uintptr_t addr, uintptr_t length)
 {
     thread_t* thread = this_thread();
     process_t* process = thread->process;
@@ -203,16 +199,16 @@ static intptr_t sys_munmap(const uintptr_t* restrict args)
 
     uintptr_t end;
 
-    if(!user_range_end(process->vmspace, args[0], args[1], &end)) {
+    if(!user_range_end(process->vmspace, addr, length, &end)) {
         return -EINVAL;
     }
 
-    return vms_unmap(process->vmspace, args[0], end);
+    return vms_unmap(process->vmspace, addr, end);
 }
 
-define_syscall(sys_munmap, SYS_MUNMAP);
+define_syscall(sys_munmap, SYS_MUNMAP, 2);
 
-static intptr_t sys_mprotect(const uintptr_t* restrict args)
+static intptr_t sys_mprotect(uintptr_t addr, uintptr_t length, uintptr_t prot)
 {
     thread_t* thread = this_thread();
     process_t* process = thread->process;
@@ -223,16 +219,16 @@ static intptr_t sys_mprotect(const uintptr_t* restrict args)
 
     uintptr_t end;
 
-    if(!user_range_end(process->vmspace, args[0], args[1], &end) || (args[2] & ~KNOWN_PROT)) {
+    if(!user_range_end(process->vmspace, addr, length, &end) || (prot & ~KNOWN_PROT)) {
         return -EINVAL;
     }
 
-    return vms_protect(process->vmspace, args[0], end, prot_to_vprot(args[2]));
+    return vms_protect(process->vmspace, addr, end, prot_to_vprot(prot));
 }
 
-define_syscall(sys_mprotect, SYS_MPROTECT);
+define_syscall(sys_mprotect, SYS_MPROTECT, 3);
 
-static intptr_t sys_msync(const uintptr_t* restrict args)
+static intptr_t sys_msync(uintptr_t addr, uintptr_t length, uintptr_t flags)
 {
     thread_t* thread = this_thread();
     process_t* process = thread->process;
@@ -241,17 +237,16 @@ static intptr_t sys_msync(const uintptr_t* restrict args)
         return -ENOSYS;
     }
 
-    uintptr_t flags = args[2];
     uintptr_t end;
 
-    if(!user_range_end(process->vmspace, args[0], args[1], &end) || (flags & ~KNOWN_SYNC) || ((flags & MS_ASYNC) && (flags & MS_SYNC))) {
+    if(!user_range_end(process->vmspace, addr, length, &end) || (flags & ~KNOWN_SYNC) || ((flags & MS_ASYNC) && (flags & MS_SYNC))) {
         return -EINVAL;
     }
 
-    return vms_sync(process->vmspace, args[0], end, (flags & MS_SYNC));
+    return vms_sync(process->vmspace, addr, end, (flags & MS_SYNC));
 }
 
-define_syscall(sys_msync, SYS_MSYNC);
+define_syscall(sys_msync, SYS_MSYNC, 3);
 
 // The range is rounded out to whole pages, as Linux does, and has to be mapped as a whole
 static intptr_t check_range(vmspace_t* restrict vmspace, uintptr_t addr, uintptr_t length)
@@ -266,7 +261,7 @@ static intptr_t check_range(vmspace_t* restrict vmspace, uintptr_t addr, uintptr
 }
 
 // UNDONE: MADV_WILLNEED reads ahead
-static intptr_t sys_madvise(const uintptr_t* restrict args)
+static intptr_t sys_madvise(uintptr_t addr, uintptr_t length, uintptr_t advice)
 {
     thread_t* thread = this_thread();
     process_t* process = thread->process;
@@ -275,7 +270,7 @@ static intptr_t sys_madvise(const uintptr_t* restrict args)
         return -ENOSYS;
     }
 
-    switch(args[2]) {
+    switch(advice) {
         case MADV_NORMAL:
         case MADV_RANDOM:
         case MADV_SEQUENTIAL:
@@ -287,28 +282,28 @@ static intptr_t sys_madvise(const uintptr_t* restrict args)
             return -EINVAL;
     }
 
-    if(page_offset(args[0])) {
+    if(page_offset(addr)) {
         return -EINVAL;
     }
 
-    if(args[1] == 0) {
+    if(length == 0) {
         return 0;
     }
 
-    intptr_t retval = check_range(process->vmspace, args[0], args[1]);
+    intptr_t retval = check_range(process->vmspace, addr, length);
 
-    if(retval == 0 && args[2] == MADV_DONTNEED) {
-        return vms_discard(process->vmspace, args[0], page_align_up(args[0] + args[1]));
+    if(retval == 0 && advice == MADV_DONTNEED) {
+        return vms_discard(process->vmspace, addr, page_align_up(addr + length));
     }
 
     return retval;
 }
 
-define_syscall(sys_madvise, SYS_MADVISE);
+define_syscall(sys_madvise, SYS_MADVISE, 3);
 
 // UNDONE: Locked pages matter once there is swap. Then
 // this needs a capability and a limit, with RLIMIT_MEMLOCK
-static intptr_t sys_mlock(const uintptr_t* restrict args)
+static intptr_t sys_mlock(uintptr_t addr, uintptr_t length)
 {
     thread_t* thread = this_thread();
     process_t* process = thread->process;
@@ -317,24 +312,24 @@ static intptr_t sys_mlock(const uintptr_t* restrict args)
         return -ENOSYS;
     }
 
-    if(args[1] == 0) {
+    if(length == 0) {
         return 0;
     }
 
-    return check_range(process->vmspace, args[0], args[1]);
+    return check_range(process->vmspace, addr, length);
 }
 
-define_syscall(sys_mlock, SYS_MLOCK);
+define_syscall(sys_mlock, SYS_MLOCK, 2);
 
-static intptr_t sys_munlock(const uintptr_t* restrict args)
+static intptr_t sys_munlock(uintptr_t addr, uintptr_t length)
 {
-    return sys_mlock(args); // Nothing is locked, so unlocking only checks the range
+    return sys_mlock(addr, length); // Nothing is locked, so unlocking only checks the range
 }
 
-define_syscall(sys_munlock, SYS_MUNLOCK);
+define_syscall(sys_munlock, SYS_MUNLOCK, 2);
 
 // UNDONE: As for mlock, and MCL_FUTURE has to reach the mappings made later
-static intptr_t sys_mlockall(const uintptr_t* restrict args)
+static intptr_t sys_mlockall(uintptr_t flags)
 {
     thread_t* thread = this_thread();
 
@@ -343,16 +338,16 @@ static intptr_t sys_mlockall(const uintptr_t* restrict args)
     }
 
     // MCL_ONFAULT only says how to lock, so it needs one of the others
-    if((args[0] & ~(uintptr_t)(KNOWN_LOCKALL)) || 0 == (args[0] & (MCL_CURRENT | MCL_FUTURE))) {
+    if((flags & ~(uintptr_t)(KNOWN_LOCKALL)) || 0 == (flags & (MCL_CURRENT | MCL_FUTURE))) {
         return -EINVAL;
     }
 
     return 0;
 }
 
-define_syscall(sys_mlockall, SYS_MLOCKALL);
+define_syscall(sys_mlockall, SYS_MLOCKALL, 1);
 
-static intptr_t sys_munlockall(const uintptr_t* restrict args)
+static intptr_t sys_munlockall(void)
 {
     thread_t* thread = this_thread();
 
@@ -363,4 +358,4 @@ static intptr_t sys_munlockall(const uintptr_t* restrict args)
     return 0;
 }
 
-define_syscall(sys_munlockall, SYS_MUNLOCKALL);
+define_syscall(sys_munlockall, SYS_MUNLOCKALL, 0);

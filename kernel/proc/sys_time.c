@@ -11,6 +11,8 @@
 #include <vex/uaccess.h>
 #include <vex/wallclock.h>
 
+#include "syscall_internal.h"
+
 // The kernel steps the realtime clock and never slews, so the raw and coarse clocks read as the fine ones
 // TODO: CLOCK_BOOTTIME is not an alias once suspend exists, as it counts the time spent suspended
 // UNDONE: CLOCK_PROCESS_CPUTIME_ID and CLOCK_THREAD_CPUTIME_ID need the CPU time counters (RDTSC?)
@@ -31,11 +33,11 @@ static int canonical_clock(uintptr_t clock)
     }
 }
 
-static intptr_t sys_gettime(const uintptr_t* restrict args)
+static intptr_t sys_gettime(uintptr_t clock, uintptr_t user_time)
 {
     timespec_t time;
 
-    switch(canonical_clock(args[0])) {
+    switch(canonical_clock(clock)) {
         case CLOCK_REALTIME:
             wallclock_get(&time);
             break;
@@ -48,7 +50,7 @@ static intptr_t sys_gettime(const uintptr_t* restrict args)
             return -EINVAL;
     }
 
-    ssize_t copied = user_copyout(args[1], &time, sizeof(time));
+    ssize_t copied = user_copyout(user_time, &time, sizeof(time));
 
     if(copied < 0) {
         return copied;
@@ -57,9 +59,9 @@ static intptr_t sys_gettime(const uintptr_t* restrict args)
     return 0;
 }
 
-define_syscall(sys_gettime, SYS_GETTIME);
+define_syscall(sys_gettime, SYS_GETTIME, 2);
 
-static intptr_t sys_settime(const uintptr_t* restrict args)
+static intptr_t sys_settime(uintptr_t clock, uintptr_t user_time)
 {
     thread_t* thread = this_thread();
 
@@ -67,12 +69,12 @@ static intptr_t sys_settime(const uintptr_t* restrict args)
         return -ENOSYS;
     }
 
-    if(args[0] != CLOCK_REALTIME) {
+    if(clock != CLOCK_REALTIME) {
         return -EINVAL;
     }
 
     timespec_t time;
-    ssize_t copied = user_copyin(&time, args[1], sizeof(time));
+    ssize_t copied = user_copyin(&time, user_time, sizeof(time));
 
     if(copied < 0) {
         return copied;
@@ -85,24 +87,24 @@ static intptr_t sys_settime(const uintptr_t* restrict args)
     return wallclock_set(&time);
 }
 
-define_syscall(sys_settime, SYS_SETTIME);
+define_syscall(sys_settime, SYS_SETTIME, 2);
 
 // Both clocks tick from the active clock source
 // A null pointer only asks whether the clock exists, as in Linux
-static intptr_t sys_gettimeres(const uintptr_t* restrict args)
+static intptr_t sys_gettimeres(uintptr_t clock, uintptr_t user_resolution)
 {
-    if(canonical_clock(args[0]) < 0) {
+    if(canonical_clock(clock) < 0) {
         return -EINVAL;
     }
 
-    if(args[1] == 0) {
+    if(user_resolution == 0) {
         return 0;
     }
 
     timespec_t resolution;
     timespec_from_nsec(&resolution, clock_source_resolution_ns());
 
-    ssize_t copied = user_copyout(args[1], &resolution, sizeof(resolution));
+    ssize_t copied = user_copyout(user_resolution, &resolution, sizeof(resolution));
 
     if(copied < 0) {
         return copied;
@@ -111,7 +113,7 @@ static intptr_t sys_gettimeres(const uintptr_t* restrict args)
     return 0;
 }
 
-define_syscall(sys_gettimeres, SYS_GETTIMERES);
+define_syscall(sys_gettimeres, SYS_GETTIMERES, 2);
 
 // Nobody triggers the event, so only the timeout or a signal ends the wait
 static ssize_t sleep_nanoseconds(uint64_t timeout)
@@ -189,7 +191,7 @@ static ssize_t sleep_until_realtime(const timespec_t* restrict target)
 }
 
 // A signal ends the sleep for good, as POSIX has it, so the call never restarts
-static intptr_t sys_nanosleep(const uintptr_t* restrict args)
+static intptr_t sys_nanosleep(uintptr_t clock_id, uintptr_t flags, uintptr_t user_request, uintptr_t user_remaining)
 {
     thread_t* thread = this_thread();
 
@@ -197,18 +199,18 @@ static intptr_t sys_nanosleep(const uintptr_t* restrict args)
         return -ENOSYS;
     }
 
-    int clock = canonical_clock(args[0]);
+    int clock = canonical_clock(clock_id);
 
     if(clock < 0) {
         return -EINVAL;
     }
 
-    if(0 != (args[1] & ~(uintptr_t)(TIMER_ABSTIME))) {
+    if(flags & ~(uintptr_t)(TIMER_ABSTIME)) {
         return -EINVAL;
     }
 
     timespec_t request;
-    ssize_t copied = user_copyin(&request, args[2], sizeof(request));
+    ssize_t copied = user_copyin(&request, user_request, sizeof(request));
 
     if(copied < 0) {
         return copied;
@@ -218,7 +220,7 @@ static intptr_t sys_nanosleep(const uintptr_t* restrict args)
         return -EINVAL;
     }
 
-    if(args[1] & TIMER_ABSTIME) {
+    if(flags & TIMER_ABSTIME) {
         if(clock == CLOCK_REALTIME) {
             return sleep_until_realtime(&request);
         }
@@ -234,7 +236,7 @@ static intptr_t sys_nanosleep(const uintptr_t* restrict args)
         return 0;
     }
 
-    return sleep_relative(timeout, args[3]);
+    return sleep_relative(timeout, user_remaining);
 }
 
-define_syscall(sys_nanosleep, SYS_NANOSLEEP);
+define_syscall(sys_nanosleep, SYS_NANOSLEEP, 4);

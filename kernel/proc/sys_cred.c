@@ -7,16 +7,18 @@
 #include <vex/thread.h>
 #include <vex/uaccess.h>
 
-static int copyout_res(const uintptr_t* restrict args, int32_t r, int32_t e, int32_t s)
+#include "syscall_internal.h"
+
+static int copyout_res(uintptr_t user_r, uintptr_t user_e, uintptr_t user_s, int32_t r, int32_t e, int32_t s)
 {
-    ssize_t copied = user_copyout(args[0], &r, sizeof(r));
+    ssize_t copied = user_copyout(user_r, &r, sizeof(r));
 
     if(copied >= 0) {
-        copied = user_copyout(args[1], &e, sizeof(e));
+        copied = user_copyout(user_e, &e, sizeof(e));
     }
 
     if(copied >= 0) {
-        copied = user_copyout(args[2], &s, sizeof(s));
+        copied = user_copyout(user_s, &s, sizeof(s));
     }
 
     if(copied < 0) {
@@ -26,7 +28,7 @@ static int copyout_res(const uintptr_t* restrict args, int32_t r, int32_t e, int
     return 0;
 }
 
-static intptr_t sys_getresuid(const uintptr_t* restrict args)
+static intptr_t sys_getresuid(uintptr_t user_ruid, uintptr_t user_euid, uintptr_t user_suid)
 {
     thread_t* thread = this_thread();
     process_t* process = thread->process;
@@ -37,12 +39,12 @@ static intptr_t sys_getresuid(const uintptr_t* restrict args)
 
     const credentials_t* credentials = thread->credentials;
 
-    return copyout_res(args, credentials->uid, credentials->euid, credentials->suid);
+    return copyout_res(user_ruid, user_euid, user_suid, credentials->uid, credentials->euid, credentials->suid);
 }
 
-define_syscall(sys_getresuid, SYS_GETRESUID);
+define_syscall(sys_getresuid, SYS_GETRESUID, 3);
 
-static intptr_t sys_setresuid(const uintptr_t* restrict args)
+static intptr_t sys_setresuid(uid_t ruid, uid_t euid, uid_t suid)
 {
     thread_t* thread = this_thread();
     process_t* process = thread->process;
@@ -57,7 +59,7 @@ static intptr_t sys_setresuid(const uintptr_t* restrict args)
     int retval = -ENOMEM;
 
     if(credentials) {
-        retval = cred_setresuid(credentials, args[0], args[1], args[2]);
+        retval = cred_setresuid(credentials, ruid, euid, suid);
     }
 
     if(retval == 0) {
@@ -72,9 +74,9 @@ static intptr_t sys_setresuid(const uintptr_t* restrict args)
     return retval;
 }
 
-define_syscall(sys_setresuid, SYS_SETRESUID);
+define_syscall(sys_setresuid, SYS_SETRESUID, 3);
 
-static intptr_t sys_getresgid(const uintptr_t* restrict args)
+static intptr_t sys_getresgid(uintptr_t user_rgid, uintptr_t user_egid, uintptr_t user_sgid)
 {
     thread_t* thread = this_thread();
     process_t* process = thread->process;
@@ -85,12 +87,12 @@ static intptr_t sys_getresgid(const uintptr_t* restrict args)
 
     const credentials_t* credentials = thread->credentials;
 
-    return copyout_res(args, credentials->gid, credentials->egid, credentials->sgid);
+    return copyout_res(user_rgid, user_egid, user_sgid, credentials->gid, credentials->egid, credentials->sgid);
 }
 
-define_syscall(sys_getresgid, SYS_GETRESGID);
+define_syscall(sys_getresgid, SYS_GETRESGID, 3);
 
-static intptr_t sys_setresgid(const uintptr_t* restrict args)
+static intptr_t sys_setresgid(gid_t rgid, gid_t egid, gid_t sgid)
 {
     thread_t* thread = this_thread();
     process_t* process = thread->process;
@@ -105,7 +107,7 @@ static intptr_t sys_setresgid(const uintptr_t* restrict args)
     int retval = -ENOMEM;
 
     if(credentials) {
-        retval = cred_setresgid(credentials, args[0], args[1], args[2]);
+        retval = cred_setresgid(credentials, rgid, egid, sgid);
     }
 
     if(retval == 0) {
@@ -120,9 +122,9 @@ static intptr_t sys_setresgid(const uintptr_t* restrict args)
     return retval;
 }
 
-define_syscall(sys_setresgid, SYS_SETRESGID);
+define_syscall(sys_setresgid, SYS_SETRESGID, 3);
 
-static intptr_t sys_getgroups(const uintptr_t* restrict args)
+static intptr_t sys_getgroups(size_t size, uintptr_t user_list)
 {
     thread_t* thread = this_thread();
     process_t* process = thread->process;
@@ -132,8 +134,6 @@ static intptr_t sys_getgroups(const uintptr_t* restrict args)
     }
 
     const credentials_t* credentials = thread->credentials;
-    size_t size = args[0];
-
     if(size == 0) {
         return credentials->num_groups;
     }
@@ -142,7 +142,7 @@ static intptr_t sys_getgroups(const uintptr_t* restrict args)
         return -EINVAL;
     }
 
-    ssize_t copied = user_copyout(args[1], credentials->groups, credentials->num_groups * sizeof(gid_t));
+    ssize_t copied = user_copyout(user_list, credentials->groups, credentials->num_groups * sizeof(gid_t));
 
     if(copied < 0) {
         return copied;
@@ -151,9 +151,9 @@ static intptr_t sys_getgroups(const uintptr_t* restrict args)
     return credentials->num_groups;
 }
 
-define_syscall(sys_getgroups, SYS_GETGROUPS);
+define_syscall(sys_getgroups, SYS_GETGROUPS, 2);
 
-static intptr_t sys_setgroups(const uintptr_t* restrict args)
+static intptr_t sys_setgroups(size_t size, uintptr_t user_list)
 {
     thread_t* thread = this_thread();
     process_t* process = thread->process;
@@ -161,8 +161,6 @@ static intptr_t sys_setgroups(const uintptr_t* restrict args)
     if(process == nullptr) {
         return -ENOSYS;
     }
-
-    size_t size = args[0];
 
     if(size > atomic_load_n(&cred_max_groups, ATOMIC_RELAXED)) {
         return -EINVAL;
@@ -179,7 +177,7 @@ static intptr_t sys_setgroups(const uintptr_t* restrict args)
     int retval = -ENOMEM;
 
     if(credentials) {
-        ssize_t copied = user_copyin(credentials->groups, args[1], size * sizeof(gid_t));
+        ssize_t copied = user_copyin(credentials->groups, user_list, size * sizeof(gid_t));
 
         if(copied < 0) {
             retval = copied;
@@ -201,9 +199,9 @@ static intptr_t sys_setgroups(const uintptr_t* restrict args)
     return retval;
 }
 
-define_syscall(sys_setgroups, SYS_SETGROUPS);
+define_syscall(sys_setgroups, SYS_SETGROUPS, 2);
 
-static intptr_t sys_getumask(const uintptr_t* restrict args)
+static intptr_t sys_getumask(void)
 {
     thread_t* thread = this_thread();
     process_t* process = thread->process;
@@ -215,9 +213,9 @@ static intptr_t sys_getumask(const uintptr_t* restrict args)
     return atomic_load_n(&process->umask, ATOMIC_RELAXED);
 }
 
-define_syscall(sys_getumask, SYS_GETUMASK);
+define_syscall(sys_getumask, SYS_GETUMASK, 0);
 
-static intptr_t sys_setumask(const uintptr_t* restrict args)
+static intptr_t sys_setumask(mode_t mask)
 {
     thread_t* thread = this_thread();
     process_t* process = thread->process;
@@ -226,12 +224,12 @@ static intptr_t sys_setumask(const uintptr_t* restrict args)
         return -ENOSYS;
     }
 
-    return atomic_exchange(&process->umask, args[0] & (S_IRWXU | S_IRWXG | S_IRWXO), ATOMIC_RELAXED);
+    return atomic_exchange(&process->umask, mask & (S_IRWXU | S_IRWXG | S_IRWXO), ATOMIC_RELAXED);
 }
 
-define_syscall(sys_setumask, SYS_SETUMASK);
+define_syscall(sys_setumask, SYS_SETUMASK, 1);
 
-static intptr_t sys_capget(const uintptr_t* restrict args)
+static intptr_t sys_capget(uintptr_t user_caps)
 {
     thread_t* thread = this_thread();
     process_t* process = thread->process;
@@ -249,7 +247,7 @@ static intptr_t sys_capget(const uintptr_t* restrict args)
     caps.bounding = credentials->cap_bounding;
     caps.flags = credentials->cap_flags;
 
-    ssize_t copied = user_copyout(args[0], &caps, sizeof(caps));
+    ssize_t copied = user_copyout(user_caps, &caps, sizeof(caps));
 
     if(copied < 0) {
         return copied;
@@ -258,9 +256,9 @@ static intptr_t sys_capget(const uintptr_t* restrict args)
     return 0;
 }
 
-define_syscall(sys_capget, SYS_CAPGET);
+define_syscall(sys_capget, SYS_CAPGET, 1);
 
-static intptr_t sys_capset(const uintptr_t* restrict args)
+static intptr_t sys_capset(uintptr_t user_caps)
 {
     thread_t* thread = this_thread();
     process_t* process = thread->process;
@@ -270,7 +268,7 @@ static intptr_t sys_capset(const uintptr_t* restrict args)
     }
 
     caps_t caps;
-    ssize_t copied = user_copyin(&caps, args[0], sizeof(caps));
+    ssize_t copied = user_copyin(&caps, user_caps, sizeof(caps));
 
     if(copied < 0) {
         return copied;
@@ -297,4 +295,4 @@ static intptr_t sys_capset(const uintptr_t* restrict args)
     return retval;
 }
 
-define_syscall(sys_capset, SYS_CAPSET);
+define_syscall(sys_capset, SYS_CAPSET, 1);

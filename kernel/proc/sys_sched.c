@@ -11,6 +11,8 @@
 #include <vex/time.h>
 #include <vex/uaccess.h>
 
+#include "syscall_internal.h"
+
 #define AFFINITY_WORD_BITS 64
 #define AFFINITY_WORDS     ((num_harts + AFFINITY_WORD_BITS - 1) / AFFINITY_WORD_BITS)
 #define AFFINITY_BYTES     (AFFINITY_WORDS * sizeof(uint64_t))
@@ -174,7 +176,7 @@ static int walk_targets(priority_walk_t* restrict walk, pid_t who, void (*callba
     return 0;
 }
 
-static intptr_t sys_getpriority(const uintptr_t* restrict args)
+static intptr_t sys_getpriority(int which, pid_t who)
 {
     thread_t* thread = this_thread();
 
@@ -184,10 +186,10 @@ static intptr_t sys_getpriority(const uintptr_t* restrict args)
 
     priority_walk_t walk = {};
     walk.caller = thread;
-    walk.which = args[0];
+    walk.which = which;
     walk.nice = NICE_MAX + 1;
 
-    int retval = walk_targets(&walk, args[1], &get_member);
+    int retval = walk_targets(&walk, who, &get_member);
 
     if(retval < 0) {
         return retval;
@@ -196,9 +198,9 @@ static intptr_t sys_getpriority(const uintptr_t* restrict args)
     return NICE_BIAS - walk.nice;
 }
 
-define_syscall(sys_getpriority, SYS_GETPRIORITY);
+define_syscall(sys_getpriority, SYS_GETPRIORITY, 2);
 
-static intptr_t sys_setpriority(const uintptr_t* restrict args)
+static intptr_t sys_setpriority(int which, pid_t who, intptr_t value)
 {
     thread_t* thread = this_thread();
 
@@ -206,7 +208,7 @@ static intptr_t sys_setpriority(const uintptr_t* restrict args)
         return -ENOSYS;
     }
 
-    intptr_t nice = (intptr_t)(args[2]);
+    intptr_t nice = value;
 
     if(nice < NICE_MIN) {
         nice = NICE_MIN;
@@ -218,10 +220,10 @@ static intptr_t sys_setpriority(const uintptr_t* restrict args)
 
     priority_walk_t walk = {};
     walk.caller = thread;
-    walk.which = args[0];
+    walk.which = which;
     walk.nice = nice;
 
-    int retval = walk_targets(&walk, args[1], &set_member);
+    int retval = walk_targets(&walk, who, &set_member);
 
     if(retval < 0) {
         return retval;
@@ -230,12 +232,11 @@ static intptr_t sys_setpriority(const uintptr_t* restrict args)
     return walk.error;
 }
 
-define_syscall(sys_setpriority, SYS_SETPRIORITY);
+define_syscall(sys_setpriority, SYS_SETPRIORITY, 3);
 
-static intptr_t sys_getscheduler(const uintptr_t* restrict args)
+static intptr_t sys_getscheduler(pid_t pid)
 {
     thread_t* thread = this_thread();
-    pid_t pid = args[0];
 
     if(thread->process == nullptr) {
         return -ENOSYS;
@@ -256,13 +257,12 @@ static intptr_t sys_getscheduler(const uintptr_t* restrict args)
     return SCHED_OTHER;
 }
 
-define_syscall(sys_getscheduler, SYS_GETSCHEDULER);
+define_syscall(sys_getscheduler, SYS_GETSCHEDULER, 1);
 
 // The only policy is SCHED_OTHER, with priority 0. UNDONE: SCHED_FIFO and SCHED_RR
-static intptr_t set_scheduling(const uintptr_t* restrict args, uintptr_t policy, uintptr_t user_param)
+static intptr_t set_scheduling(pid_t pid, uintptr_t policy, uintptr_t user_param)
 {
     thread_t* thread = this_thread();
-    pid_t pid = args[0];
 
     if(thread->process == nullptr) {
         return -ENOSYS;
@@ -300,24 +300,23 @@ static intptr_t set_scheduling(const uintptr_t* restrict args, uintptr_t policy,
     return retval;
 }
 
-static intptr_t sys_setscheduler(const uintptr_t* restrict args)
+static intptr_t sys_setscheduler(pid_t pid, uintptr_t policy, uintptr_t user_param)
 {
-    return set_scheduling(args, args[1], args[2]);
+    return set_scheduling(pid, policy, user_param);
 }
 
-define_syscall(sys_setscheduler, SYS_SETSCHEDULER);
+define_syscall(sys_setscheduler, SYS_SETSCHEDULER, 3);
 
-static intptr_t sys_setschedparam(const uintptr_t* restrict args)
+static intptr_t sys_setschedparam(pid_t pid, uintptr_t user_param)
 {
-    return set_scheduling(args, SCHED_OTHER, args[1]);
+    return set_scheduling(pid, SCHED_OTHER, user_param);
 }
 
-define_syscall(sys_setschedparam, SYS_SETSCHEDPARAM);
+define_syscall(sys_setschedparam, SYS_SETSCHEDPARAM, 2);
 
-static intptr_t sys_getschedparam(const uintptr_t* restrict args)
+static intptr_t sys_getschedparam(pid_t pid, uintptr_t user_param)
 {
     thread_t* thread = this_thread();
-    pid_t pid = args[0];
 
     if(thread->process == nullptr) {
         return -ENOSYS;
@@ -336,7 +335,7 @@ static intptr_t sys_getschedparam(const uintptr_t* restrict args)
     process_decref(process);
 
     sched_param_t param = {};
-    ssize_t copied = user_copyout(args[1], &param, sizeof(param));
+    ssize_t copied = user_copyout(user_param, &param, sizeof(param));
 
     if(copied < 0) {
         return copied;
@@ -345,16 +344,16 @@ static intptr_t sys_getschedparam(const uintptr_t* restrict args)
     return 0;
 }
 
-define_syscall(sys_getschedparam, SYS_GETSCHEDPARAM);
+define_syscall(sys_getschedparam, SYS_GETSCHEDPARAM, 2);
 
-static intptr_t sys_getschedrange(const uintptr_t* restrict args)
+static intptr_t sys_getschedrange(uintptr_t policy, uintptr_t user_range)
 {
-    if(args[0] != SCHED_OTHER) {
+    if(policy != SCHED_OTHER) {
         return -EINVAL;
     }
 
     sched_range_t range = {};
-    ssize_t copied = user_copyout(args[1], &range, sizeof(range));
+    ssize_t copied = user_copyout(user_range, &range, sizeof(range));
 
     if(copied < 0) {
         return copied;
@@ -363,12 +362,11 @@ static intptr_t sys_getschedrange(const uintptr_t* restrict args)
     return 0;
 }
 
-define_syscall(sys_getschedrange, SYS_GETSCHEDRANGE);
+define_syscall(sys_getschedrange, SYS_GETSCHEDRANGE, 2);
 
-static intptr_t sys_getschedinterval(const uintptr_t* restrict args)
+static intptr_t sys_getschedinterval(pid_t pid, uintptr_t user_interval)
 {
     thread_t* thread = this_thread();
-    pid_t pid = args[0];
 
     if(thread->process == nullptr) {
         return -ENOSYS;
@@ -391,7 +389,7 @@ static intptr_t sys_getschedinterval(const uintptr_t* restrict args)
     timespec_t interval;
     timespec_from_nsec(&interval, timeslice);
 
-    ssize_t copied = user_copyout(args[1], &interval, sizeof(interval));
+    ssize_t copied = user_copyout(user_interval, &interval, sizeof(interval));
 
     if(copied < 0) {
         return copied;
@@ -400,7 +398,7 @@ static intptr_t sys_getschedinterval(const uintptr_t* restrict args)
     return 0;
 }
 
-define_syscall(sys_getschedinterval, SYS_GETSCHEDINTERVAL);
+define_syscall(sys_getschedinterval, SYS_GETSCHEDINTERVAL, 2);
 
 static uint64_t online_word(size_t word)
 {
@@ -418,11 +416,9 @@ static uint64_t online_word(size_t word)
 }
 
 // The mask is in whole words, as Linux has it. The call returns the size of the mask, not zero
-static intptr_t sys_getaffinity(const uintptr_t* restrict args)
+static intptr_t sys_getaffinity(pid_t pid, size_t size, uintptr_t user_mask)
 {
     thread_t* thread = this_thread();
-    pid_t pid = args[0];
-    size_t size = args[1];
 
     if(thread->process == nullptr) {
         return -ENOSYS;
@@ -442,7 +438,7 @@ static intptr_t sys_getaffinity(const uintptr_t* restrict args)
 
     for(size_t word = 0; word < AFFINITY_WORDS; word += 1) {
         uint64_t bits = online_word(word);
-        ssize_t copied = user_copyout(args[2] + word * sizeof(bits), &bits, sizeof(bits));
+        ssize_t copied = user_copyout(user_mask + word * sizeof(bits), &bits, sizeof(bits));
 
         if(copied < 0) {
             return copied;
@@ -452,14 +448,12 @@ static intptr_t sys_getaffinity(const uintptr_t* restrict args)
     return AFFINITY_BYTES;
 }
 
-define_syscall(sys_getaffinity, SYS_GETAFFINITY);
+define_syscall(sys_getaffinity, SYS_GETAFFINITY, 3);
 
 // UNDONE: The scheduler keeps the thread off the harts that the mask leaves out
-static intptr_t sys_setaffinity(const uintptr_t* restrict args)
+static intptr_t sys_setaffinity(pid_t pid, size_t size, uintptr_t user_mask)
 {
     thread_t* thread = this_thread();
-    pid_t pid = args[0];
-    size_t size = args[1];
 
     if(thread->process == nullptr) {
         return -ENOSYS;
@@ -483,7 +477,7 @@ static intptr_t sys_setaffinity(const uintptr_t* restrict args)
                 chunk = sizeof(bits);
             }
 
-            ssize_t copied = user_copyin(&bits, args[2] + offset, chunk);
+            ssize_t copied = user_copyin(&bits, user_mask + offset, chunk);
 
             if(copied < 0) {
                 return copied;
@@ -516,4 +510,4 @@ static intptr_t sys_setaffinity(const uintptr_t* restrict args)
     return 0;
 }
 
-define_syscall(sys_setaffinity, SYS_SETAFFINITY);
+define_syscall(sys_setaffinity, SYS_SETAFFINITY, 3);

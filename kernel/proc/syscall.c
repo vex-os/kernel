@@ -159,7 +159,7 @@ int syscall_resolve_at(int dirfd, const char* restrict path, unsigned flags, vno
     return retval;
 }
 
-intptr_t syscall_with_fd(const uintptr_t* restrict args, intptr_t (*op)(file_t* restrict file, const uintptr_t* restrict args))
+intptr_t syscall_fd_get(uintptr_t fd, file_t** restrict out)
 {
     thread_t* thread = this_thread();
     process_t* process = thread->process;
@@ -168,17 +168,15 @@ intptr_t syscall_with_fd(const uintptr_t* restrict args, intptr_t (*op)(file_t* 
         return -ENOSYS;
     }
 
-    file_t* file = process_fd_get(process, args[0]);
+    file_t* file = process_fd_get(process, fd);
 
     if(file == nullptr) {
         return -EBADF;
     }
 
-    intptr_t retval = op(file, args);
+    *out = file;
 
-    file_close(file);
-
-    return retval;
+    return 0;
 }
 
 static void init_syscall(void)
