@@ -69,6 +69,13 @@ struct vfs_driver_s {
 int vfs_driver_add(vfs_driver_t* restrict driver);
 int vfs_driver_remove(vfs_driver_t* restrict driver);
 
+/// Makes a filesystem that no path leads to, for kernel objects that need a vfs_t
+/// @param type The name of a driver. The filesystem has no device
+/// @param params Options for the filesystem, or nullptr
+/// @post On success out is mounted but not in the list of mounts, so nothing can unmount it
+/// @retval -ENOENT No driver has this name
+int vfs_create(const char* restrict type, const char* restrict params, vfs_t** restrict out);
+
 /// @param flags MNT_ values
 /// @param params Options for the filesystem, or nullptr. The VFS itself takes "ro" and "readonly" from them, as MNT_RDONLY
 int vfs_mount(const char* restrict type, const char* restrict path, const block_interface_t* restrict volume, unsigned flags,

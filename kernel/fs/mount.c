@@ -109,6 +109,81 @@ static void free_fs(vfs_t* restrict fs)
     slab_free(fs);
 }
 
+static void params_parse(cmdline_t* restrict cmdl, const char* restrict params)
+{
+    cmdl->buffer = nullptr;
+    cmdl->length = 0;
+
+    if(params) {
+        cmdl->buffer = kstrdup(params);
+
+        if(cmdl->buffer) {
+            parse_cmdline(cmdl, cmdl->buffer, 1 + strlen(params));
+        }
+    }
+}
+
+static void params_free(cmdline_t* restrict cmdl)
+{
+    if(cmdl->buffer) {
+        kfree(cmdl->buffer);
+    }
+}
+
+// Makes the filesystem and lets the driver mount it. The label only names it in the log
+static int build_fs(const vfs_driver_t* restrict driver, const block_interface_t* restrict volume, unsigned flags,
+    const cmdline_t* restrict cmdl, const char* restrict label, vfs_t** restrict out)
+{
+    vfs_t* fs = slab_alloc(sizeof(vfs_t));
+
+    if(fs == nullptr) {
+        return -ENOMEM;
+    }
+
+    fs->ops = driver->ops;
+    fs->readonly = (flags & MNT_RDONLY) || cmdline_contains(cmdl, "ro") || cmdline_contains(cmdl, "readonly");
+
+    int retval = set_dev(fs, volume);
+
+    if(retval < 0) {
+        slab_free(fs);
+        return retval;
+    }
+
+    // The driver reads its metadata
+    // through the file cache while mounting
+    fs->volume = volume;
+
+    retval = driver->ops->mount(fs, volume, cmdl);
+
+    const char* device_name;
+
+    if(volume == nullptr) {
+        device_name = "null";
+    }
+    else {
+        device_name = volume->name;
+    }
+
+    if(retval == 0) {
+        pr_verbose("vfs: mount %s: mountpoint=%s device=%s", driver->name, label, device_name);
+    }
+    else {
+        const char* reason = strerror(retval);
+
+        pr_verbose("vfs: %s: failed to mount: %s; mountpoint=%s device=%s", driver->name, reason, label, device_name);
+    }
+
+    if(retval < 0) {
+        free_fs(fs);
+        return retval;
+    }
+
+    *out = fs;
+
+    return 0;
+}
+
 static int mount_locked(const char* restrict type, const char* restrict path, const block_interface_t* restrict volume, unsigned flags,
     const char* restrict params)
 {
@@ -133,67 +208,14 @@ static int mount_locked(const char* restrict type, const char* restrict path, co
     }
 
     cmdline_t cmdl;
-    cmdl.buffer = nullptr;
-    cmdl.length = 0;
+    params_parse(&cmdl, params);
 
-    if(params) {
-        cmdl.buffer = kstrdup(params);
+    vfs_t* fs;
+    int retval = build_fs(driver, volume, flags, &cmdl, path, &fs);
 
-        if(cmdl.buffer) {
-            parse_cmdline(&cmdl, cmdl.buffer, 1 + strlen(params));
-        }
-    }
-
-    vfs_t* fs = slab_alloc(sizeof(vfs_t));
-
-    if(fs == nullptr) {
-        if(cmdl.buffer)
-            kfree(cmdl.buffer);
-        return -ENOMEM;
-    }
-
-    fs->ops = driver->ops;
-    fs->readonly = (flags & MNT_RDONLY) || cmdline_contains(&cmdl, "ro") || cmdline_contains(&cmdl, "readonly");
-
-    int retval = set_dev(fs, volume);
+    params_free(&cmdl);
 
     if(retval < 0) {
-        if(cmdl.buffer)
-            kfree(cmdl.buffer);
-        slab_free(fs);
-        return retval;
-    }
-
-    // The driver reads its metadata
-    // through the file cache while mounting
-    fs->volume = volume;
-
-    retval = driver->ops->mount(fs, volume, &cmdl);
-
-    const char* device_name;
-
-    if(volume == nullptr) {
-        device_name = "null";
-    }
-    else {
-        device_name = volume->name;
-    }
-
-    if(retval == 0) {
-        pr_verbose("vfs: mount %s: mountpoint=%s device=%s", driver->name, path, device_name);
-    }
-    else {
-        const char* reason = strerror(retval);
-
-        pr_verbose("vfs: %s: failed to mount: %s; mountpoint=%s device=%s", driver->name, reason, path, device_name);
-    }
-
-    if(cmdl.buffer) {
-        kfree(cmdl.buffer);
-    }
-
-    if(retval < 0) {
-        free_fs(fs);
         return retval;
     }
 
@@ -320,6 +342,29 @@ int vfs_driver_remove(vfs_driver_t* restrict driver)
     spinlock_release(&drivers_lock);
 
     return -ENOENT;
+}
+
+int vfs_create(const char* restrict type, const char* restrict params, vfs_t** restrict out)
+{
+    kassert(type);
+    kassert(out);
+
+    spinlock_acquire(&drivers_lock);
+    vfs_driver_t* driver = find_driver(type);
+    spinlock_release(&drivers_lock);
+
+    if(driver == nullptr) {
+        return -ENOENT;
+    }
+
+    cmdline_t cmdl;
+    params_parse(&cmdl, params);
+
+    int retval = build_fs(driver, nullptr, 0, &cmdl, "(internal)", out);
+
+    params_free(&cmdl);
+
+    return retval;
 }
 
 int vfs_mount(const char* restrict type, const char* restrict path, const block_interface_t* restrict volume, unsigned flags,
