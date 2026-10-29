@@ -43,7 +43,6 @@ static_assert(sizeof(hwtree_record_t) % FEED_ALIGN == 0);
 void hwtree_put(hwtree_record_t* restrict record, const char* restrict key, const char* restrict fmt, ...) __printflike(3, 4);
 
 /// Tells the readers of /dev/hwtree that an interface of a node appeared
-/// @param kind block or char
 void hwtree_interface_added(const device_t* restrict device, const char* restrict kind, const char* restrict name);
 
 void hwtree_interface_removed(const device_t* restrict device, const char* restrict name);

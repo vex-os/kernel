@@ -126,7 +126,6 @@ void tty_receive(tty_interface_t* restrict interface, const void* restrict bytes
 
 /// Hands over a byte that came with a line error, for termios to drop, mark or turn into SIGINT
 /// @param byte What the hardware read; a break's is ignored
-/// @param error One of TTY_ERROR_*
 /// @note Any context, an interrupt handler among them
 void tty_receive_error(tty_interface_t* restrict interface, uint8_t byte, unsigned error);
 

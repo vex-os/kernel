@@ -3,7 +3,7 @@
 #include <vex/compiler.h>
 #include <vex/types.h>
 
-/// vms_copyin on the calling process's address space; a kernel thread gets -EFAULT
+/// A kernel thread gets -EFAULT
 ssize_t user_copyin(void* restrict dst, user_addr_t src, size_t size);
 
 /// vms_copyin_str on the calling process's address space; a kernel thread gets -EFAULT
@@ -13,8 +13,8 @@ ssize_t user_copyin(void* restrict dst, user_addr_t src, size_t size);
 /// @retval -EINVAL max_sz is zero
 ssize_t user_copyin_str(char* restrict dst, user_addr_t src, size_t max_sz);
 
-/// vms_copyout on the calling process's address space; a kernel thread gets -EFAULT
+/// A kernel thread gets -EFAULT
 ssize_t user_copyout(user_addr_t dst, const void* restrict src, size_t size);
 
-/// vms_copyout_str on the calling process's address space; a kernel thread gets -EFAULT
+/// A kernel thread gets -EFAULT
 ssize_t user_copyout_str(user_addr_t dst, const char* restrict src, size_t max_sz);

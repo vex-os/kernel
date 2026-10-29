@@ -109,7 +109,6 @@ long ktest_read(long fd, void* buffer, size_t size);
 
 void ktest_close(long fd);
 
-/// Writes the whole string to the file descriptor
 void ktest_puts(long fd, const char* string);
 
 /// Understands %s %c %d %u %x %% with the l and ll length modifiers, and a zero flag with a width
@@ -120,7 +119,6 @@ void ktest_dprintf(long fd, const char* format, ...);
 /// Formats like ktest_printf into the buffer and cuts the result to the size
 size_t ktest_snprintf(char* buffer, size_t size, const char* format, ...);
 
-/// Prints to the standard output
 void ktest_printf(const char* format, ...);
 
 /// Writes one line to the kernel log, and opens /dev/kplog on the first call

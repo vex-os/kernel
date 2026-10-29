@@ -19,7 +19,6 @@ void tty_discipline_deinit(tty_interface_t* restrict interface);
 /// Empties the input and the line being edited. For the first open
 void tty_discipline_reset(tty_interface_t* restrict interface);
 
-/// Empties the input and the line being edited
 void tty_discipline_flush_input(tty_interface_t* restrict interface);
 
 /// Runs a byte from the line through the discipline: line errors, input editing, echo, and the signal characters

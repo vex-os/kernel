@@ -75,7 +75,6 @@ void interrupt_isa_route(unsigned irq, uint32_t* restrict gsi, unsigned* restric
 /// Routes a GSI to a handler; every handler on a shared GSI is called for each interrupt
 /// @pre The device framework is the caller. Drivers and firmware code use device_request_irq,
 /// so that the node relies on the node of the interrupt controller
-/// @param flags INTERRUPT_*
 /// @retval -ENODEV No interrupt controller has the GSI
 /// @retval -EBUSY The GSI is taken without sharing, or with another trigger or polarity
 int interrupt_attach(uint32_t gsi, unsigned trigger, unsigned polarity, unsigned flags, irq_handler_t handler, void* restrict ctxdata,

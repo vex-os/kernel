@@ -41,6 +41,5 @@ bool dir_emit(dir_context_t* restrict dir_context, dirent_t* restrict entry, uin
 bool dir_emit_dots(dir_context_t* restrict dir_context, ino_t self, ino_t parent);
 
 /// Gives the DT_ value that a directory entry of this node type has
-/// @param vnode_type A VNODE_ value
 /// @retval DT_UNKNOWN The type has no DT_ value
 uint8_t dirent_type_from_vnode(unsigned vnode_type);

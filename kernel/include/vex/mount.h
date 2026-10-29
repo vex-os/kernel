@@ -76,7 +76,6 @@ int vfs_driver_remove(vfs_driver_t* restrict driver);
 /// @retval -ENOENT No driver has this name
 int vfs_create(const char* restrict type, const char* restrict params, vfs_t** restrict out);
 
-/// @param flags MNT_ values
 /// @param params Options for the filesystem, or nullptr. The VFS itself takes "ro" and "readonly" from them, as MNT_RDONLY
 int vfs_mount(const char* restrict type, const char* restrict path, const block_interface_t* restrict volume, unsigned flags,
     const char* restrict params);
