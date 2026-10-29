@@ -14,7 +14,7 @@ typedef struct mmio_mapping_s mmio_mapping_t;
 
 struct mmio_mapping_s {
     mmio_mapping_t* next; // Sorted by virt
-    uintptr_t virt;
+    virt_addr_t virt;
     phys_addr_t phys;
     size_t size;
     unsigned vprot;
@@ -42,6 +42,13 @@ static bool type_conflicts_nolock(phys_addr_t phys, size_t size, unsigned vprot)
     return false;
 }
 
+static bool mapping_contains(const mmio_mapping_t* restrict mapping, virt_addr_t address)
+{
+    bool above = address_greater_equal(address, mapping->virt);
+    virt_addr_t end = address_add(mapping->virt, mapping->size);
+    return above && address_less(address, end);
+}
+
 static mmio_mapping_t* find_reusable_nolock(phys_addr_t phys, size_t size, unsigned vprot)
 {
     for(mmio_mapping_t* it = mmio_head; it; it = it->next) {
@@ -57,16 +64,16 @@ static mmio_mapping_t* find_reusable_nolock(phys_addr_t phys, size_t size, unsig
     return nullptr;
 }
 
-static uintptr_t place_virt(uintptr_t gap_start, phys_addr_t phys, size_t size)
+static virt_addr_t place_virt(virt_addr_t gap_start, phys_addr_t phys, size_t size)
 {
     if(size < LARGE_ALIGN) {
         return gap_start;
     }
 
-    uintptr_t virt = (gap_start & ~(LARGE_ALIGN - 1)) | (phys.value & (LARGE_ALIGN - 1));
+    virt_addr_t virt = virt_addr((gap_start.value & ~(LARGE_ALIGN - 1)) | (phys.value & (LARGE_ALIGN - 1)));
 
-    if(virt < gap_start) {
-        virt += LARGE_ALIGN;
+    if(address_less(virt, gap_start)) {
+        virt = address_add(virt, LARGE_ALIGN);
     }
 
     return virt;
@@ -74,19 +81,20 @@ static uintptr_t place_virt(uintptr_t gap_start, phys_addr_t phys, size_t size)
 
 static bool insert_nolock(mmio_mapping_t* restrict mapping)
 {
-    uintptr_t gap_start = MMIO_REGION_BASE;
+    virt_addr_t gap_start = virt_addr(MMIO_REGION_BASE);
     mmio_mapping_t** prev = &mmio_head;
 
     for(;;) {
-        uintptr_t gap_end = MMIO_REGION_BASE + MMIO_REGION_SIZE;
+        virt_addr_t gap_end = virt_addr(MMIO_REGION_BASE + MMIO_REGION_SIZE);
 
         if(*prev) {
             gap_end = (*prev)->virt;
         }
 
-        uintptr_t virt = place_virt(gap_start, mapping->phys, mapping->size);
+        virt_addr_t virt = place_virt(gap_start, mapping->phys, mapping->size);
+        bool before_end = address_less_equal(virt, gap_end);
 
-        if(virt <= gap_end && gap_end - virt >= mapping->size) {
+        if(before_end && address_diff(gap_end, virt) >= mapping->size) {
             mapping->virt = virt;
             mapping->next = *prev;
             *prev = mapping;
@@ -97,7 +105,7 @@ static bool insert_nolock(mmio_mapping_t* restrict mapping)
             return false;
         }
 
-        gap_start = (*prev)->virt + (*prev)->size;
+        gap_start = address_add((*prev)->virt, (*prev)->size);
         prev = &(*prev)->next;
     }
 }
@@ -141,7 +149,8 @@ void* mmio_map(phys_addr_t phys, size_t size, unsigned vprot)
         existing->refcount += 1;
         spinlock_release(&mmio_lock);
         slab_free(mapping);
-        return (void*)(existing->virt + address_diff(phys, existing->phys));
+        virt_addr_t reused = address_add(existing->virt, address_diff(phys, existing->phys));
+        return virt_addr_pointer(reused);
     }
 
     if(type_conflicts_nolock(phys_page, length, vprot)) {
@@ -157,10 +166,10 @@ void* mmio_map(phys_addr_t phys, size_t size, unsigned vprot)
         return nullptr;
     }
 
-    int retval = pmap_map_range(&sys_pmap, virt_addr(mapping->virt), phys_page, length, vprot);
+    int retval = pmap_map_range(&sys_pmap, mapping->virt, phys_page, length, vprot);
 
     if(retval < 0) {
-        int unmapped = pmap_unmap_range_noflush(&sys_pmap, virt_addr(mapping->virt), length);
+        int unmapped = pmap_unmap_range_noflush(&sys_pmap, mapping->virt, length);
         kassert(unmapped == 0); // Nothing was split, so nothing had to be allocated
 
         unlink_nolock(mapping);
@@ -171,18 +180,20 @@ void* mmio_map(phys_addr_t phys, size_t size, unsigned vprot)
 
     spinlock_release(&mmio_lock);
 
-    return (void*)(mapping->virt + address_diff(phys, phys_page));
+    virt_addr_t mapped = address_add(mapping->virt, address_diff(phys, phys_page));
+
+    return virt_addr_pointer(mapped);
 }
 
 void mmio_unmap(volatile void* virt)
 {
-    uintptr_t address = (uintptr_t)(virt);
+    virt_addr_t address = virt_addr_from_pointer(virt);
 
     spinlock_acquire(&mmio_lock);
 
     mmio_mapping_t* mapping = mmio_head;
 
-    while(mapping && !(address >= mapping->virt && address < mapping->virt + mapping->size)) {
+    while(mapping && !mapping_contains(mapping, address)) {
         mapping = mapping->next;
     }
 
@@ -196,7 +207,7 @@ void mmio_unmap(volatile void* virt)
     }
 
     // Whole pages that were mapped as a whole, so nothing gets split
-    int retval = pmap_unmap_range_noflush(&sys_pmap, virt_addr(mapping->virt), mapping->size);
+    int retval = pmap_unmap_range_noflush(&sys_pmap, mapping->virt, mapping->size);
     kassert(retval == 0);
 
     spinlock_release(&mmio_lock);
@@ -212,6 +223,8 @@ void mmio_unmap(volatile void* virt)
 
 bool mmio_owns(const volatile void* virt)
 {
-    uintptr_t address = (uintptr_t)(virt);
-    return address >= MMIO_REGION_BASE && address - MMIO_REGION_BASE < MMIO_REGION_SIZE;
+    virt_addr_t address = virt_addr_from_pointer(virt);
+    virt_addr_t base = virt_addr(MMIO_REGION_BASE);
+
+    return address_greater_equal(address, base) && address_diff(address, base) < MMIO_REGION_SIZE;
 }

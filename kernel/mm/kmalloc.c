@@ -23,7 +23,7 @@ struct memblock_s {
     memblock_t* prev;
     memblock_t* next;
     unsigned short type;
-    uintptr_t address;
+    virt_addr_t address;
     size_t length;
 };
 
@@ -31,7 +31,7 @@ static_assert(sizeof(memblock_t) <= SLAB_MAX_SIZE);
 
 static memblock_t* head = nullptr;
 static memblock_t* tail = nullptr;
-static uintptr_t heap_end = HEAP_REGION_BASE;
+static virt_addr_t heap_end = { .value = HEAP_REGION_BASE };
 static spinlock_t heap_lock = SPINLOCK_INIT;
 
 static memblock_t* find_free_block(size_t size)
@@ -51,11 +51,13 @@ static memblock_t* extend_heap(size_t size)
 {
     size_t i;
     phys_addr_t phys;
-    uintptr_t virt;
+    virt_addr_t virt;
 
     size_t npages = page_count(size);
 
-    if(npages > (HEAP_REGION_BASE + HEAP_REGION_SIZE - heap_end) / PAGE_SIZE) {
+    virt_addr_t region_end = virt_addr(HEAP_REGION_BASE + HEAP_REGION_SIZE);
+
+    if(npages > address_diff(region_end, heap_end) / PAGE_SIZE) {
         return nullptr;
     }
 
@@ -78,8 +80,8 @@ static memblock_t* extend_heap(size_t size)
             goto error_cleanup;
         }
 
-        virt = block->address + i * PAGE_SIZE;
-        int retval = pmap_map(&sys_pmap, virt_addr(virt), phys, VPROT_RW);
+        virt = address_add(block->address, i * PAGE_SIZE);
+        int retval = pmap_map(&sys_pmap, virt, phys, VPROT_RW);
 
         if(retval < 0) {
             pslab_free_phys(phys);
@@ -87,7 +89,7 @@ static memblock_t* extend_heap(size_t size)
         }
     }
 
-    heap_end += block->length;
+    heap_end = address_add(heap_end, block->length);
 
     if(tail) {
         tail->next = block;
@@ -102,9 +104,9 @@ static memblock_t* extend_heap(size_t size)
 
 error_cleanup:
     while(i--) {
-        virt = block->address + i * PAGE_SIZE;
-        pslab_free_phys(pmap_resolve_address(&sys_pmap, virt_addr(virt)));
-        pmap_unmap_noflush(&sys_pmap, virt_addr(virt)); // Mapped a moment ago and never touched, under heap_lock
+        virt = address_add(block->address, i * PAGE_SIZE);
+        pslab_free_phys(pmap_resolve_address(&sys_pmap, virt));
+        pmap_unmap_noflush(&sys_pmap, virt); // Mapped a moment ago and never touched, under heap_lock
     }
 
     slab_free(block);
@@ -127,7 +129,7 @@ static void split_block(memblock_t* restrict block, size_t size)
         return;
     }
 
-    new_block->address = block->address + aligned_sz;
+    new_block->address = address_add(block->address, aligned_sz);
     new_block->length = remainder;
     new_block->type = BLOCK_TYPE_FREE;
     new_block->prev = block;
@@ -144,12 +146,13 @@ static void split_block(memblock_t* restrict block, size_t size)
     block->length = aligned_sz;
 }
 
-static memblock_t* find_block_at(uintptr_t address)
+static memblock_t* find_block_at(const void* restrict pointer)
 {
+    virt_addr_t address = virt_addr_from_pointer(pointer);
     memblock_t* it;
 
     for(it = head; it; it = it->next) {
-        if(it->address == address) {
+        if(address_equal(it->address, address)) {
             return it;
         }
     }
@@ -222,7 +225,7 @@ void* kmalloc(size_t size)
 
     spinlock_release_intr(&heap_lock, intr_state);
 
-    return memset((void*)(block->address), 0, size);
+    return memset(virt_addr_pointer(block->address), 0, size);
 }
 
 void* krealloc(void* restrict ptr, size_t size)
@@ -242,7 +245,7 @@ void* krealloc(void* restrict ptr, size_t size)
 
     bool intr_state = spinlock_acquire_intr(&heap_lock);
 
-    memblock_t* block = find_block_at((uintptr_t)(ptr));
+    memblock_t* block = find_block_at(ptr);
 
     if(block == nullptr) {
         spinlock_release_intr(&heap_lock, intr_state);
@@ -278,7 +281,7 @@ void kfree(void* restrict ptr)
 
     bool intr_state = spinlock_acquire_intr(&heap_lock);
 
-    memblock_t* block = find_block_at((uintptr_t)(ptr));
+    memblock_t* block = find_block_at(ptr);
 
     if(block == nullptr || block->type == BLOCK_TYPE_FREE) {
         spinlock_release_intr(&heap_lock, intr_state);
