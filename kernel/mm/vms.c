@@ -1,4 +1,5 @@
 #include <vex/assert.h>
+#include <vex/commit.h>
 #include <vex/errno.h>
 #include <vex/event.h>
 #include <vex/file.h>
@@ -175,16 +176,65 @@ static void put_frame(uintptr_t phys)
     }
 }
 
-static void free_region(vm_region_t* restrict region, bool deferred)
+// Private memory that a write can turn into pages of its own
+static bool counts_commit(const vm_region_t* restrict region, unsigned vprot)
 {
-    if(region->file == nullptr) {
-        slab_free(region);
-        return;
+    return !region->device && !region->shared && (vprot & VPROT_WRITE);
+}
+
+static bool region_counted(const vm_region_t* restrict region)
+{
+    return counts_commit(region, region->vprot);
+}
+
+static size_t region_pages(const vm_region_t* restrict region)
+{
+    return page_count(region->end - region->start);
+}
+
+static size_t counted_pages_in(vmspace_t* restrict vmspace, uintptr_t start, uintptr_t end)
+{
+    size_t pages = 0U;
+
+    for(const vm_region_t* it = vmspace->regions; it && it->start < end; it = it->next) {
+        if(it->end <= start || !region_counted(it)) {
+            continue;
+        }
+
+        uintptr_t overlap_start = it->start;
+        uintptr_t overlap_end = it->end;
+
+        if(overlap_start < start) {
+            overlap_start = start;
+        }
+
+        if(overlap_end > end) {
+            overlap_end = end;
+        }
+
+        pages += page_count(overlap_end - overlap_start);
     }
 
-    if(!deferred) {
+    return pages;
+}
+
+static void destroy_region(vm_region_t* restrict region)
+{
+    if(region->file) {
         file_close(region->file);
-        slab_free(region);
+    }
+
+    slab_free(region);
+}
+
+static void free_region(vm_region_t* restrict region, bool deferred)
+{
+    if(region_counted(region)) {
+        commit_uncharge(region_pages(region));
+    }
+
+    if(region->file == nullptr || !deferred) {
+        destroy_region(region);
         return;
     }
 
@@ -560,7 +610,9 @@ static bool find_highest_gap(vmspace_t* restrict vmspace, size_t size, uintptr_t
     }
 }
 
-static vm_region_t* alloc_region(uintptr_t start, uintptr_t end, unsigned vprot, const vm_backing_t* restrict backing)
+// Private writable memory takes its pages from the commit limit, and free_region gives them back.
+// The replaced pages are the ones that the caller unmaps after this call
+static vm_region_t* alloc_region(uintptr_t start, uintptr_t end, unsigned vprot, const vm_backing_t* restrict backing, size_t replaced)
 {
     vm_region_t* region = slab_alloc(sizeof(vm_region_t));
 
@@ -585,6 +637,11 @@ static vm_region_t* alloc_region(uintptr_t start, uintptr_t end, unsigned vprot,
         region->device = backing->device;
     }
 
+    if(region_counted(region) && commit_charge_replacing(region_pages(region), replaced) < 0) {
+        destroy_region(region);
+        return nullptr;
+    }
+
     return region;
 }
 
@@ -601,7 +658,7 @@ static void __noreturn release_thread(void* restrict arg)
 
         while(regions) {
             vm_region_t* next = regions->next;
-            free_region(regions, false);
+            destroy_region(regions);
             regions = next;
         }
     }
@@ -644,7 +701,7 @@ int vms_map(vmspace_t* restrict vmspace, uintptr_t start, uintptr_t end, unsigne
         return -EINVAL;
     }
 
-    vm_region_t* region = alloc_region(start, end, vprot, backing);
+    vm_region_t* region = alloc_region(start, end, vprot, backing, 0U);
 
     if(region == nullptr) {
         return -ENOMEM;
@@ -671,13 +728,14 @@ int vms_map_replace(vmspace_t* restrict vmspace, uintptr_t start, uintptr_t end,
         return -EINVAL;
     }
 
-    vm_region_t* region = alloc_region(start, end, vprot, backing);
+    mutex_acquire(&vmspace->lock);
+
+    vm_region_t* region = alloc_region(start, end, vprot, backing, counted_pages_in(vmspace, start, end));
 
     if(region == nullptr) {
+        mutex_release(&vmspace->lock);
         return -ENOMEM;
     }
-
-    mutex_acquire(&vmspace->lock);
 
     int retval = unmap_locked(vmspace, start, end);
 
@@ -700,7 +758,7 @@ int vms_map_any(vmspace_t* restrict vmspace, size_t size, unsigned vprot, const 
         return -EINVAL;
     }
 
-    vm_region_t* region = alloc_region(0, 0, vprot, backing);
+    vm_region_t* region = alloc_region(0, size, vprot, backing, 0U);
 
     if(region == nullptr) {
         return -ENOMEM;
@@ -770,6 +828,28 @@ int vms_protect(vmspace_t* restrict vmspace, uintptr_t start, uintptr_t end, uns
         return retval;
     }
 
+    size_t gain = 0U;
+    size_t loss = 0U;
+
+    for(const vm_region_t* it = find_region(vmspace, start); it && it->start < end; it = it->next) {
+        bool counted_before = region_counted(it);
+        bool counted_after = counts_commit(it, vprot);
+
+        if(!counted_before && counted_after) {
+            gain += region_pages(it);
+        }
+
+        if(counted_before && !counted_after) {
+            loss += region_pages(it);
+        }
+    }
+
+    // The regions stay split when this fails, which changes nothing that a program sees
+    if(gain && commit_charge(gain) < 0) {
+        mutex_release(&vmspace->lock);
+        return -ENOMEM;
+    }
+
     bool patched = false;
 
     for(vm_region_t* it = find_region(vmspace, start); it && it->start < end; it = it->next) {
@@ -795,6 +875,10 @@ int vms_protect(vmspace_t* restrict vmspace, uintptr_t start, uintptr_t end, uns
                 patched = true;
             }
         }
+    }
+
+    if(loss) {
+        commit_uncharge(loss);
     }
 
     mutex_release(&vmspace->lock);
@@ -947,7 +1031,7 @@ int vms_clone(vmspace_t* restrict vmspace, vmspace_t* restrict source)
         backing.may_write = it->may_write;
         backing.device = it->device;
 
-        vm_region_t* region = alloc_region(it->start, it->end, it->vprot, &backing);
+        vm_region_t* region = alloc_region(it->start, it->end, it->vprot, &backing, 0U);
 
         if(region == nullptr) {
             retval = -ENOMEM;

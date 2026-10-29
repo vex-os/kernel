@@ -15,19 +15,29 @@
 static size_t limit_pages = 0U;
 static size_t charged_pages = 0U;
 
-int commit_charge(size_t pages)
+static int charge(size_t pages, size_t credit)
 {
     size_t charged = atomic_load(&charged_pages, ATOMIC_RELAXED);
 
     do {
-        // The loop only ever adds what fits
-        // so charged never passes the limit
-        if(pages > limit_pages - charged) {
+        // The credit lets the total pass the limit for a moment. The caller
+        // gives that many pages back right after, so only a replacement has one
+        if(charged > limit_pages + credit || pages > limit_pages + credit - charged) {
             return -ENOMEM;
         }
     } while(!atomic_cmpxchg_weak(&charged_pages, &charged, charged + pages, ATOMIC_RELAXED, ATOMIC_RELAXED));
 
     return 0;
+}
+
+int commit_charge(size_t pages)
+{
+    return charge(pages, 0U);
+}
+
+int commit_charge_replacing(size_t pages, size_t replaced)
+{
+    return charge(pages, replaced);
 }
 
 void commit_uncharge(size_t pages)
