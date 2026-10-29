@@ -1,4 +1,5 @@
 kernel_sources += files(
+    'commit.c',
     'hhdm.c',
     'kbase.c',
     'kmalloc.c',
