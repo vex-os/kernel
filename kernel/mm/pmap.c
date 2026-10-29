@@ -175,24 +175,32 @@ static int map_kernel_section(const void* restrict start, const void* restrict e
 {
     virt_addr_t virt = page_align(virt_addr_from_pointer(start));
     virt_addr_t virt_end = page_align_up(virt_addr_from_pointer(end));
-    phys_addr_t phys = phys_addr(virt.value - kernel_base_virt + kernel_base_phys);
+    size_t offset = address_diff(virt, kernel_base_virt);
+    phys_addr_t phys = address_add(kernel_base_phys, offset);
 
     size_t size = address_diff(virt_end, virt);
 
     return pmap_map_range(&sys_pmap, virt, phys, size, vprot);
 }
 
-static void map_hhdm_run(uintptr_t start, uintptr_t end)
+static void map_hhdm_run(phys_addr_t start, phys_addr_t end)
 {
-    if(end > start && pmap_map_range(&sys_pmap, virt_addr(start + hhdm_base), phys_addr(start), end - start, VPROT_RW) < 0) {
-        panic("mmu: failed to map %#zx-%#zx into the HHDM", start, end);
+    if(!address_greater(end, start)) {
+        return;
+    }
+
+    virt_addr_t virt = address_add(hhdm_base, start.value);
+    size_t size = address_diff(end, start);
+
+    if(pmap_map_range(&sys_pmap, virt, start, size, VPROT_RW) < 0) {
+        panic("mmu: failed to map %#zx-%#zx into the HHDM", start.value, end.value);
     }
 }
 
 static void map_hhdm(void)
 {
-    uintptr_t run_start = 0;
-    uintptr_t run_end = 0;
+    phys_addr_t run_start = phys_addr(0);
+    phys_addr_t run_end = phys_addr(0);
 
     for(size_t i = 0; i < memmap->entry_count; ++i) {
         const struct limine_memmap_entry* entry = memmap->entries[i];
@@ -201,19 +209,17 @@ static void map_hhdm(void)
             continue;
         }
 
-        uintptr_t start = page_align(entry->base);
-        uintptr_t end = page_align_up(entry->base + entry->length);
+        phys_addr_t start = page_align(phys_addr(entry->base));
+        phys_addr_t end = page_align_up(phys_addr(entry->base + entry->length));
 
-        kassert(start >= run_start); // Limine sorts the memory map by base
+        kassert(address_greater_equal(start, run_start)); // Limine sorts the memory map by base
 
-        if(start > run_end) {
+        if(address_greater(start, run_end)) {
             map_hhdm_run(run_start, run_end);
             run_start = start;
         }
 
-        if(end > run_end) {
-            run_end = end;
-        }
+        run_end = address_max(end, run_end);
     }
 
     map_hhdm_run(run_start, run_end);
