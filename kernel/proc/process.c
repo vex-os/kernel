@@ -9,6 +9,7 @@
 #include <vex/mount.h>
 #include <vex/pgrp.h>
 #include <vex/process.h>
+#include <vex/rlimit.h>
 #include <vex/sched.h>
 #include <vex/signal.h>
 #include <vex/slab.h>
@@ -36,13 +37,28 @@ static __always_inline __nodiscard size_t pid_bucket(pid_t pid)
     return pid % PROCTABLE_BUCKETS;
 }
 
-static int grow_fds_locked(process_t* process, size_t fd)
+// The number of descriptors the process may have, read
+// before fd_lock is taken as the limit lives under the
+// lock of the process. A limit lowered below the descriptors
+// in use leaves them alone and only turns away new ones
+static size_t fd_limit(process_t* restrict process)
+{
+    rlimit_t limit = process_get_rlimit(process, RLIMIT_NOFILE);
+
+    if(limit.rlim_cur > CONFIG_MAX_FDS) {
+        return CONFIG_MAX_FDS;
+    }
+
+    return limit.rlim_cur;
+}
+
+static int grow_fds_locked(process_t* process, size_t fd, size_t limit)
 {
     if(fd < process->max_fds) {
         return 0;
     }
 
-    if(fd >= CONFIG_MAX_FDS) {
+    if(fd >= limit) {
         return -EMFILE;
     }
 
@@ -52,8 +68,8 @@ static int grow_fds_locked(process_t* process, size_t fd)
         new_max *= 2;
     }
 
-    if(new_max > CONFIG_MAX_FDS) {
-        new_max = CONFIG_MAX_FDS;
+    if(new_max > limit) {
+        new_max = limit;
     }
 
     fd_slot_t* grown = krealloc(process->fds, new_max * sizeof(fd_slot_t));
@@ -254,11 +270,20 @@ process_t* process_create(process_t* restrict parent)
         parent_actions = parent->signal_actions;
     }
 
+    if(parent) {
+        process->rlimits = process_get_rlimits(parent);
+    }
+    else {
+        process->rlimits = rlimits_create();
+    }
+
     process->signal_actions = signal_actions_create(parent_actions);
     process->exit_note = slab_alloc(sizeof(pending_signal_t));
     process->adopt_note = slab_alloc(sizeof(pending_signal_t));
 
-    if(process->signal_actions == nullptr || process->exit_note == nullptr || process->adopt_note == nullptr) {
+    if(process->signal_actions == nullptr || process->exit_note == nullptr || process->adopt_note == nullptr
+        || process->rlimits == nullptr) {
+        rlimits_decref(process->rlimits);
         slab_free(process->adopt_note);
         slab_free(process->exit_note);
         signal_actions_destroy(process->signal_actions);
@@ -297,6 +322,7 @@ process_t* process_create(process_t* restrict parent)
     }
 
     if(process->cwd == nullptr) {
+        rlimits_decref(process->rlimits);
         cred_decref(process->credentials);
         slab_free(process->adopt_note);
         slab_free(process->exit_note);
@@ -425,6 +451,7 @@ void process_decref(process_t* process)
         }
 
         cred_decref(process->credentials);
+        rlimits_decref(process->rlimits);
         signal_flush(process->sig_queue);
         slab_free(process->adopt_note);
         slab_free(process->exit_note);
@@ -722,13 +749,16 @@ file_t* process_fd_get(process_t* process, int fd)
 
 int process_fd_alloc(process_t* process, file_t* file, int min_fd, uint32_t fd_flags)
 {
-    if(min_fd < 0 || min_fd >= CONFIG_MAX_FDS) {
+    size_t limit = fd_limit(process);
+    bool beyond_limit = min_fd > 0 && (size_t)(min_fd) >= limit; // A limit of zero turns every call away with EMFILE below
+
+    if(min_fd < 0 || min_fd >= CONFIG_MAX_FDS || beyond_limit) {
         return -EINVAL;
     }
 
     spinlock_acquire(&process->fd_lock);
 
-    for(size_t fd = min_fd; fd < process->max_fds; ++fd) {
+    for(size_t fd = min_fd; fd < process->max_fds && fd < limit; ++fd) {
         if(process->fds[fd].file == nullptr) {
             process->fds[fd].file = file;
             process->fds[fd].flags = fd_flags;
@@ -744,7 +774,7 @@ int process_fd_alloc(process_t* process, file_t* file, int min_fd, uint32_t fd_f
         fd = min_fd;
     }
 
-    int retval = grow_fds_locked(process, fd);
+    int retval = grow_fds_locked(process, fd, limit);
 
     if(retval < 0) {
         spinlock_release(&process->fd_lock);
@@ -785,14 +815,16 @@ int process_fd_dup(process_t* process, int old_fd, int new_fd, uint32_t fd_flags
 
     // As POSIX has it, a descriptor past
     // the limit is a bad one rather than one too many
-    if(new_fd >= CONFIG_MAX_FDS) {
+    size_t limit = fd_limit(process);
+
+    if((size_t)(new_fd) >= limit) {
         file_close(copy);
         return -EBADF;
     }
 
     spinlock_acquire(&process->fd_lock);
 
-    int retval = grow_fds_locked(process, new_fd);
+    int retval = grow_fds_locked(process, new_fd, limit);
 
     if(retval < 0) {
         spinlock_release(&process->fd_lock);

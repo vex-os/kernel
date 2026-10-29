@@ -117,5 +117,7 @@
 #define __k_SYS_NANOSLEEP   0x124
 #define __k_SYS_GETTIMERES  0x125
 #define __k_SYS_SYSINFO     0x126
+#define __k_SYS_GETRLIMIT   0x127
+#define __k_SYS_SETRLIMIT   0x128
 
 #endif /* USR_VEX_SYSCALL_H */

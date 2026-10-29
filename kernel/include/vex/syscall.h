@@ -120,6 +120,8 @@ typedef struct vnode_s vnode_t;
 #define SYS_NANOSLEEP   __k_SYS_NANOSLEEP
 #define SYS_GETTIMERES  __k_SYS_GETTIMERES
 #define SYS_SYSINFO     __k_SYS_SYSINFO
+#define SYS_GETRLIMIT   __k_SYS_GETRLIMIT
+#define SYS_SETRLIMIT   __k_SYS_SETRLIMIT
 
 typedef struct syscall_s syscall_t;
 

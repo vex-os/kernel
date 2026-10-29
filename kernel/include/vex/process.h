@@ -10,6 +10,7 @@
 typedef struct file_s file_t;
 typedef struct pending_signal_s pending_signal_t;
 typedef struct process_group_s process_group_t;
+typedef struct rlimits_s rlimits_t;
 typedef struct thread_s thread_t;
 typedef struct vmspace_s vmspace_t;
 typedef struct vnode_s vnode_t;
@@ -62,6 +63,8 @@ struct process_s {
 
     credentials_t* credentials;
     mutex_t credentials_lock;
+
+    rlimits_t* rlimits; // Shared with the parent until one of them changes a limit, under lock
 
     signal_actions_t* signal_actions;
     pending_signal_t* exit_note;
