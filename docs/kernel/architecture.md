@@ -22,9 +22,14 @@ separate syscall.
 
 ## Syscalls
 
-Syscalls register the same way: `define_syscall(sys_foo, SYS_FOO)` puts an entry in a linker section, and `kernel/proc/syscall.c` builds
+Syscalls register the same way: `define_syscall(sys_foo, SYS_FOO, 2)` puts an entry in a linker section, and `kernel/proc/syscall.c` builds
 the dispatch table at the syscall stage. Syscall numbers live in `kernel/include/usr/vex/syscall.h`. The implementations are in
 `kernel/proc/sys_*.c`.
+
+A handler is a plain function whose parameters are the registers that the call reads, so its signature is the signature of the call. The
+last argument of the macro is the number of those registers. `define_syscall_fd` and `define_syscall_dirfd` are for a call that starts with
+a descriptor or with a descriptor and a path. They hand the handler a `file_t*`, or an `int` and the path copied from user space. The macros
+and the rule for adding one are in `kernel/proc/syscall_internal.h`.
 
 ## Header layout
 
