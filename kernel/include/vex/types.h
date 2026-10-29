@@ -10,6 +10,24 @@
 #error "C99 or later is required"
 #endif
 
+// Kernel ABI defines these but never aliases
+// standard C99-provided types to __k_ counterparts
+// so we have to ensure that the types have equal sizes here
+
+static_assert(sizeof(uint8_t) == sizeof(__k_uint8_t));
+static_assert(sizeof(uint16_t) == sizeof(__k_uint16_t));
+static_assert(sizeof(uint32_t) == sizeof(__k_uint32_t));
+static_assert(sizeof(uint64_t) == sizeof(__k_uint64_t));
+
+static_assert(sizeof(int8_t) == sizeof(__k_int8_t));
+static_assert(sizeof(int16_t) == sizeof(__k_int16_t));
+static_assert(sizeof(int32_t) == sizeof(__k_int32_t));
+static_assert(sizeof(int64_t) == sizeof(__k_int64_t));
+
+static_assert(sizeof(intptr_t) == sizeof(__k_intptr_t));
+static_assert(sizeof(uintptr_t) == sizeof(__k_uintptr_t));
+static_assert(sizeof(size_t) == sizeof(__k_size_t));
+
 typedef __k_ssize_t ssize_t;
 
 typedef __k_id_t id_t;
@@ -42,7 +60,7 @@ typedef struct virt_addr_s virt_addr_t;
 typedef struct phys_addr_s phys_addr_t;
 
 union __transparent_union user_addr_u {
-    __k_uintptr_t value;
+    uintptr_t value;
 };
 
 struct virt_addr_s {
@@ -52,3 +70,7 @@ struct virt_addr_s {
 struct phys_addr_s {
     uintptr_t value;
 };
+
+static_assert(sizeof(uintptr_t) == sizeof(user_addr_t));
+static_assert(sizeof(uintptr_t) == sizeof(virt_addr_t));
+static_assert(sizeof(uintptr_t) == sizeof(phys_addr_t));
