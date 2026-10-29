@@ -130,9 +130,13 @@ bool job_resume_wait(thread_t* thread)
             return false;
         }
 
-        // No handler is due, so these signals only stop the process, kill it or are dropped
+        // These signals only stop the
+        // process, kill it or are dropped
         if(work & THREAD_WORK_SIGNAL) {
-            signal_deliver(ctx);
+            if(!signal_deliver_uncaught(ctx)) {
+                return false;
+            }
+
             continue;
         }
 

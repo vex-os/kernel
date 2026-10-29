@@ -13,6 +13,8 @@
 #define SHARED_ANON (__k_MAP_SHARED | __k_MAP_ANONYMOUS)
 #define BIT(sig)    (1UL << ((sig) - 1))
 #define FAST_ROUNDS 4
+#define RACE_ROUNDS 200
+#define RACE_NSEC   1000000L
 
 // Counters in memory that the parent and the child share; a counter that stops moving belongs to a stopped thread
 struct counters {
@@ -22,6 +24,7 @@ struct counters {
     volatile unsigned long hangups;
     volatile unsigned long continues;
     volatile unsigned long after_stop;
+    volatile unsigned long bad_returns;
 };
 
 static struct counters* counters;
@@ -290,6 +293,49 @@ static void test_sleep_survives_stop(void)
     ktest_expect(status, __k_W_EXITCODE(7, 0));
 }
 
+// A handler that becomes due while a sleeping thread takes a stop must wait for the way out of the call. Taken in the
+// middle of the call, it got a frame there, and the call returned what the register held before
+static void test_sleep_stop_with_handler(void)
+{
+    counters->handled = 0;
+    counters->bad_returns = 0;
+
+    int status = 0;
+    long child = ktest_syscall1(__k_SYS_FORK, 0);
+
+    if(child == 0) {
+        install(__k_SIGUSR1, &on_signal, 0);
+
+        struct __k_timespec request;
+        request.tv_sec = 1;
+        request.tv_nsec = 0;
+
+        for(;;) {
+            long retval = ktest_syscall4(__k_SYS_NANOSLEEP, __k_CLOCK_MONOTONIC, 0, (long)&request, 0);
+
+            if(retval != 0 && retval != -__k_EINTR) {
+                counters->bad_returns += 1;
+            }
+        }
+    }
+
+    sleep_for(SETTLE_NSEC / 2);
+
+    for(int round = 0; round < RACE_ROUNDS; round += 1) {
+        ktest_syscall2(__k_SYS_KILL, child, __k_SIGSTOP);
+        ktest_syscall2(__k_SYS_KILL, child, __k_SIGUSR1);
+        ktest_syscall2(__k_SYS_KILL, child, __k_SIGCONT);
+        sleep_for(RACE_NSEC);
+    }
+
+    sleep_for(SETTLE_NSEC);
+    ktest_syscall2(__k_SYS_KILL, child, __k_SIGKILL);
+    wait_for(child, 0, &status);
+
+    ktest_expect(counters->bad_returns, 0);
+    ktest_expect(counters->handled > 0, 1);
+}
+
 // A group that loses its last link to the rest of its session while a member is stopped gets SIGHUP and SIGCONT,
 // and the signals of a terminal no longer stop its members. The link is a process that exits or leaves for a session of its own
 static void test_orphaned_group(bool leaves_session)
@@ -355,6 +401,7 @@ int main(void)
     test_default_actions();
     test_parent_notice();
     test_sleep_survives_stop();
+    test_sleep_stop_with_handler();
     test_orphaned_group(false);
     test_orphaned_group(true);
 

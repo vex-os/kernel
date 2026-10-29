@@ -144,6 +144,12 @@ void signal_retarget(process_t* restrict process);
 void signal_force(thread_t* restrict thread, const siginfo_t* restrict info);
 
 void signal_deliver(hart_context_t* restrict ctx);
+
+/// signal_deliver for a thread inside a system call, which can take no handler frame
+/// @pre The caller is the thread
+/// @retval true A signal without a handler was taken, or none was deliverable
+/// @retval false The next signal has a handler; it stays pending for the way out
+bool signal_deliver_uncaught(hart_context_t* restrict ctx) __nodiscard;
 void signal_action(process_t* restrict process, int sig, const sigaction_t* restrict act, sigaction_t* restrict old_action);
 sigset_t signal_mask(thread_t* restrict thread, int how, sigset_t set);
 

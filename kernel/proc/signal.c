@@ -290,6 +290,124 @@ static int queue_signal(process_t* restrict process, pid_t tid, int sig, pending
     return 0;
 }
 
+static bool deliver(hart_context_t* restrict ctx, bool handlers)
+{
+    thread_t* thread = this_thread();
+    process_t* process = thread->process;
+    signal_actions_t* signal_actions = process->signal_actions;
+
+    bool intr_state = spinlock_acquire_intr(&signal_actions->lock);
+
+    sigset_t* pending = &thread->sig_pending;
+    pending_signal_t** queue = &thread->sig_queue;
+    sigset_t deliverable = *pending & ~thread->sig_blocked;
+
+    if(deliverable == 0) {
+        pending = &process->sig_pending;
+        queue = &process->sig_queue;
+        deliverable = *pending & ~thread->sig_blocked;
+    }
+
+    if(deliverable == 0) {
+        recalc_locked(thread);
+        spinlock_release_intr(&signal_actions->lock, intr_state);
+        signal_restore_mask(thread);
+        return true;
+    }
+
+    int sig = __builtin_ctzll(deliverable) + 1;
+    sigaction_t action = signal_actions->actions[sig - 1];
+    bool caught = action.sa_handler != SIG_DFL && action.sa_handler != SIG_IGN;
+
+    // Checked under the lock that the signal was chosen under, as one
+    // that arrives after a check outside it would get a frame in mid-call
+    if(caught && !handlers) {
+        spinlock_release_intr(&signal_actions->lock, intr_state);
+        return false;
+    }
+
+    *pending &= ~sigbit(sig);
+
+    pending_signal_t* node = queue_take(queue, sig);
+    sigset_t old_mask = thread->sig_blocked;
+
+    // The handler returns to the mask from before
+    // sigsuspend, which is not the one it runs with
+    if(thread->sig_saved_valid) {
+        old_mask = thread->sig_saved;
+    }
+
+    bool ignored = ignored_locked(process, sig); // It may have become so while it was blocked
+
+    if(caught && (action.sa_flags & SA_RESETHAND)) {
+        memset(&signal_actions->actions[sig - 1], 0, sizeof(sigaction_t));
+    }
+
+    recalc_locked(thread);
+
+    spinlock_release_intr(&signal_actions->lock, intr_state);
+
+    siginfo_t info = {};
+    info.si_signo = sig;
+    info.si_code = SI_KERNEL;
+
+    if(node) {
+        info = node->info;
+        slab_free(node);
+    }
+
+    if(!caught) {
+        // A process that stops in sigsuspend is still in it when it continues
+        if(!default_stops(sig) || ignored) {
+            signal_restore_mask(thread);
+        }
+
+        if(ignored) {
+            return true;
+        }
+
+        // POSIX: the signals of a terminal do not stop a process
+        // of an orphaned group, as nobody could continue it
+        bool from_terminal = default_stops(sig) && sig != SIGSTOP;
+
+        if(from_terminal && process_group_orphaned(process)) {
+            return true;
+        }
+
+        if(default_stops(sig)) {
+            job_stop(process, sig);
+        }
+        else {
+            process_kill(process, sig);
+        }
+
+        return true;
+    }
+
+    if(thread->syscall_restart && 0 == (action.sa_flags & SA_RESTART)) {
+        arch_syscall_interrupted(ctx);
+    }
+
+    thread->syscall_restart = false;
+    thread->sig_saved_valid = false;
+
+    // A stack that takes no frame leaves nothing to return to
+    if(arch_signal_setup(thread, ctx, &action, &info, old_mask) < 0) {
+        process_kill(process, SIGSEGV);
+        return true;
+    }
+
+    sigset_t blocked = action.sa_mask;
+
+    if(0 == (action.sa_flags & SA_NODEFER)) {
+        blocked |= sigbit(sig);
+    }
+
+    signal_mask(thread, SIG_BLOCK, blocked);
+
+    return true;
+}
+
 signal_actions_t* signal_actions_create(signal_actions_t* restrict parent)
 {
     signal_actions_t* signal_actions = pslab_alloc_virt();
@@ -449,111 +567,12 @@ void signal_restore_mask(thread_t* restrict thread)
 
 void signal_deliver(hart_context_t* restrict ctx)
 {
-    thread_t* thread = this_thread();
-    process_t* process = thread->process;
-    signal_actions_t* signal_actions = process->signal_actions;
+    deliver(ctx, true);
+}
 
-    bool intr_state = spinlock_acquire_intr(&signal_actions->lock);
-
-    sigset_t* pending = &thread->sig_pending;
-    pending_signal_t** queue = &thread->sig_queue;
-    sigset_t deliverable = *pending & ~thread->sig_blocked;
-
-    if(deliverable == 0) {
-        pending = &process->sig_pending;
-        queue = &process->sig_queue;
-        deliverable = *pending & ~thread->sig_blocked;
-    }
-
-    if(deliverable == 0) {
-        recalc_locked(thread);
-        spinlock_release_intr(&signal_actions->lock, intr_state);
-        signal_restore_mask(thread);
-        return;
-    }
-
-    int sig = __builtin_ctzll(deliverable) + 1;
-
-    *pending &= ~sigbit(sig);
-
-    pending_signal_t* node = queue_take(queue, sig);
-    sigaction_t action = signal_actions->actions[sig - 1];
-    sigset_t old_mask = thread->sig_blocked;
-
-    // The handler returns to the mask from before
-    // sigsuspend, which is not the one it runs with
-    if(thread->sig_saved_valid) {
-        old_mask = thread->sig_saved;
-    }
-
-    bool caught = action.sa_handler != SIG_DFL && action.sa_handler != SIG_IGN;
-    bool ignored = ignored_locked(process, sig); // It may have become so while it was blocked
-
-    if(caught && (action.sa_flags & SA_RESETHAND)) {
-        memset(&signal_actions->actions[sig - 1], 0, sizeof(sigaction_t));
-    }
-
-    recalc_locked(thread);
-
-    spinlock_release_intr(&signal_actions->lock, intr_state);
-
-    siginfo_t info = {};
-    info.si_signo = sig;
-    info.si_code = SI_KERNEL;
-
-    if(node) {
-        info = node->info;
-        slab_free(node);
-    }
-
-    if(!caught) {
-        // A process that stops in sigsuspend is still in it when it continues
-        if(!default_stops(sig) || ignored) {
-            signal_restore_mask(thread);
-        }
-
-        if(ignored) {
-            return;
-        }
-
-        // POSIX: the signals of a terminal do not stop a process
-        // of an orphaned group, as nobody could continue it
-        bool from_terminal = default_stops(sig) && sig != SIGSTOP;
-
-        if(from_terminal && process_group_orphaned(process)) {
-            return;
-        }
-
-        if(default_stops(sig)) {
-            job_stop(process, sig);
-        }
-        else {
-            process_kill(process, sig);
-        }
-
-        return;
-    }
-
-    if(thread->syscall_restart && 0 == (action.sa_flags & SA_RESTART)) {
-        arch_syscall_interrupted(ctx);
-    }
-
-    thread->syscall_restart = false;
-    thread->sig_saved_valid = false;
-
-    // A stack that takes no frame leaves nothing to return to
-    if(arch_signal_setup(thread, ctx, &action, &info, old_mask) < 0) {
-        process_kill(process, SIGSEGV);
-        return;
-    }
-
-    sigset_t blocked = action.sa_mask;
-
-    if(0 == (action.sa_flags & SA_NODEFER)) {
-        blocked |= sigbit(sig);
-    }
-
-    signal_mask(thread, SIG_BLOCK, blocked);
+bool signal_deliver_uncaught(hart_context_t* restrict ctx)
+{
+    return deliver(ctx, false);
 }
 
 void signal_action(process_t* restrict process, int sig, const sigaction_t* restrict act, sigaction_t* restrict old_action)
