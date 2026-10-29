@@ -31,6 +31,16 @@ static size_t pages_of(off_t size)
     return ((size_t)(size) + PAGE_SIZE - 1) / PAGE_SIZE;
 }
 
+// Only a target in a page counts, as a slab object is as small as the node that holds it
+static size_t target_pages(size_t length)
+{
+    if(length > SLAB_MAX_SIZE) {
+        return 1;
+    }
+
+    return 0;
+}
+
 static mode_t type_bits(unsigned type)
 {
     if(type == VNODE_DIRECTORY) {
@@ -280,6 +290,10 @@ static void tmpfs_vnode_release(vnode_t* restrict node)
         tmpfs_uncharge(tmpfs, pages_of(inode->size));
     }
 
+    if(node->type == VNODE_SYM_LINK) {
+        tmpfs_uncharge(tmpfs, target_pages(inode->size));
+    }
+
     tmpfs->used_nodes -= 1;
 
     mutex_release(&tmpfs->lock);
@@ -502,8 +516,20 @@ static int tmpfs_vnode_symlink(vnode_t* restrict node, const char* restrict name
 
     vnode_t* created = nullptr;
 
+    size_t pages = target_pages(length);
+
     mutex_acquire(&tmpfs->lock);
-    int retval = create_locked(node, name, VNODE_SYM_LINK, S_IRWXU | S_IRWXG | S_IRWXO, credentials, copy, length, &created);
+
+    int retval = tmpfs_charge(tmpfs, pages);
+
+    if(retval == 0) {
+        retval = create_locked(node, name, VNODE_SYM_LINK, S_IRWXU | S_IRWXG | S_IRWXO, credentials, copy, length, &created);
+
+        if(retval < 0) {
+            tmpfs_uncharge(tmpfs, pages);
+        }
+    }
+
     mutex_release(&tmpfs->lock);
 
     if(retval < 0) {

@@ -517,6 +517,52 @@ static void test_accounting(void)
     ktest_expect(free_blocks(mount_point), before);
 }
 
+// A target in a page takes a page of the limit, a short one takes none
+static void test_symlink_limits(const char* work_directory)
+{
+    char limited[__k_PATH_MAX];
+    char target[PAGE_SIZE];
+    char path[__k_PATH_MAX];
+
+    memset(target, 'x', sizeof(target));
+    target[PAGE_SIZE - 1] = 0;
+
+    path_in(limited, work_directory, "symlimit");
+    ktest_expect(make_directory(limited), 0);
+    ktest_expect(mount_tmpfs(limited, "size=8k"), 0);
+    ktest_expect(free_blocks(limited), 2);
+
+    path_in(path, limited, "a");
+    ktest_expect(make_symlink(target, path), 0);
+    ktest_expect(free_blocks(limited), 1);
+
+    path_in(path, limited, "b");
+    ktest_expect(make_symlink(target, path), 0);
+    ktest_expect(free_blocks(limited), 0);
+
+    path_in(path, limited, "c");
+    ktest_expect(make_symlink(target, path), -__k_ENOSPC);
+    ktest_expect(make_symlink("short", path), 0);
+    ktest_expect(free_blocks(limited), 0);
+
+    // A name that exists fails the call and gives the page back
+    path_in(path, limited, "a");
+    ktest_expect(remove_file(path), 0);
+    ktest_expect(free_blocks(limited), 1);
+    path_in(path, limited, "b");
+    ktest_expect(make_symlink(target, path), -__k_EEXIST);
+    ktest_expect(free_blocks(limited), 1);
+
+    path_in(path, limited, "b");
+    ktest_expect(remove_file(path), 0);
+    path_in(path, limited, "c");
+    ktest_expect(remove_file(path), 0);
+    ktest_expect(free_blocks(limited), 2);
+
+    ktest_expect(unmount(limited), 0);
+    ktest_expect(remove_directory(limited), 0);
+}
+
 static void test_limits(const char* work_directory)
 {
     char limited[__k_PATH_MAX];
@@ -584,6 +630,7 @@ int main(void)
     ktest_expect(unmount(mount_point), 0);
 
     test_limits(work_directory);
+    test_symlink_limits(work_directory);
 
     return ktest_result();
 }
