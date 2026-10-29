@@ -421,35 +421,40 @@ void process_for_each(void (*callback)(process_t* restrict process, void* restri
     process_t* batch[PROCESS_WALK_BATCH];
 
     for(size_t bucket = 0; bucket < PROCTABLE_BUCKETS; bucket += 1) {
-        size_t visited = 0;
+        bool started = false;
+        pid_t below = 0;
         size_t count;
 
+        // A bucket holds descending pids, as a new pid is the largest yet and goes to its head.
+        // The walk goes on below the last pid it saw, so that what was added or removed
+        // meanwhile shifts nothing; the processes added meanwhile are left out
         do {
             count = 0;
 
             bool intr_state = spinlock_acquire_intr(&proctable_lock);
-            size_t index = 0;
             process_t* it = proctable[bucket];
 
             while(it && count < PROCESS_WALK_BATCH) {
-                if(index >= visited) {
+                if(!started || it->pid < below) {
                     process_incref(it);
                     batch[count] = it;
                     count += 1;
                 }
 
-                index += 1;
                 it = it->hash_next;
             }
 
             spinlock_release_intr(&proctable_lock, intr_state);
 
+            if(count) {
+                started = true;
+                below = batch[count - 1]->pid;
+            }
+
             for(size_t i = 0; i < count; ++i) {
                 callback(batch[i], arg);
                 process_decref(batch[i]);
             }
-
-            visited += count;
         } while(count == PROCESS_WALK_BATCH);
     }
 }

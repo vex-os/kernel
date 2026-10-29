@@ -22,6 +22,7 @@ struct process_group_s {
     session_t* session;
     process_t* members; // Under process_group_lock, linked through process_t.group_next
     process_group_t* hash_next;
+    uint32_t orphan_pass; // Under process_group_lock, the last run of the orphan check that took the group
 };
 
 /// Holds the lock that guards every process's group, the groups' members and the sessions' terminals;

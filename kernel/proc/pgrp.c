@@ -14,6 +14,7 @@
 // tty; a mutex, as signals sent to a group's members may sleep. It nests outside process locks
 static mutex_t process_group_lock = MUTEX_INIT;
 static process_group_t* process_group_table[PROCESS_GROUP_BUCKETS];
+static uint32_t orphan_pass; // Numbers the runs of check_orphans_locked, under process_group_lock
 
 static __always_inline __nodiscard size_t pgid_bucket(pid_t pgid)
 {
@@ -48,6 +49,7 @@ static process_group_t* group_create_locked(pid_t pgid, session_t* restrict sess
     group->num_members = 0;
     group->session = session;
     group->members = nullptr;
+    group->orphan_pass = 0;
 
     size_t bucket = pgid_bucket(pgid);
     group->hash_next = process_group_table[bucket];
@@ -280,26 +282,12 @@ static process_group_t* parent_group_locked(const process_t* restrict process)
     return group;
 }
 
-static bool in_batch(process_group_t* const* restrict batch, size_t count, const process_group_t* restrict group)
-{
-    for(size_t i = 0; i < count; ++i) {
-        if(batch[i] == group) {
-            return true;
-        }
-    }
-
-    return false;
-}
-
 // The groups stay put while the lock is held, so the
 // pointers need no references. The first group is the
 // one that the process was in when it tied other groups to the session
 static void check_orphans_locked(process_t* restrict process, process_group_t* restrict before)
 {
     kassert(mutex_held(&process_group_lock));
-
-    size_t skip = 0;
-    bool more = true;
 
     // A group is hung up when the process cuts its tie
     // to the session by leaving, not whenever it is orphaned
@@ -309,28 +297,28 @@ static void check_orphans_locked(process_t* restrict process, process_group_t* r
         hang_up_orphaned_locked(before);
     }
 
+    // The children may change while the process lock is dropped for the signals. Each round
+    // walks them all again and takes only the groups this check has not marked yet
+    orphan_pass += 1;
+
+    bool more = true;
+
     while(more) {
         process_group_t* batch[ORPHAN_BATCH];
         size_t count = 0;
-        size_t visited = 0;
-        size_t index = 0;
 
         bool intr_state = spinlock_acquire_intr(&process->lock);
         process_t* child = process->children;
 
         while(child && count < ORPHAN_BATCH) {
-            if(index >= skip) {
-                process_group_t* group = atomic_load_n(&child->group, ATOMIC_ACQUIRE);
+            process_group_t* group = atomic_load_n(&child->group, ATOMIC_ACQUIRE);
 
-                if(ties_session(before, group) && !in_batch(batch, count, group)) {
-                    batch[count] = group;
-                    count += 1;
-                }
-
-                visited += 1;
+            if(ties_session(before, group) && group->orphan_pass != orphan_pass) {
+                group->orphan_pass = orphan_pass;
+                batch[count] = group;
+                count += 1;
             }
 
-            index += 1;
             child = child->sibling_next;
         }
 
@@ -340,8 +328,6 @@ static void check_orphans_locked(process_t* restrict process, process_group_t* r
         for(size_t i = 0; i < count; ++i) {
             hang_up_orphaned_locked(batch[i]);
         }
-
-        skip += visited;
     }
 }
 

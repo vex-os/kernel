@@ -112,7 +112,7 @@ process_t* process_locate(pid_t pid) __nodiscard;
 process_t* process_locate_or_self(process_t* restrict caller, pid_t pid) __nodiscard;
 
 /// Calls the callback for every process, with a reference held, in no particular order
-/// @note A process that appears or goes away meanwhile may be skipped or visited twice. The callback may sleep
+/// @note None is visited twice, and a process that appears meanwhile may be left out. The callback may sleep
 void process_for_each(void (*callback)(process_t* restrict process, void* restrict arg), void* restrict arg);
 void process_incref(process_t* process);
 void process_decref(process_t* process);
