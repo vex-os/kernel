@@ -49,6 +49,13 @@ arch-specific halves.
 
 ## Memory
 
+Three types name an address, so that one kind cannot take the place of another. `user_addr_t` is an address as a system call got it, not
+checked yet. `virt_addr_t` is an address in the address space of a `pmap` or a `vmspace`, one that the kernel cannot follow as a pointer.
+`phys_addr_t` is a physical address. `vex/address.h` has their operations. A number becomes an address through `user_addr()`,
+`virt_addr()` or `phys_addr()`, and an address becomes a number through `.value`. Memory that the kernel can reach, such as the direct map,
+the heap and the kernel stacks, is a plain pointer. Only `user_addr_t` takes a plain integer as an argument, as a system call wrapper passes
+the register to the handler as it is.
+
 The kernel has two physical page allocators: `pdma` (the first 16 MiB, for ISA DMA) and `pslab` (a free list of single pages). Both names
 are terms, not abbreviations. The slab allocator serves objects up to `SLAB_MAX_SIZE` (half a page).
 
