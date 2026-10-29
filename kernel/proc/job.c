@@ -1,4 +1,5 @@
 #include <vex/atomic.h>
+#include <vex/cred.h>
 #include <vex/event.h>
 #include <vex/process.h>
 #include <vex/sched.h>
@@ -31,7 +32,9 @@ static void notify_parent(process_t* restrict process, int code, int status)
     spinlock_release_intr(&signal_actions->lock, intr_state);
 
     if(0 == (flags & SA_NOCLDSTOP)) {
-        credentials_t* credentials = process->credentials;
+        // A reference, as another thread of
+        // the process may change them meanwhile
+        credentials_t* credentials = process_get_cred(process);
 
         siginfo_t info = {};
         info.si_signo = SIGCHLD;
@@ -39,6 +42,8 @@ static void notify_parent(process_t* restrict process, int code, int status)
         info.si_pid = process->pid;
         info.si_uid = credentials->uid;
         info.si_status = status;
+
+        cred_decref(credentials);
 
         signal_send(parent, 0, &info);
     }
