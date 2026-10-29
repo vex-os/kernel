@@ -4,6 +4,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <usr/vex/types.h>
+#include <vex/compiler.h>
 
 #if __STDC_VERSION__ < 199901L
 #error "C99 or later is required"
@@ -35,3 +36,19 @@ typedef __k_clock_t clock_t;
 typedef __k_time_t time_t;
 
 typedef __uint128_t uint128_t;
+
+typedef union user_addr_u user_addr_t;
+typedef struct virt_addr_s virt_addr_t;
+typedef struct phys_addr_s phys_addr_t;
+
+union __transparent_union user_addr_u {
+    __k_uintptr_t value;
+};
+
+struct virt_addr_s {
+    uintptr_t value;
+};
+
+struct phys_addr_s {
+    uintptr_t value;
+};

@@ -19,17 +19,18 @@
 #define inline   __inline
 #endif
 
-#define __alias(func)      __attribute__((alias(#func)))
-#define __align_as(type)   __attribute__((aligned(sizeof(type))))
-#define __aligned(n)       __attribute__((aligned(n)))
-#define __always_inline    __attribute__((always_inline)) inline
-#define __nodiscard        __attribute__((warn_unused_result))
-#define __noreturn         __attribute__((noreturn))
-#define __packed           __attribute__((packed))
-#define __printflike(x, y) __attribute__((format(printf, x, y)))
-#define __scanflike(x, y)  __attribute__((format(scanf, x, y)))
-#define __section(name)    __attribute__((section(name)))
-#define __used             __attribute__((used))
+#define __alias(func)       __attribute__((alias(#func)))
+#define __align_as(type)    __attribute__((aligned(sizeof(type))))
+#define __aligned(n)        __attribute__((aligned(n)))
+#define __always_inline     __attribute__((always_inline)) inline
+#define __nodiscard         __attribute__((warn_unused_result))
+#define __noreturn          __attribute__((noreturn))
+#define __packed            __attribute__((packed))
+#define __printflike(x, y)  __attribute__((format(printf, x, y)))
+#define __scanflike(x, y)   __attribute__((format(scanf, x, y)))
+#define __section(name)     __attribute__((section(name)))
+#define __transparent_union __attribute__((transparent_union))
+#define __used              __attribute__((used))
 
 #if __has_builtin(__builtin_expect)
 #define predict_false(cond) __builtin_expect((cond), 0L)
