@@ -20,6 +20,7 @@ ktest_programs = [
     'clock',
     'signal_threads',
     'process',
+    'sigsuspend',
     'process_group',
     'exec_threads',
     'tlb_shootdown',

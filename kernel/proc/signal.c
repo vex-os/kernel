@@ -365,6 +365,14 @@ void signal_force(thread_t* restrict thread, const siginfo_t* restrict info)
     }
 }
 
+void signal_restore_mask(thread_t* restrict thread)
+{
+    if(thread->sig_saved_valid) {
+        thread->sig_saved_valid = false;
+        signal_mask(thread, SIG_SETMASK, thread->sig_saved);
+    }
+}
+
 void signal_deliver(hart_context_t* restrict ctx)
 {
     thread_t* thread = this_thread();
@@ -386,6 +394,7 @@ void signal_deliver(hart_context_t* restrict ctx)
     if(deliverable == 0) {
         recalc_locked(thread);
         spinlock_release_intr(&signal_actions->lock, intr_state);
+        signal_restore_mask(thread);
         return;
     }
 
@@ -396,6 +405,13 @@ void signal_deliver(hart_context_t* restrict ctx)
     pending_signal_t* node = queue_take(queue, sig);
     sigaction_t action = signal_actions->actions[sig - 1];
     sigset_t old_mask = thread->sig_blocked;
+
+    // The handler returns to the mask from before
+    // sigsuspend, which is not the one it runs with
+    if(thread->sig_saved_valid) {
+        old_mask = thread->sig_saved;
+    }
+
     bool caught = action.sa_handler != SIG_DFL && action.sa_handler != SIG_IGN;
     bool ignored = ignored_locked(process, sig); // It may have become so while it was blocked
 
@@ -417,6 +433,8 @@ void signal_deliver(hart_context_t* restrict ctx)
     }
 
     if(!caught) {
+        signal_restore_mask(thread);
+
         if(!ignored) {
             process_kill(process, sig);
         }
@@ -429,6 +447,7 @@ void signal_deliver(hart_context_t* restrict ctx)
     }
 
     thread->syscall_restart = false;
+    thread->sig_saved_valid = false;
 
     // A stack that takes no frame leaves nothing to return to
     if(arch_signal_setup(thread, ctx, &action, &info, old_mask) < 0) {

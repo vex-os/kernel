@@ -1,6 +1,7 @@
 #include <vex/capability.h>
 #include <vex/cred.h>
 #include <vex/errno.h>
+#include <vex/event.h>
 #include <vex/pgrp.h>
 #include <vex/process.h>
 #include <vex/signal.h>
@@ -345,6 +346,40 @@ static intptr_t sys_sigreturn(void)
 }
 
 define_syscall(sys_sigreturn, SYS_SIGRETURN, 0);
+
+// Never returns -ERESTART: the call would run again and overwrite the saved mask
+static intptr_t sys_sigsuspend(user_addr_t set)
+{
+    thread_t* thread = this_thread();
+
+    if(thread->process == nullptr) {
+        return -ENOSYS;
+    }
+
+    sigset_t new_mask;
+    ssize_t copied = user_copyin(&new_mask, set, sizeof(new_mask));
+
+    if(copied < 0) {
+        return copied;
+    }
+
+    thread->sig_saved = signal_mask(thread, SIG_SETMASK, new_mask);
+    thread->sig_saved_valid = true;
+
+    // The signal that ends the wait runs its handler on the
+    // way out, and the handler's return restores the mask
+    ssize_t result = event_sleep(0);
+
+    if(result == -ERESTART) {
+        return -EINTR;
+    }
+
+    signal_restore_mask(thread);
+
+    return result;
+}
+
+define_syscall(sys_sigsuspend, SYS_SIGSUSPEND, 1);
 
 static intptr_t sys_sigaltstack(user_addr_t ss, user_addr_t old)
 {

@@ -70,11 +70,15 @@ struct thread_s {
     thread_t* process_prev;
 
     sigset_t sig_blocked;
+    sigset_t sig_saved; // The mask that sigsuspend replaced, valid while sig_saved_valid
     sigset_t sig_pending;
     pending_signal_t* sig_queue;
     uintptr_t sig_altstack;
     uint32_t sig_altstack_size;
+    bool sig_saved_valid;
+
     uintptr_t clear_tid; // Zeroed and woken as a futex when the thread exits
+
     void* kstack_top;
     void* io_page; // The bounce buffer of read and write system calls, which never nest; allocated on first use
 
