@@ -64,8 +64,8 @@ struct __k_serial_modem {
  * receive_size bytes came, a byte equal to terminator came, or timeout_msec passed;
  * receive_size comes back as how many bytes were read. The port must be unbound */
 struct __k_serial_exchange {
-    __k_uint64_t send;
-    __k_uint64_t receive;
+    __k_uintptr_t send;
+    __k_uintptr_t receive;
     __k_uint32_t send_size;
     __k_uint32_t receive_size;
     __k_uint32_t timeout_msec;

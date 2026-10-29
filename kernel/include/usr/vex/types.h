@@ -1,6 +1,8 @@
 #ifndef USR_VEX_TYPES_H
 #define USR_VEX_TYPES_H
 
+#include <arch/types.h>
+
 #if defined(__INT8_TYPE__) && defined(__INT16_TYPE__) && defined(__INT32_TYPE__) && defined(__INT64_TYPE__) && defined(__UINT8_TYPE__) \
     && defined(__UINT16_TYPE__) && defined(__UINT32_TYPE__) && defined(__UINT64_TYPE__)
 #define __k_SINT8_TYPE  __INT8_TYPE__
@@ -12,6 +14,7 @@
 #define __k_UINT32_TYPE __UINT32_TYPE__
 #define __k_UINT64_TYPE __UINT64_TYPE__
 #define __k_SSIZE_TYPE  __INT64_TYPE__
+#define __k_SIZE_TYPE   __UINT64_TYPE__
 #elif defined(__cplusplus) || defined(__STDC_VERSION__) && __STDC_VERSION__ >= 199901L
 #include <stddef.h>
 #include <stdint.h>
@@ -24,6 +27,7 @@
 #define __k_UINT32_TYPE uint32_t
 #define __k_UINT64_TYPE uint64_t
 #define __k_SSIZE_TYPE  int64_t
+#define __k_SIZE_TYPE   uint64_t
 #else
 #include <limits.h>
 #if UCHAR_MAX == 0xFF
@@ -51,13 +55,25 @@
 #define __k_SINT64_TYPE signed long
 #define __k_UINT64_TYPE unsigned long
 #define __k_SSIZE_TYPE  signed long
+#define __k_SIZE_TYPE   unsigned long
 #elif defined(ULLONG_MAX) && ULLONG_MAX == 0xFFFFFFFFFFFFFFFFULL
 #define __k_SINT64_TYPE signed long long
 #define __k_UINT64_TYPE unsigned long long
 #define __k_SSIZE_TYPE  signed long long
+#define __k_SIZE_TYPE   unsigned long long
 #else
 #error "64-bit integer type unavailable in this C89 environment"
 #endif
+#endif
+
+#if __k_POINTER_BITS == 64
+#define __k_SINTPTR_TYPE __k_SINT64_TYPE
+#define __k_UINTPTR_TYPE __k_UINT64_TYPE
+#elif __k_POINTER_BITS == 32
+#define __k_INTPTR_TYPE  __k_INT32_TYPE
+#define __k_UINTPTR_TYPE __k_UINT32_TYPE
+#else
+#error "unsupported pointer width"
 #endif
 
 typedef __k_SINT8_TYPE __k_int8_t;
@@ -70,7 +86,10 @@ typedef __k_UINT16_TYPE __k_uint16_t;
 typedef __k_UINT32_TYPE __k_uint32_t;
 typedef __k_UINT64_TYPE __k_uint64_t;
 
+typedef __k_SINTPTR_TYPE __k_intptr_t;
+typedef __k_UINTPTR_TYPE __k_uintptr_t;
 typedef __k_SSIZE_TYPE __k_ssize_t;
+typedef __k_SIZE_TYPE __k_size_t;
 
 typedef __k_SINT32_TYPE __k_id_t;
 typedef __k_SINT32_TYPE __k_gid_t;

@@ -16,7 +16,7 @@ static struct __k_iovec vec(const void* base, size_t length)
 {
     struct __k_iovec iov;
 
-    iov.base = (__k_uint64_t)(base);
+    iov.base = (__k_uintptr_t)(base);
     iov.len = length;
 
     return iov;

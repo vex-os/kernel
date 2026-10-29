@@ -24,7 +24,7 @@ struct __k_vexfb_info {
     struct __k_vexfb_channel green;
     struct __k_vexfb_channel blue;
     struct __k_vexfb_channel alpha;
-    __k_uint64_t size;
+    __k_size_t size;
     __k_uint32_t palette_size; /* Entries; zero for direct color */
     __k_uint32_t flags;
 };
@@ -37,13 +37,13 @@ struct __k_vexfb_rect {
 };
 
 struct __k_vexfb_flush {
-    __k_uint64_t rects; /* __k_vexfb_rect[count] */
+    __k_uintptr_t rects; /* __k_vexfb_rect[count] */
     __k_uint32_t count;
     __k_uint32_t pad;
 };
 
 struct __k_vexfb_palette {
-    __k_uint64_t colors; /* __k_uint32_t[count], 0x00RRGGBB */
+    __k_uintptr_t colors; /* __k_uint32_t[count], 0x00RRGGBB */
     __k_uint32_t first;
     __k_uint32_t count;
 };
@@ -56,8 +56,8 @@ struct __k_vexfb_mode {
 };
 
 struct __k_vexfb_modes {
-    __k_uint64_t modes; /* __k_vexfb_mode[count] */
-    __k_uint32_t count; /* Room in modes; the kernel writes back how many there are */
+    __k_uintptr_t modes; /* __k_vexfb_mode[count] */
+    __k_uint32_t count;  /* Room in modes; the kernel writes back how many there are */
     __k_uint32_t pad;
 };
 

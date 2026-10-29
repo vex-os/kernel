@@ -129,7 +129,7 @@ struct __k_sigaction {
 
 struct __k_stack {
     void* ss_sp;
-    __k_uint64_t ss_size;
+    __k_size_t ss_size;
     __k_int32_t ss_flags;
     __k_uint32_t ss_reserved;
 };
