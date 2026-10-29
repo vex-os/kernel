@@ -75,7 +75,7 @@ static int io_cursor_init_vector(io_cursor_t* restrict cursor, user_addr_t iov, 
             return copied;
         }
 
-        if(element.len > (size_t)(INT64_MAX) - (size)) {
+        if(element.len > (size_t)(INT64_MAX) - (size)) { // clang-format antics
             return -EINVAL;
         }
 
