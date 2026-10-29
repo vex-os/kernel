@@ -228,11 +228,13 @@ void __used amd64_isr_handler(hart_context_t* restrict ctx, uint64_t intvec)
     }
 
     if(intvec == 0x08) {
-        uintptr_t fault;
-        asm volatile("movq %%cr2, %0" : "=r"(fault));
+        uintptr_t cr2;
+        asm volatile("movq %%cr2, %0" : "=r"(cr2));
+
+        virt_addr_t fault = virt_addr(cr2);
 
         if(kstack_is_guard(fault)) {
-            panic("kernel stack overflow: hart=%hu fault=%p rip=%p", hart->index, (void*)(fault), (void*)(ctx->amd64_rip));
+            panic("kernel stack overflow: hart=%hu fault=%p rip=%p", hart->index, virt_addr_pointer(fault), (void*)(ctx->amd64_rip));
         }
 
         panic("double fault: hart=%hu rip=%p", hart->index, (void*)(ctx->amd64_rip));

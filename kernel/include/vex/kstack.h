@@ -1,5 +1,6 @@
 #pragma once
 
+#include <vex/address.h>
 #include <vex/compiler.h>
 #include <vex/limits.h>
 #include <vex/types.h>
@@ -9,4 +10,4 @@
 
 void* kstack_alloc(void) __nodiscard;
 void kstack_free(void* restrict top);
-bool kstack_is_guard(uintptr_t address) __nodiscard;
+bool kstack_is_guard(virt_addr_t address) __nodiscard;

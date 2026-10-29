@@ -20,9 +20,9 @@ static bitmap_t free_slots[KSTACK_NUM_SLOTS / BITMAP_CHUNK_BITS];
 static size_t next_slot = 0U;
 static spinlock_t slots_lock = SPINLOCK_INIT;
 
-static __always_inline uintptr_t slot_base(size_t slot)
+static __always_inline virt_addr_t slot_base(size_t slot)
 {
-    return KSTACK_REGION_BASE + slot * KSTACK_SLOT_SIZE;
+    return virt_addr(KSTACK_REGION_BASE + slot * KSTACK_SLOT_SIZE);
 }
 
 static size_t claim_slot(void)
@@ -52,14 +52,14 @@ static void release_slot(size_t slot)
     spinlock_release_intr(&slots_lock, intr_state);
 }
 
-static void unmap_pages(uintptr_t stack_bottom, size_t count)
+static void unmap_pages(virt_addr_t stack_bottom, size_t count)
 {
     phys_addr_t phys[KSTACK_PAGES];
 
     for(size_t i = 0U; i < count; ++i) {
-        uintptr_t virt = stack_bottom + i * PAGE_SIZE;
-        phys[i] = page_align(pmap_resolve_address(&sys_pmap, virt_addr(virt)));
-        pmap_unmap_noflush(&sys_pmap, virt_addr(virt));
+        virt_addr_t virt = address_add(stack_bottom, i * PAGE_SIZE);
+        phys[i] = page_align(pmap_resolve_address(&sys_pmap, virt));
+        pmap_unmap_noflush(&sys_pmap, virt);
     }
 
     tlb_shootdown();
@@ -77,12 +77,13 @@ void* kstack_alloc(void)
         return nullptr;
     }
 
-    uintptr_t stack_bottom = slot_base(slot) + PAGE_SIZE;
+    virt_addr_t stack_bottom = address_add(slot_base(slot), PAGE_SIZE);
 
     for(size_t i = 0U; i < KSTACK_PAGES; ++i) {
         phys_addr_t phys = pslab_alloc_phys();
+        virt_addr_t virt = address_add(stack_bottom, i * PAGE_SIZE);
 
-        if(address_null(phys) || pmap_map(&sys_pmap, virt_addr(stack_bottom + i * PAGE_SIZE), phys, VPROT_RW) < 0) {
+        if(address_null(phys) || pmap_map(&sys_pmap, virt, phys, VPROT_RW) < 0) {
             pslab_free_phys(phys);
             unmap_pages(stack_bottom, i);
             release_slot(slot);
@@ -90,7 +91,9 @@ void* kstack_alloc(void)
         }
     }
 
-    return (void*)(stack_bottom + KSTACK_SIZE);
+    virt_addr_t top = address_add(stack_bottom, KSTACK_SIZE);
+
+    return virt_addr_pointer(top);
 }
 
 void kstack_free(void* restrict top)
@@ -99,25 +102,42 @@ void kstack_free(void* restrict top)
         return;
     }
 
-    uintptr_t stack_top = (uintptr_t)(top);
-    uintptr_t stack_bottom = stack_top - KSTACK_SIZE;
-    size_t slot = (stack_bottom - PAGE_SIZE - KSTACK_REGION_BASE) / KSTACK_SLOT_SIZE;
+    virt_addr_t stack_top = virt_addr_from_pointer(top);
+    virt_addr_t region = virt_addr(KSTACK_REGION_BASE);
+    bool in_region = address_greater_equal(stack_top, region);
 
-    if(stack_top < KSTACK_REGION_BASE || slot >= KSTACK_NUM_SLOTS || slot_base(slot) + KSTACK_SLOT_SIZE != stack_top) {
+    // An address below the region has no slot
+    size_t slot = SIZE_MAX;
+
+    if(in_region) {
+        slot = (address_diff(stack_top, region) - KSTACK_SIZE - PAGE_SIZE) / KSTACK_SLOT_SIZE;
+    }
+
+    if(slot >= KSTACK_NUM_SLOTS) {
         panic("kstack: freeing invalid kernel stack %p", top);
     }
+
+    virt_addr_t slot_end = address_add(slot_base(slot), KSTACK_SLOT_SIZE);
+
+    if(!address_equal(slot_end, stack_top)) {
+        panic("kstack: freeing invalid kernel stack %p", top);
+    }
+
+    virt_addr_t stack_bottom = address_sub(stack_top, KSTACK_SIZE);
 
     unmap_pages(stack_bottom, KSTACK_PAGES);
     release_slot(slot);
 }
 
-bool kstack_is_guard(uintptr_t address)
+bool kstack_is_guard(virt_addr_t address)
 {
-    if(address < KSTACK_REGION_BASE) {
+    virt_addr_t region = virt_addr(KSTACK_REGION_BASE);
+
+    if(address_less(address, region)) {
         return false;
     }
 
-    size_t offset = address - KSTACK_REGION_BASE;
+    size_t offset = address_diff(address, region);
 
     if(offset >= KSTACK_NUM_SLOTS * KSTACK_SLOT_SIZE) {
         return false;
