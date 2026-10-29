@@ -240,10 +240,6 @@ static void begin_exit(process_t* restrict process, int exit_code, int exit_sign
     job_wake_locked(process);
 
     spinlock_release_intr(&process->lock, intr_state);
-
-    // A zombie must not keep filesystems
-    // busy until it is waited for
-    release_files(process);
 }
 
 pid_t process_alloc_id(void)
@@ -251,7 +247,7 @@ pid_t process_alloc_id(void)
     return atomic_fetch_add(&next_pid, 1, ATOMIC_RELAXED);
 }
 
-void process_check_orphans(process_t* restrict process)
+void process_finish_exit(process_t* restrict process)
 {
     uint8_t flags = atomic_load_n(&process->flags, ATOMIC_ACQUIRE);
 
@@ -259,11 +255,15 @@ void process_check_orphans(process_t* restrict process)
         return;
     }
 
-    if(atomic_fetch_or(&process->flags, PROCESS_ORPHANS_CHECKED, ATOMIC_ACQ_REL) & PROCESS_ORPHANS_CHECKED) {
+    if(atomic_fetch_or(&process->flags, PROCESS_EXIT_FINISHED, ATOMIC_ACQ_REL) & PROCESS_EXIT_FINISHED) {
         return;
     }
 
     process_group_check_orphans(process);
+
+    // A zombie must not keep filesystems
+    // busy until it is waited for
+    release_files(process);
 }
 
 process_t* process_create(process_t* restrict parent)

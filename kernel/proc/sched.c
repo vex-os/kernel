@@ -730,9 +730,8 @@ void __noreturn sched_terminate(void)
     thread_t* thread = this_thread();
     process_t* process = thread->process;
 
-    // Not in begin_exit: a SIGKILL sent to a group runs it under process_group_lock
     if(process) {
-        process_check_orphans(process);
+        process_finish_exit(process);
     }
 
     disable_interrupts();
