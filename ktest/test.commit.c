@@ -1,3 +1,4 @@
+#include <vex/capability.h>
 #include <vex/errno.h>
 #include <vex/mman.h>
 #include <vex/syscall.h>
@@ -9,6 +10,7 @@
 #define SPARE_PAGES 4
 #define RW          (__k_PROT_READ | __k_PROT_WRITE)
 #define ANONYMOUS   (__k_MAP_PRIVATE | __k_MAP_ANONYMOUS)
+#define NORESERVE   (ANONYMOUS | __k_MAP_NORESERVE)
 
 static long map_anonymous(long address, long pages, long prot, long flags)
 {
@@ -161,6 +163,15 @@ static long fork_and_exit(void)
     return child;
 }
 
+static void reap(long child)
+{
+    int wstatus = -1;
+
+    ktest_assert(child > 0);
+    ktest_expect(ktest_syscall3(__k_SYS_WAITPID, child, (long)(&wstatus), 0), child);
+    ktest_expect(wstatus, 0);
+}
+
 static void test_fork(long room)
 {
     long hold = map_writable(room - SPARE_PAGES);
@@ -177,16 +188,71 @@ static void test_fork(long room)
     hold = map_writable(quarter);
     ktest_assert(hold > 0);
 
-    long child = fork_and_exit();
-    int wstatus = -1;
-
-    ktest_assert(child > 0);
-    ktest_expect(ktest_syscall3(__k_SYS_WAITPID, child, (long)(&wstatus), 0), child);
-    ktest_expect(wstatus, 0);
+    reap(fork_and_exit());
 
     // The copy of the child goes with it
     ktest_expect(free_pages(), room - quarter);
     ktest_expect(unmap(hold, quarter), 0);
+}
+
+static void test_noreserve(long room)
+{
+    // The memory takes nothing, so there can be more of it than all that exists
+    long big = map_anonymous(0, 2 * room, RW, NORESERVE);
+
+    ktest_assert(big > 0);
+    ktest_expect(free_pages(), room);
+
+    // A change of the rights does not make it count
+    long none = map_anonymous(0, room, __k_PROT_NONE, NORESERVE);
+
+    ktest_assert(none > 0);
+    ktest_expect(protect(none, room, RW), 0);
+    ktest_expect(protect(none, room, __k_PROT_READ), 0);
+    ktest_expect(protect(none, room, RW), 0);
+    ktest_expect(free_pages(), room);
+
+    // A hole in it does not give back pages that it never took
+    ktest_expect(unmap(big + PAGE_SIZE, 1), 0);
+    ktest_expect(free_pages(), room);
+
+    // A child needs no room for the copy
+    reap(fork_and_exit());
+    ktest_expect(free_pages(), room);
+
+    ktest_expect(unmap(big, 1), 0);
+    ktest_expect(unmap(big + 2 * PAGE_SIZE, 2 * room - 2), 0);
+    ktest_expect(unmap(none, room), 0);
+    ktest_expect(free_pages(), room);
+}
+
+static void test_noreserve_denied(void)
+{
+    long child = ktest_syscall1(__k_SYS_FORK, 0);
+
+    if(child == 0) {
+        struct __k_caps caps;
+
+        ktest_syscall1(__k_SYS_CAPGET, (long)(&caps));
+        caps.effective &= ~__k_CAP_TO_MASK(__k_CAP_VM_NORESERVE);
+        ktest_expect(ktest_syscall1(__k_SYS_CAPSET, (long)(&caps)), 0);
+
+        // The flag does nothing then, and the pages count as for any other mapping
+        long room = free_pages();
+
+        ktest_expect(map_anonymous(0, room + 1, RW, NORESERVE), -__k_ENOMEM);
+
+        long half = map_anonymous(0, room / 2, RW, NORESERVE);
+
+        ktest_assert(half > 0);
+        ktest_expect(free_pages(), room - room / 2);
+        ktest_expect(unmap(half, room / 2), 0);
+        ktest_expect(free_pages(), room);
+
+        ktest_exit(ktest_result());
+    }
+
+    reap(child);
 }
 
 int main(void)
@@ -200,6 +266,8 @@ int main(void)
     test_protect(room);
     test_replace(room);
     test_fork(room);
+    test_noreserve(room);
+    test_noreserve_denied();
 
     ktest_expect(free_pages(), room);
 
