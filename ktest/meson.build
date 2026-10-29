@@ -33,6 +33,7 @@ ktest_programs = [
     'iov',
     'getdents',
     'mount',
+    'tmpfs',
     'path',
     'kplog',
     'hwtree',
