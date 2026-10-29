@@ -15,7 +15,7 @@ typedef struct mmio_mapping_s mmio_mapping_t;
 struct mmio_mapping_s {
     mmio_mapping_t* next; // Sorted by virt
     uintptr_t virt;
-    uintptr_t phys;
+    phys_addr_t phys;
     size_t size;
     unsigned vprot;
     unsigned refcount; // Zero while the range waits for a shootdown, so it can't be reused yet
@@ -27,10 +27,10 @@ static mmio_mapping_t* mmio_head = nullptr;
 // A physical range may be mapped more than once
 // only with one memory type; x86 leaves the result
 // undefined when two mappings disagree
-static bool type_conflicts_nolock(uintptr_t phys, size_t size, unsigned vprot)
+static bool type_conflicts_nolock(phys_addr_t phys, size_t size, unsigned vprot)
 {
     for(mmio_mapping_t* it = mmio_head; it; it = it->next) {
-        bool overlaps = phys < it->phys + it->size && it->phys < phys + size;
+        bool overlaps = address_less(phys, address_add(it->phys, it->size)) && address_less(it->phys, address_add(phys, size));
 
         if(overlaps && (it->vprot & VPROT_CACHE_MASK) != (vprot & VPROT_CACHE_MASK)) {
             return true;
@@ -40,10 +40,11 @@ static bool type_conflicts_nolock(uintptr_t phys, size_t size, unsigned vprot)
     return false;
 }
 
-static mmio_mapping_t* find_reusable_nolock(uintptr_t phys, size_t size, unsigned vprot)
+static mmio_mapping_t* find_reusable_nolock(phys_addr_t phys, size_t size, unsigned vprot)
 {
     for(mmio_mapping_t* it = mmio_head; it; it = it->next) {
-        if(it->refcount && it->vprot == vprot && phys >= it->phys && phys + size <= it->phys + it->size) {
+        if(it->refcount && it->vprot == vprot && !address_less(phys, it->phys)
+            && !address_less(address_add(it->phys, it->size), address_add(phys, size))) {
             return it;
         }
     }
@@ -51,13 +52,13 @@ static mmio_mapping_t* find_reusable_nolock(uintptr_t phys, size_t size, unsigne
     return nullptr;
 }
 
-static uintptr_t place_virt(uintptr_t gap_start, uintptr_t phys, size_t size)
+static uintptr_t place_virt(uintptr_t gap_start, phys_addr_t phys, size_t size)
 {
     if(size < LARGE_ALIGN) {
         return gap_start;
     }
 
-    uintptr_t virt = (gap_start & ~(LARGE_ALIGN - 1)) | (phys & (LARGE_ALIGN - 1));
+    uintptr_t virt = (gap_start & ~(LARGE_ALIGN - 1)) | (phys.value & (LARGE_ALIGN - 1));
 
     if(virt < gap_start) {
         virt += LARGE_ALIGN;
@@ -106,13 +107,13 @@ static void unlink_nolock(mmio_mapping_t* restrict mapping)
     }
 }
 
-void* mmio_map(uintptr_t phys, size_t size, unsigned vprot)
+void* mmio_map(phys_addr_t phys, size_t size, unsigned vprot)
 {
     kassert(size > 0);
     kassert(0 == (vprot & VPROT_USER));
 
-    uintptr_t phys_page = page_align(phys);
-    size_t length = page_align_up(phys + size) - phys_page;
+    phys_addr_t phys_page = page_align(phys);
+    size_t length = address_diff(page_align_up(address_add(phys, size)), phys_page);
 
     mmio_mapping_t* mapping = slab_alloc(sizeof(mmio_mapping_t));
 
@@ -133,13 +134,13 @@ void* mmio_map(uintptr_t phys, size_t size, unsigned vprot)
         existing->refcount += 1;
         spinlock_release(&mmio_lock);
         slab_free(mapping);
-        return (void*)(existing->virt + (phys - existing->phys));
+        return (void*)(existing->virt + address_diff(phys, existing->phys));
     }
 
     if(type_conflicts_nolock(phys_page, length, vprot)) {
         spinlock_release(&mmio_lock);
         slab_free(mapping);
-        pr_warning("mmio: %#zx+%#zx is already mapped with another memory type", phys, size);
+        pr_warning("mmio: %#zx+%#zx is already mapped with another memory type", phys.value, size);
         return nullptr;
     }
 
@@ -163,7 +164,7 @@ void* mmio_map(uintptr_t phys, size_t size, unsigned vprot)
 
     spinlock_release(&mmio_lock);
 
-    return (void*)(mapping->virt + (phys - phys_page));
+    return (void*)(mapping->virt + address_diff(phys, phys_page));
 }
 
 void mmio_unmap(volatile void* virt)

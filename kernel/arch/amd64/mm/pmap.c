@@ -43,7 +43,7 @@ int arch_pmap_alloc(pmap_t* restrict pmap)
 {
     pmap->phys = pslab_alloc_phys();
 
-    if(pmap->phys == 0) {
+    if(address_null(pmap->phys)) {
         return -ENOMEM;
     }
 
@@ -58,7 +58,7 @@ void arch_pmap_free(pmap_t* restrict pmap)
 {
     pslab_free_virt(pmap->virt);
 
-    pmap->phys = 0;
+    pmap->phys = phys_addr(0);
     pmap->virt = nullptr;
 }
 

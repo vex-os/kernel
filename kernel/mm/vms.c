@@ -26,8 +26,8 @@
 typedef struct user_access_s user_access_t;
 
 struct user_access_s {
-    uintptr_t pinned; // The frame to put_frame once done, or zero
-    bool device;      // device_regions_lock is held until then
+    phys_addr_t pinned; // The frame to put_frame once done, or null
+    bool device;        // device_regions_lock is held until then
 };
 
 static spinlock_t stale_lock = SPINLOCK_INIT;
@@ -170,7 +170,7 @@ static bool range_valid(vmspace_t* restrict vmspace, uintptr_t start, uintptr_t 
     return start < end && end <= pmap_user_end(vmspace->pmap);
 }
 
-static void put_frame(uintptr_t phys)
+static void put_frame(phys_addr_t phys)
 {
     if(pframe_decref(pframe_of(phys))) {
         pslab_free_phys(phys);
@@ -251,9 +251,9 @@ static int unshare_locked(vmspace_t* restrict vmspace, const vm_region_t* restri
 {
     unsigned vprot = region->vprot | VPROT_USER;
     bool sole;
-    uintptr_t phys = rmap_pin(vmspace->pmap, page, &sole);
+    phys_addr_t phys = rmap_pin(vmspace->pmap, page, &sole);
 
-    if(phys == 0) {
+    if(address_null(phys)) {
         return -EAGAIN;
     }
 
@@ -269,9 +269,9 @@ static int unshare_locked(vmspace_t* restrict vmspace, const vm_region_t* restri
         return retval;
     }
 
-    uintptr_t copy = pslab_alloc_phys();
+    phys_addr_t copy = pslab_alloc_phys();
 
-    if(copy == 0) {
+    if(address_null(copy)) {
         put_frame(phys);
         return -ENOMEM;
     }
@@ -298,12 +298,12 @@ static int unshare_locked(vmspace_t* restrict vmspace, const vm_region_t* restri
 // to track them dirty: they map with the region's vprot. The caller holds device_regions_lock
 static int fault_device_locked(vmspace_t* restrict vmspace, const vm_region_t* restrict region, uintptr_t page)
 {
-    if(pmap_resolve_address(vmspace->pmap, page)) {
+    if(address_valid(pmap_resolve_address(vmspace->pmap, page))) {
         return 0;
     }
 
     off_t offset = region->file_offset + (page - region->start);
-    uintptr_t phys;
+    phys_addr_t phys;
     unsigned cache;
     int retval = vnode_resolve_page(region->file->node, offset, &phys, &cache);
 
@@ -334,7 +334,7 @@ static int fault_locked(vmspace_t* restrict vmspace, uintptr_t page, unsigned ac
     }
 
     for(;;) {
-        bool mapped = pmap_resolve_address(vmspace->pmap, page);
+        bool mapped = address_valid(pmap_resolve_address(vmspace->pmap, page));
 
         if(mapped && !exclusive) {
             return 0;
@@ -370,9 +370,9 @@ static int fault_locked(vmspace_t* restrict vmspace, uintptr_t page, unsigned ac
         }
     }
 
-    uintptr_t phys = pslab_alloc_phys();
+    phys_addr_t phys = pslab_alloc_phys();
 
-    if(phys == 0) {
+    if(address_null(phys)) {
         return -ENOMEM;
     }
 
@@ -388,20 +388,20 @@ static int fault_locked(vmspace_t* restrict vmspace, uintptr_t page, unsigned ac
     return 0;
 }
 
-static uintptr_t pin_locked(vmspace_t* restrict vmspace, uintptr_t virt, unsigned access, bool exclusive)
+static phys_addr_t pin_locked(vmspace_t* restrict vmspace, uintptr_t virt, unsigned access, bool exclusive)
 {
     uintptr_t page = page_align(virt);
-    uintptr_t phys = 0;
+    phys_addr_t phys = phys_addr(0);
 
     vm_region_t* region = find_region(vmspace, page);
 
     if(region && region->device) {
-        return 0; // No pframe to pin
+        return phys_addr(0); // No pframe to pin
     }
 
-    while(phys == 0) {
+    while(address_null(phys)) {
         if(fault_locked(vmspace, page, access, exclusive) < 0) {
-            return 0;
+            return phys_addr(0);
         }
 
         phys = rmap_pin(vmspace->pmap, page, nullptr);
@@ -425,7 +425,7 @@ static void* access_begin_locked(vmspace_t* restrict vmspace, uintptr_t virt, un
 {
     vm_region_t* region = find_region(vmspace, virt);
 
-    out->pinned = 0;
+    out->pinned = phys_addr(0);
     out->device = false;
 
     if(region && region->device) {
@@ -449,7 +449,7 @@ static void* access_begin_locked(vmspace_t* restrict vmspace, uintptr_t virt, un
 
     out->pinned = pin_locked(vmspace, virt, access, exclusive);
 
-    if(out->pinned == 0) {
+    if(address_null(out->pinned)) {
         return nullptr;
     }
 
@@ -462,12 +462,12 @@ static void access_end(const user_access_t* restrict user_access)
         spinlock_release(&device_regions_lock);
     }
 
-    if(user_access->pinned) {
+    if(address_valid(user_access->pinned)) {
         put_frame(user_access->pinned);
     }
 }
 
-static void free_batch(uintptr_t* restrict batch, size_t* restrict count, bool shootdown)
+static void free_batch(phys_addr_t* restrict batch, size_t* restrict count, bool shootdown)
 {
     if(*count == 0) {
         return;
@@ -501,13 +501,13 @@ static void release_device_pages(vmspace_t* restrict vmspace, const vm_region_t*
     }
 }
 
-static void release_range(vmspace_t* restrict vmspace, uintptr_t start, uintptr_t end, uintptr_t* restrict batch, size_t* restrict count,
+static void release_range(vmspace_t* restrict vmspace, uintptr_t start, uintptr_t end, phys_addr_t* restrict batch, size_t* restrict count,
     bool shootdown)
 {
     for(uintptr_t page = start; page < end; page += PAGE_SIZE) {
-        uintptr_t phys = rmap_unmap(vmspace->pmap, page);
+        phys_addr_t phys = rmap_unmap(vmspace->pmap, page);
 
-        if(phys == 0) {
+        if(address_null(phys)) {
             continue;
         }
 
@@ -520,7 +520,7 @@ static void release_range(vmspace_t* restrict vmspace, uintptr_t start, uintptr_
     }
 }
 
-static void release_pages(vmspace_t* restrict vmspace, const vm_region_t* restrict region, uintptr_t* restrict batch,
+static void release_pages(vmspace_t* restrict vmspace, const vm_region_t* restrict region, phys_addr_t* restrict batch,
     size_t* restrict count, bool shootdown)
 {
     if(region->device) {
@@ -533,7 +533,7 @@ static void release_pages(vmspace_t* restrict vmspace, const vm_region_t* restri
 
 static void unmap_all_locked(vmspace_t* restrict vmspace, bool shootdown, bool deferred)
 {
-    uintptr_t batch[FREE_BATCH];
+    phys_addr_t batch[FREE_BATCH];
     size_t count = 0;
 
     while(vmspace->regions) {
@@ -560,7 +560,7 @@ static int unmap_locked(vmspace_t* restrict vmspace, uintptr_t start, uintptr_t 
         return retval;
     }
 
-    uintptr_t batch[FREE_BATCH];
+    phys_addr_t batch[FREE_BATCH];
     size_t count = 0;
 
     vm_region_t** prev = &vmspace->regions;
@@ -862,9 +862,9 @@ int vms_protect(vmspace_t* restrict vmspace, uintptr_t start, uintptr_t end, uns
         it->vprot = vprot;
 
         for(uintptr_t page = it->start; page < it->end; page += PAGE_SIZE) {
-            uintptr_t phys = pmap_resolve_address(vmspace->pmap, page);
+            phys_addr_t phys = pmap_resolve_address(vmspace->pmap, page);
 
-            if(phys == 0) {
+            if(address_null(phys)) {
                 continue;
             }
 
@@ -933,7 +933,7 @@ int vms_discard(vmspace_t* restrict vmspace, uintptr_t start, uintptr_t end)
         }
     }
 
-    uintptr_t batch[FREE_BATCH];
+    phys_addr_t batch[FREE_BATCH];
     size_t count = 0;
 
     for(vm_region_t* it = find_region(vmspace, start); it && it->start < end; it = it->next) {
@@ -1063,9 +1063,9 @@ int vms_clone(vmspace_t* restrict vmspace, vmspace_t* restrict source)
         unsigned vprot = (it->vprot & ~VPROT_WRITE) | VPROT_USER;
 
         for(uintptr_t page = it->start; page < it->end && retval == 0; page += PAGE_SIZE) {
-            uintptr_t phys = rmap_pin(source->pmap, page, nullptr);
+            phys_addr_t phys = rmap_pin(source->pmap, page, nullptr);
 
-            if(phys == 0) {
+            if(address_null(phys)) {
                 continue;
             }
 
@@ -1148,19 +1148,19 @@ void vms_revoke(vnode_t* restrict node)
     }
 }
 
-uintptr_t vms_touch(vmspace_t* restrict vmspace, uintptr_t virt)
+phys_addr_t vms_touch(vmspace_t* restrict vmspace, uintptr_t virt)
 {
     if(virt >= pmap_user_end(vmspace->pmap)) {
-        return 0;
+        return phys_addr(0);
     }
 
     mutex_acquire(&vmspace->lock);
 
-    uintptr_t phys = pin_locked(vmspace, virt, VPROT_NONE, true);
+    phys_addr_t phys = pin_locked(vmspace, virt, VPROT_NONE, true);
 
-    if(phys) {
+    if(address_valid(phys)) {
         put_frame(phys);
-        phys += page_offset(virt);
+        phys = address_add(phys, page_offset(virt));
     }
 
     mutex_release(&vmspace->lock);
@@ -1168,16 +1168,16 @@ uintptr_t vms_touch(vmspace_t* restrict vmspace, uintptr_t virt)
     return phys;
 }
 
-uintptr_t vms_pin(vmspace_t* restrict vmspace, uintptr_t virt)
+phys_addr_t vms_pin(vmspace_t* restrict vmspace, uintptr_t virt)
 {
     if(virt >= pmap_user_end(vmspace->pmap)) {
-        return 0;
+        return phys_addr(0);
     }
 
     mutex_acquire(&vmspace->lock);
 
     vm_region_t* region = find_region(vmspace, virt);
-    uintptr_t phys = 0;
+    phys_addr_t phys = phys_addr(0);
 
     if(region) {
         phys = pin_locked(vmspace, virt, VPROT_READ, !region->shared);
@@ -1185,14 +1185,14 @@ uintptr_t vms_pin(vmspace_t* restrict vmspace, uintptr_t virt)
 
     mutex_release(&vmspace->lock);
 
-    if(phys) {
-        phys += page_offset(virt);
+    if(address_valid(phys)) {
+        phys = address_add(phys, page_offset(virt));
     }
 
     return phys;
 }
 
-void vms_unpin(uintptr_t phys)
+void vms_unpin(phys_addr_t phys)
 {
     put_frame(page_align(phys));
 }

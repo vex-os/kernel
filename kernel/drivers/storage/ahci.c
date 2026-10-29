@@ -168,7 +168,7 @@ struct ahci_port_s {
     ahci_pci_context_t* context;
     const io_region_t* bar;
     uintptr_t port_base;
-    uintptr_t dma_phys;
+    phys_addr_t dma_phys;
     uint8_t* dma_virt;
     unsigned iterator;
     unsigned number;
@@ -176,7 +176,7 @@ struct ahci_port_s {
 
 struct ahci_pci_context_s {
     io_region_t abar;
-    uintptr_t dma_limit;
+    phys_addr_t dma_limit;
     bool irq;
     block_interface_t interfaces[32];
     atapi_interface_t atapi_interfaces[32];
@@ -205,7 +205,7 @@ static __nodiscard bool port_acquire(ahci_port_t* restrict port)
 {
     mutex_acquire(&port->lock);
 
-    if(port->dma_phys == 0) {
+    if(address_null(port->dma_phys)) {
         mutex_release(&port->lock);
         return false;
     }
@@ -365,23 +365,23 @@ static void ahci_setup_header(ahci_port_t* restrict port, uint16_t flags, const 
     volatile ahci_cmd_header_t* header = (volatile ahci_cmd_header_t*)(port->dma_virt + DMA_OFFSET_CMDLIST);
     volatile ahci_prdt_entry_t* prdt = (volatile ahci_prdt_entry_t*)(port->dma_virt + DMA_OFFSET_PRDT);
 
-    uintptr_t cmdtable_phys = port->dma_phys + DMA_OFFSET_CMDTABLE;
+    phys_addr_t cmdtable_phys = address_add(port->dma_phys, DMA_OFFSET_CMDTABLE);
 
     kassert(num_segments <= AHCI_MAX_PRDT);
 
     header->flags = htole16(flags | (sizeof(ata_fis_h2d_t) / sizeof(uint32_t))); // CFL, in dwords
     header->prdtl = htole16((uint16_t)(num_segments));
     header->prdbc = 0;
-    header->ctba = htole32(cmdtable_phys);
-    header->ctbau = htole32(cmdtable_phys >> 32);
+    header->ctba = htole32(cmdtable_phys.value);
+    header->ctbau = htole32(cmdtable_phys.value >> 32);
     header->reserved[0] = 0;
     header->reserved[1] = 0;
     header->reserved[2] = 0;
     header->reserved[3] = 0;
 
     for(size_t i = 0; i < num_segments; ++i) {
-        prdt[i].dba = htole32(segments[i].phys);
-        prdt[i].dbau = htole32(segments[i].phys >> 32);
+        prdt[i].dba = htole32(segments[i].phys.value);
+        prdt[i].dbau = htole32(segments[i].phys.value >> 32);
         prdt[i].reserved = 0;
         prdt[i].dbc = htole32((uint32_t)(segments[i].length) - 1);
     }
@@ -440,7 +440,7 @@ static int ahci_identify(ahci_port_t* restrict port, ata_identify_t identify)
     volatile uint8_t* databuf = (volatile uint8_t*)(port->dma_virt + DMA_OFFSET_DATABUF);
 
     block_segment_t segment;
-    segment.phys = port->dma_phys + DMA_OFFSET_DATABUF;
+    segment.phys = address_add(port->dma_phys, DMA_OFFSET_DATABUF);
     segment.length = sizeof(ata_identify_t);
 
     memset((void*)(databuf), 0, sizeof(ata_identify_t));
@@ -463,7 +463,7 @@ static int ahci_atapi_identify(ahci_port_t* restrict port, ata_identify_t identi
     volatile uint8_t* databuf = (volatile uint8_t*)(port->dma_virt + DMA_OFFSET_DATABUF);
 
     block_segment_t segment;
-    segment.phys = port->dma_phys + DMA_OFFSET_DATABUF;
+    segment.phys = address_add(port->dma_phys, DMA_OFFSET_DATABUF);
     segment.length = sizeof(ata_identify_t);
 
     memset((void*)(databuf), 0, sizeof(ata_identify_t));
@@ -512,7 +512,7 @@ static int ahci_atapi_capacity(ahci_port_t* restrict port, size_t* restrict sect
     uint8_t result[8];
 
     block_segment_t segment;
-    segment.phys = port->dma_phys + DMA_OFFSET_DATABUF;
+    segment.phys = address_add(port->dma_phys, DMA_OFFSET_DATABUF);
     segment.length = sizeof(result);
 
     memset((void*)(databuf), 0, sizeof(result));
@@ -606,9 +606,9 @@ static int ahci_port_init(ahci_pci_context_t* restrict context, const io_region_
     ahci_port_t* port = &context->ports[port_num];
 
     uintptr_t port_base = HBA_PORT0_OFFSET + port_num * HBA_PORT_STRIDE;
-    uintptr_t dma_phys = pdma_alloc_phys(DMA_NUM_PAGES);
+    phys_addr_t dma_phys = pdma_alloc_phys(DMA_NUM_PAGES);
 
-    if(dma_phys == 0) {
+    if(address_null(dma_phys)) {
         pr_verbose("ahci: out of memory");
         return -ENOMEM;
     }
@@ -629,14 +629,17 @@ static int ahci_port_init(ahci_pci_context_t* restrict context, const io_region_
     if(!ahci_stop(port)) {
         pr_verbose("ahci: %u: command engine did not stop", port_num);
         pdma_free_phys(dma_phys, DMA_NUM_PAGES);
-        port->dma_phys = 0;
+        port->dma_phys = phys_addr(0);
         return -EIO;
     }
 
-    io_write32(abar, port_base + PORT_REG_CLB, dma_phys + DMA_OFFSET_CMDLIST);
-    io_write32(abar, port_base + PORT_REG_CLBU, (dma_phys + DMA_OFFSET_CMDLIST) >> 32);
-    io_write32(abar, port_base + PORT_REG_FB, dma_phys + DMA_OFFSET_FIS);
-    io_write32(abar, port_base + PORT_REG_FBU, (dma_phys + DMA_OFFSET_FIS) >> 32);
+    phys_addr_t cmdlist_phys = address_add(dma_phys, DMA_OFFSET_CMDLIST);
+    phys_addr_t fis_phys = address_add(dma_phys, DMA_OFFSET_FIS);
+
+    io_write32(abar, port_base + PORT_REG_CLB, cmdlist_phys.value);
+    io_write32(abar, port_base + PORT_REG_CLBU, cmdlist_phys.value >> 32);
+    io_write32(abar, port_base + PORT_REG_FB, fis_phys.value);
+    io_write32(abar, port_base + PORT_REG_FBU, fis_phys.value >> 32);
 
     io_write32(abar, port_base + PORT_REG_SERR, 0xFFFFFFFF);
     io_write32(abar, port_base + PORT_REG_IS, 0xFFFFFFFF);
@@ -659,7 +662,7 @@ static void ahci_port_teardown(ahci_port_t* restrict port)
 
     pdma_free_phys(port->dma_phys, DMA_NUM_PAGES);
 
-    port->dma_phys = 0;
+    port->dma_phys = phys_addr(0);
 
     mutex_release(&port->lock);
 }
@@ -928,10 +931,10 @@ static int ahci_attach(device_t* restrict device, const driver_match_t* restrict
     }
 
     const io_region_t* abar = &context->abar;
-    context->dma_limit = UINT32_MAX;
+    context->dma_limit = phys_addr(UINT32_MAX);
 
     if(io_read32(abar, HBA_CAP) & HBA_CAP_S64A) {
-        context->dma_limit = UINTPTR_MAX;
+        context->dma_limit = phys_addr(UINTPTR_MAX);
     }
 
     ahci_handoff(abar);
@@ -1036,7 +1039,7 @@ static void ahci_detach(device_t* restrict device)
             continue;
         }
 
-        if(context->ports[port_num].dma_phys) {
+        if(address_valid(context->ports[port_num].dma_phys)) {
             ahci_port_teardown(&context->ports[port_num]);
         }
     }

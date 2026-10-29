@@ -50,7 +50,7 @@ static memblock_t* find_free_block(size_t size)
 static memblock_t* extend_heap(size_t size)
 {
     size_t i;
-    uintptr_t phys;
+    phys_addr_t phys;
     uintptr_t virt;
 
     size_t npages = page_count(size);
@@ -74,7 +74,7 @@ static memblock_t* extend_heap(size_t size)
     for(i = 0; i < npages; ++i) {
         phys = pslab_alloc_phys();
 
-        if(phys == 0) {
+        if(address_null(phys)) {
             goto error_cleanup;
         }
 

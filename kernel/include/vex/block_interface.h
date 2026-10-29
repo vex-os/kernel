@@ -1,5 +1,6 @@
 #pragma once
 
+#include <vex/address.h>
 #include <vex/compiler.h>
 #include <vex/dev_name.h>
 #include <vex/errno.h>
@@ -24,7 +25,7 @@ typedef struct block_interface_ops_s block_interface_ops_t;
 typedef struct block_interface_private_s block_interface_private_t;
 
 struct block_segment_s {
-    uintptr_t phys;
+    phys_addr_t phys;
     size_t length;
 };
 
@@ -64,8 +65,8 @@ struct block_interface_s {
     size_t sector_size;
     size_t max_transfer;
     size_t max_segments;
-    uintptr_t dma_limit; // Highest physical address a segment may reach
-    uintptr_t dma_align; // A mask: segment addresses and lengths have these bits clear
+    phys_addr_t dma_limit; // Highest physical address a segment may reach
+    uintptr_t dma_align;   // A mask: segment addresses and lengths have these bits clear
     unsigned flags;
     device_t* device; // The node of the hardware, set before the add; a partition takes the one of its disk
     void* ctxdata;

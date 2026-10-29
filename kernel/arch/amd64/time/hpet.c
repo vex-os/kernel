@@ -144,7 +144,7 @@ static void arch_init_hpet(void)
         struct acpi_hpet* hpet = (struct acpi_hpet*)(table.hdr);
 
         if(hpet->address.address) {
-            volatile uint64_t* mmio = mmio_map(hpet->address.address, HPET_MMIO_SIZE, VPROT_MMIO);
+            volatile uint64_t* mmio = mmio_map(phys_addr(hpet->address.address), HPET_MMIO_SIZE, VPROT_MMIO);
 
             if(mmio == nullptr) {
                 panic("hpet: failed to map registers");

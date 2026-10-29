@@ -89,9 +89,9 @@ static void lose_console(fb_interface_t* restrict interface)
     mutex_release(&console_mutex);
 }
 
-static bool overlaps(const fb_interface_t* restrict interface, uintptr_t phys, size_t size)
+static bool overlaps(const fb_interface_t* restrict interface, phys_addr_t phys, size_t size)
 {
-    return interface->phys < phys + size && phys < interface->phys + interface->info.size;
+    return address_less(interface->phys, address_add(phys, size)) && address_less(phys, address_add(interface->phys, interface->info.size));
 }
 
 static uint64_t mapped_size(const fb_interface_t* restrict fb)
@@ -474,7 +474,7 @@ static int fb_char_mmap(const char_interface_t* restrict interface, off_t offset
     return 0;
 }
 
-static int fb_char_resolve_page(const char_interface_t* restrict interface, off_t offset, uintptr_t* restrict phys,
+static int fb_char_resolve_page(const char_interface_t* restrict interface, off_t offset, phys_addr_t* restrict phys,
     unsigned* restrict cache)
 {
     const fb_interface_t* fb = fb_of(interface);
@@ -483,7 +483,7 @@ static int fb_char_resolve_page(const char_interface_t* restrict interface, off_
         return -ENXIO;
     }
 
-    *phys = fb->phys + offset;
+    *phys = address_add(fb->phys, offset);
     *cache = fb->cache;
 
     return 0;
@@ -556,7 +556,7 @@ void fb_boot_add(fb_interface_t* restrict interface)
     *tail = interface;
 }
 
-int fb_boot_claim(uintptr_t phys, size_t size)
+int fb_boot_claim(phys_addr_t phys, size_t size)
 {
     // UNDONE: remove the added ones instead which
     // revokes their mappings and leaves a gap in the names

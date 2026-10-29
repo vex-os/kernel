@@ -1,5 +1,6 @@
 #pragma once
 
+#include <vex/address.h>
 #include <vex/char_interface.h>
 #include <vex/compiler.h>
 #include <vex/fb.h>
@@ -50,7 +51,7 @@ struct fb_interface_s {
     fb_interface_private_t priv;
     const fb_interface_ops_t* ops;
     vexfb_info_t info;
-    uintptr_t phys;            // Of the info.size bytes userspace maps
+    phys_addr_t phys;          // Of the info.size bytes userspace maps
     unsigned cache;            // A VPROT_CACHE value for them
     void* virt;                // The kernel's mapping of them, for read and write
     const vexfb_mode_t* modes; // What the display suggests, for VEXFB_GET_MODES
@@ -67,7 +68,7 @@ void fb_boot_add(fb_interface_t* restrict interface);
 /// @pre A native driver's probe, before its fb_interface_add for the same memory
 /// @retval -EBUSY The boot framebuffers are already added
 /// @note fbcons, if it drew to one of them, moves to the next device added
-int fb_boot_claim(uintptr_t phys, size_t size);
+int fb_boot_claim(phys_addr_t phys, size_t size);
 
 int fb_interface_add(fb_interface_t* restrict interface);
 

@@ -54,7 +54,7 @@ static void release_slot(size_t slot)
 
 static void unmap_pages(uintptr_t stack_bottom, size_t count)
 {
-    uintptr_t phys[KSTACK_PAGES];
+    phys_addr_t phys[KSTACK_PAGES];
 
     for(size_t i = 0U; i < count; ++i) {
         uintptr_t virt = stack_bottom + i * PAGE_SIZE;
@@ -80,9 +80,9 @@ void* kstack_alloc(void)
     uintptr_t stack_bottom = slot_base(slot) + PAGE_SIZE;
 
     for(size_t i = 0U; i < KSTACK_PAGES; ++i) {
-        uintptr_t phys = pslab_alloc_phys();
+        phys_addr_t phys = pslab_alloc_phys();
 
-        if(phys == 0U || pmap_map(&sys_pmap, stack_bottom + i * PAGE_SIZE, phys, VPROT_RW) < 0) {
+        if(address_null(phys) || pmap_map(&sys_pmap, stack_bottom + i * PAGE_SIZE, phys, VPROT_RW) < 0) {
             pslab_free_phys(phys);
             unmap_pages(stack_bottom, i);
             release_slot(slot);

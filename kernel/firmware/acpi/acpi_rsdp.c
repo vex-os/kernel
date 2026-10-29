@@ -9,7 +9,7 @@ static volatile __used __section(".limine_requests") struct limine_rsdp_request 
     .revision = 0,
 };
 
-uintptr_t rsdp_address = 0;
+phys_addr_t rsdp_address = {};
 
 static void init_acpi_rsdp(void)
 {

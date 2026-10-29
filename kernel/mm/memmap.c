@@ -23,17 +23,19 @@ bool memmap_is_ram_type(uint64_t type)
     }
 }
 
-bool memmap_is_ram(uintptr_t phys, size_t size)
+bool memmap_is_ram(phys_addr_t phys, size_t size)
 {
-    uintptr_t end = phys + size;
+    // The entries of the map are numbers from the bootloader
+    uintptr_t address = phys.value;
+    uintptr_t end = address + size;
 
-    while(phys < end) {
+    while(address < end) {
         const struct limine_memmap_entry* found = nullptr;
 
         for(size_t i = 0; i < memmap->entry_count; ++i) {
             const struct limine_memmap_entry* entry = memmap->entries[i];
 
-            if(phys >= entry->base && phys - entry->base < entry->length) {
+            if(address >= entry->base && address - entry->base < entry->length) {
                 found = entry;
                 break;
             }
@@ -43,7 +45,7 @@ bool memmap_is_ram(uintptr_t phys, size_t size)
             return false;
         }
 
-        phys = found->base + found->length;
+        address = found->base + found->length;
     }
 
     return true;

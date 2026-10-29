@@ -52,7 +52,7 @@ struct bochsfb_s {
     fb_interface_t interface;
     io_region_t mmio;
     io_region_t vram;
-    uintptr_t vram_phys;
+    phys_addr_t vram_phys;
     spinlock_t dac_lock; // The DAC takes an index, then three data accesses per color
     unsigned dac_bits;
     bool has_vga; // 8 and 24 bpp need the VGA side, which bochs-display lacks
@@ -218,7 +218,7 @@ static int bochsfb_set_mode(fb_interface_t* restrict interface, const vexfb_mode
     }
 
     interface->info = info;
-    interface->phys = bochsfb->vram_phys + offset;
+    interface->phys = address_add(bochsfb->vram_phys, offset);
     interface->virt = (uint8_t*)(bochsfb->vram.base) + offset;
 
     return 0;
@@ -377,7 +377,7 @@ static int bochsfb_attach(device_t* restrict node, const driver_match_t* restric
 
     bochsfb->mmio = mmio;
     bochsfb->vram = vram;
-    bochsfb->vram_phys = vram_phys;
+    bochsfb->vram_phys = phys_addr(vram_phys);
     bochsfb->dac_lock = SPINLOCK_INIT;
     bochsfb->has_vga = function->class_id == 0x03 && function->subclass_id == 0x00;
 
@@ -393,7 +393,7 @@ static int bochsfb_attach(device_t* restrict node, const driver_match_t* restric
     fb_interface_t* interface = &bochsfb->interface;
     interface->ops = &bochsfb_ops;
     interface->info = info;
-    interface->phys = vram_phys + offset;
+    interface->phys = address_add(phys_addr(vram_phys), offset);
     interface->cache = VPROT_CACHE_WC;
     interface->virt = (uint8_t*)(vram.base) + offset;
     interface->modes = bochsfb->modes;
@@ -403,7 +403,7 @@ static int bochsfb_attach(device_t* restrict node, const driver_match_t* restric
 
     // NOTE: after a successful claim the
     // screen is ours even if the add below fails
-    if(fb_boot_claim(vram_phys, vram.length) < 0) {
+    if(fb_boot_claim(phys_addr(vram_phys), vram.length) < 0) {
         pr_warning("bochsfb: boot framebuffers are already added, one may share the memory");
     }
 

@@ -272,7 +272,7 @@ static bool is_sci(uacpi_u32 gsi)
 
 uacpi_status uacpi_kernel_get_rsdp(uacpi_phys_addr* out)
 {
-    *out = rsdp_address;
+    *out = rsdp_address.value;
 
     return UACPI_STATUS_OK;
 }
@@ -314,11 +314,11 @@ void uacpi_kernel_log(uacpi_log_level lvl, const uacpi_char* msg)
 
 void* uacpi_kernel_map(uacpi_phys_addr addr, uacpi_size len)
 {
-    if(memmap_is_ram(addr, len)) {
-        return phys_to_virt(addr);
+    if(memmap_is_ram(phys_addr(addr), len)) {
+        return phys_to_virt(phys_addr(addr));
     }
 
-    return mmio_map(addr, len, VPROT_MMIO);
+    return mmio_map(phys_addr(addr), len, VPROT_MMIO);
 }
 
 void uacpi_kernel_unmap(void* addr, uacpi_size len)

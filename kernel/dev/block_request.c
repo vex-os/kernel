@@ -46,11 +46,11 @@ static bool request_valid(const block_interface_t* restrict interface, const blo
     for(size_t i = 0; i < req->num_segments; ++i) {
         const block_segment_t* segment = &req->segments[i];
 
-        if(segment->length == 0 || ((segment->phys | segment->length) & interface->dma_align)) {
+        if(segment->length == 0 || ((segment->phys.value | segment->length) & interface->dma_align)) {
             return false;
         }
 
-        if(segment->phys > interface->dma_limit || segment->length - 1 > interface->dma_limit - segment->phys) {
+        if(address_less(interface->dma_limit, segment->phys) || segment->length - 1 > address_diff(interface->dma_limit, segment->phys)) {
             return false;
         }
 
@@ -72,18 +72,19 @@ static bool map_segments(const block_interface_t* restrict interface, const uint
 
     while(length > 0) {
         uintptr_t virt = (uintptr_t)(buffer);
-        uintptr_t phys = pmap_resolve_address(&sys_pmap, virt);
+        phys_addr_t phys = pmap_resolve_address(&sys_pmap, virt);
         size_t piece = PAGE_SIZE - (virt % PAGE_SIZE);
 
         if(piece > length) {
             piece = length;
         }
 
-        if(phys == 0 || ((phys | piece) & interface->dma_align) || phys > interface->dma_limit || piece - 1 > interface->dma_limit - phys) {
+        if(address_null(phys) || ((phys.value | piece) & interface->dma_align) || address_less(interface->dma_limit, phys)
+            || piece - 1 > address_diff(interface->dma_limit, phys)) {
             return false;
         }
 
-        if(count && segments[count - 1].phys + segments[count - 1].length == phys) {
+        if(count && address_equal(address_add(segments[count - 1].phys, segments[count - 1].length), phys)) {
             segments[count - 1].length += piece;
         }
         else {
@@ -139,7 +140,7 @@ static int transfer(const block_interface_t* restrict interface, unsigned op, ui
         return -EIO;
     }
 
-    uintptr_t bounce_phys = 0;
+    phys_addr_t bounce_phys = phys_addr(0);
     size_t bounce_pages = 0;
     int retval = 0;
 
@@ -157,11 +158,11 @@ static int transfer(const block_interface_t* restrict interface, unsigned op, ui
         bool direct = map_segments(interface, buffer, bytes, segments, &req.num_segments);
 
         if(!direct) {
-            if(bounce_phys == 0) {
+            if(address_null(bounce_phys)) {
                 bounce_pages = (max_sectors * sector_size + PAGE_SIZE - 1) / PAGE_SIZE;
                 bounce_phys = pdma_alloc_phys(bounce_pages);
 
-                if(bounce_phys == 0) {
+                if(address_null(bounce_phys)) {
                     return -ENOMEM;
                 }
             }
@@ -186,7 +187,7 @@ static int transfer(const block_interface_t* restrict interface, unsigned op, ui
         count -= chunk;
     }
 
-    if(bounce_phys) {
+    if(address_valid(bounce_phys)) {
         pdma_free_phys(bounce_phys, bounce_pages);
     }
 

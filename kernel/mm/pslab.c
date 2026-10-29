@@ -21,46 +21,47 @@ static spinlock_t pslab_lock = SPINLOCK_INIT;
 size_t pslab_numpages = 0U;
 size_t pslab_numfree = 0U;
 
-static void pslab_add_region(uintptr_t start, size_t length)
+static void pslab_add_region(phys_addr_t start, size_t length)
 {
     void** head_ptr;
-    uintptr_t offset;
+    size_t offset;
 
     for(offset = 0U; offset < length; offset += PAGE_SIZE) {
-        pframe_t* pframe = pframe_of(start + offset);
+        phys_addr_t page = address_add(start, offset);
+        pframe_t* pframe = pframe_of(page);
 
         pframe->flags |= PFRAME_PSLAB;
 
-        head_ptr = phys_to_virt(start + offset);
+        head_ptr = phys_to_virt(page);
         head_ptr[0] = pslab_list;
         pslab_list = head_ptr;
         pslab_numpages += 1U;
         pslab_numfree += 1U;
     }
 
-    pr_verbose("pslab: adding region: start=%p end=%p", (void*)(start), (void*)(start + length - 1U));
+    pr_verbose("pslab: adding region: start=%p end=%p", (void*)(start.value), (void*)(address_add(start, length - 1U).value));
 }
 
-static void pslab_add_usable(uintptr_t start, size_t length)
+static void pslab_add_usable(phys_addr_t start, size_t length)
 {
-    uintptr_t reserved_start;
+    phys_addr_t reserved_start;
     size_t reserved_length;
     pframe_storage(&reserved_start, &reserved_length);
 
-    uintptr_t end = start + length;
-    uintptr_t reserved_end = reserved_start + reserved_length;
+    phys_addr_t end = address_add(start, length);
+    phys_addr_t reserved_end = address_add(reserved_start, reserved_length);
 
-    if(reserved_end <= start || reserved_start >= end) {
+    if(!address_less(start, reserved_end) || !address_less(reserved_start, end)) {
         pslab_add_region(start, length);
         return;
     }
 
-    if(reserved_start > start) {
-        pslab_add_region(start, reserved_start - start);
+    if(address_less(start, reserved_start)) {
+        pslab_add_region(start, address_diff(reserved_start, start));
     }
 
-    if(reserved_end < end) {
-        pslab_add_region(reserved_end, end - reserved_end);
+    if(address_less(reserved_end, end)) {
+        pslab_add_region(reserved_end, address_diff(end, reserved_end));
     }
 }
 
@@ -89,11 +90,11 @@ static void* take_page(void)
     return nullptr;
 }
 
-uintptr_t pslab_alloc_phys(void)
+phys_addr_t pslab_alloc_phys(void)
 {
     void* ptr = pslab_alloc_virt();
     if(ptr == nullptr)
-        return 0U;
+        return phys_addr(0U);
     return virt_to_phys(ptr);
 }
 
@@ -116,9 +117,9 @@ void* pslab_alloc_virt(void)
     return ptr;
 }
 
-void pslab_free_phys(uintptr_t phys)
+void pslab_free_phys(phys_addr_t phys)
 {
-    if(phys) {
+    if(address_valid(phys)) {
         pslab_free_virt(phys_to_virt(phys));
     }
 }
@@ -169,7 +170,7 @@ static void init_pslab(void)
             }
 
             if(length > 0U) {
-                pslab_add_usable(start, length);
+                pslab_add_usable(phys_addr(start), length);
             }
         }
     }

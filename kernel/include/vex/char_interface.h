@@ -54,7 +54,7 @@ struct char_interface_ops_s {
     /// Gives the physical address and memory type (a VPROT_CACHE_* value) of the page at offset in the device's memory
     /// @pre offset is page aligned; the caller holds a spinlock, so this can't sleep
     /// @retval -ENXIO offset is past the end of the device's memory
-    int (*resolve_page)(const char_interface_t* restrict interface, off_t offset, uintptr_t* restrict phys, unsigned* restrict cache);
+    int (*resolve_page)(const char_interface_t* restrict interface, off_t offset, phys_addr_t* restrict phys, unsigned* restrict cache);
 
     void (*release)(const char_interface_t* restrict interface);
 };
@@ -172,7 +172,7 @@ static __always_inline int char_interface_mmap(const char_interface_t* restrict 
     return interface->ops->mmap(interface, offset, length);
 }
 
-static __always_inline int char_interface_resolve_page(const char_interface_t* restrict interface, off_t offset, uintptr_t* restrict phys,
+static __always_inline int char_interface_resolve_page(const char_interface_t* restrict interface, off_t offset, phys_addr_t* restrict phys,
     unsigned* restrict cache)
 {
     if(atomic_load(&interface->priv.removed, ATOMIC_ACQUIRE))

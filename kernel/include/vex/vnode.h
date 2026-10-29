@@ -132,7 +132,7 @@ struct vnode_ops_s {
     /// @pre offset is page aligned. The caller holds a spinlock, so this must not sleep
     /// @retval -ENXIO offset is past the end of the memory of the node
     /// @note Set only by device nodes, whose memory is mapped through it instead of fault
-    int (*resolve_page)(vnode_t* restrict node, off_t offset, uintptr_t* restrict phys, unsigned* restrict cache);
+    int (*resolve_page)(vnode_t* restrict node, off_t offset, phys_addr_t* restrict phys, unsigned* restrict cache);
 
     /// @param space The name's namespace, as an XATTR space
     /// @param name Without its namespace prefix
@@ -211,7 +211,7 @@ int vnode_ioctl(vnode_t* restrict node, file_t* restrict file, uint32_t request,
 int vnode_fsync(vnode_t* restrict node);
 int vnode_fault(vnode_t* restrict node, off_t offset, pmap_t* restrict pmap, uintptr_t virt, unsigned vprot);
 int vnode_mmap(vnode_t* restrict node, off_t offset, size_t length);
-int vnode_resolve_page(vnode_t* restrict node, off_t offset, uintptr_t* restrict phys, unsigned* restrict cache);
+int vnode_resolve_page(vnode_t* restrict node, off_t offset, phys_addr_t* restrict phys, unsigned* restrict cache);
 ssize_t vnode_get_xattr(vnode_t* restrict node, const credentials_t* restrict credentials, const char* restrict name, void* restrict value,
     size_t size);
 int vnode_set_xattr(vnode_t* restrict node, const credentials_t* restrict credentials, const char* restrict name,

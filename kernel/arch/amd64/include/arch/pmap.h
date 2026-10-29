@@ -1,5 +1,6 @@
 #pragma once
 
+#include <vex/address.h>
 #include <vex/compiler.h>
 #include <vex/spinlock.h>
 #include <vex/types.h>
@@ -54,7 +55,7 @@ struct pmap_s {
     spinlock_t lock;
     unsigned num_levels;
     pmentry_t* virt;
-    uintptr_t phys;
+    phys_addr_t phys;
 };
 
 unsigned pmap_detect_levels(void);
@@ -141,14 +142,14 @@ static __always_inline __nodiscard bool pmentry_leaf(pmentry_t entry, unsigned l
     return level == 1 || (entry & AMD64_PML_LARGE);
 }
 
-static __always_inline __nodiscard uintptr_t pmentry_address(pmentry_t entry, unsigned level)
+static __always_inline __nodiscard phys_addr_t pmentry_address(pmentry_t entry, unsigned level)
 {
-    return entry & AMD64_PML_ADDRESS_MASK & ~(pmentry_level_size(level) - 1);
+    return phys_addr(entry & AMD64_PML_ADDRESS_MASK & ~(pmentry_level_size(level) - 1));
 }
 
-static __always_inline __nodiscard uintptr_t pmentry_table_address(pmentry_t entry)
+static __always_inline __nodiscard phys_addr_t pmentry_table_address(pmentry_t entry)
 {
-    return entry & AMD64_PML_ADDRESS_MASK;
+    return phys_addr(entry & AMD64_PML_ADDRESS_MASK);
 }
 
 static __always_inline __nodiscard unsigned pmentry_vprot(pmentry_t entry, unsigned level)
@@ -166,11 +167,11 @@ static __always_inline __nodiscard unsigned pmentry_vprot(pmentry_t entry, unsig
     return vprot;
 }
 
-static __always_inline __nodiscard pmentry_t pmentry_setup(uintptr_t address, unsigned vprot, unsigned level)
+static __always_inline __nodiscard pmentry_t pmentry_setup(phys_addr_t address, unsigned vprot, unsigned level)
 {
     pmentry_t result = PMENTRY_NULL;
 
-    result |= address & AMD64_PML_ADDRESS_MASK;
+    result |= address.value & AMD64_PML_ADDRESS_MASK;
     result |= AMD64_PML_NOEXEC;
 
     if((vprot & VPROT_USER) && 0 == (vprot & (VPROT_READ | VPROT_WRITE | VPROT_EXEC))) {
@@ -195,14 +196,14 @@ static __always_inline __nodiscard pmentry_t pmentry_setup(uintptr_t address, un
     return result;
 }
 
-static __always_inline __nodiscard pmentry_t pmentry_table(uintptr_t address)
+static __always_inline __nodiscard pmentry_t pmentry_table(phys_addr_t address)
 {
-    return (address & AMD64_PML_ADDRESS_MASK) | AMD64_PML_PRESENT | AMD64_PML_WRITE | AMD64_PML_USER;
+    return (address.value & AMD64_PML_ADDRESS_MASK) | AMD64_PML_PRESENT | AMD64_PML_WRITE | AMD64_PML_USER;
 }
 
 static __always_inline void pmap_switch(const pmap_t* restrict pmap)
 {
-    asm volatile("movq %0, %%cr3" ::"r"(pmap->phys) : "memory");
+    asm volatile("movq %0, %%cr3" ::"r"(pmap->phys.value) : "memory");
 }
 
 static __always_inline void pmap_flush_all(void)

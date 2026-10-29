@@ -1,5 +1,6 @@
 #pragma once
 
+#include <vex/address.h>
 #include <vex/compiler.h>
 #include <vex/types.h>
 
@@ -26,11 +27,11 @@ struct pframe_s {
     rmap_entry_t* mappings; // Under the rmap lock of the frame
 };
 
-pframe_t* pframe_of(uintptr_t phys) __nodiscard;
-uintptr_t pframe_phys(const pframe_t* restrict pframe) __nodiscard;
+pframe_t* pframe_of(phys_addr_t phys) __nodiscard;
+phys_addr_t pframe_phys(const pframe_t* restrict pframe) __nodiscard;
 
 void pframe_incref(pframe_t* restrict pframe);
 bool pframe_decref(pframe_t* restrict pframe) __nodiscard;
 bool pframe_shared(const pframe_t* restrict pframe) __nodiscard;
 
-void pframe_storage(uintptr_t* restrict start, size_t* restrict length);
+void pframe_storage(phys_addr_t* restrict start, size_t* restrict length);

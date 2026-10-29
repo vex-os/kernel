@@ -220,7 +220,7 @@ static uacpi_iteration_decision ioapic_madt_callback(uacpi_handle user, struct a
             panic("ioapic: out of memory");
         }
 
-        data->base = mmio_map(ioapic->address, IOAPIC_MMIO_SIZE, VPROT_MMIO);
+        data->base = mmio_map(phys_addr(ioapic->address), IOAPIC_MMIO_SIZE, VPROT_MMIO);
 
         if(data->base == nullptr) {
             panic("ioapic: failed to map registers");

@@ -83,9 +83,9 @@ int futex_wait(vmspace_t* restrict vmspace, uintptr_t address, uint32_t expected
         return -EINVAL;
     }
 
-    uintptr_t phys = vms_pin(vmspace, address);
+    phys_addr_t phys = vms_pin(vmspace, address);
 
-    if(phys == 0) {
+    if(address_null(phys)) {
         return -EFAULT;
     }
 
@@ -97,7 +97,7 @@ int futex_wait(vmspace_t* restrict vmspace, uintptr_t address, uint32_t expected
 
     if(shared) {
         waiter.vmspace = nullptr;
-        waiter.address = phys;
+        waiter.address = phys.value;
     }
     else {
         waiter.vmspace = vmspace;
@@ -178,17 +178,17 @@ ssize_t futex_wake(vmspace_t* restrict vmspace, uintptr_t address, size_t count,
 {
     const vmspace_t* key_vmspace = vmspace;
     uintptr_t key_address = address;
-    uintptr_t phys = 0;
+    phys_addr_t phys = phys_addr(0);
 
     if(shared) {
         phys = vms_pin(vmspace, address);
 
-        if(phys == 0) {
+        if(address_null(phys)) {
             return -EFAULT;
         }
 
         key_vmspace = nullptr;
-        key_address = phys;
+        key_address = phys.value;
     }
 
     futex_bucket_t* bucket = bucket_of(key_vmspace, key_address);

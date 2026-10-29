@@ -193,7 +193,7 @@ static int map_range(device_t* restrict bus, unsigned type, uint64_t start, uint
         return 0;
     }
 
-    void* virt = mmio_map(address, length, vprot);
+    void* virt = mmio_map(phys_addr(address), length, vprot);
 
     if(virt == nullptr) {
         return -ENOMEM;

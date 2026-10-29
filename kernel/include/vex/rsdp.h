@@ -2,4 +2,4 @@
 
 #include <vex/types.h>
 
-extern uintptr_t rsdp_address;
+extern phys_addr_t rsdp_address;

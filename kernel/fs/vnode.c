@@ -1442,7 +1442,7 @@ int vnode_mmap(vnode_t* restrict node, off_t offset, size_t length)
     return node->ops->mmap(node, offset, length);
 }
 
-int vnode_resolve_page(vnode_t* restrict node, off_t offset, uintptr_t* restrict phys, unsigned* restrict cache)
+int vnode_resolve_page(vnode_t* restrict node, off_t offset, phys_addr_t* restrict phys, unsigned* restrict cache)
 {
     kassert(node);
 

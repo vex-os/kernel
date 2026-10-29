@@ -97,7 +97,7 @@ static void arch_init_lapic(void)
     uintptr_t lapic_phys = msr & MSR_APIC_BASE_PHYSMASK;
 
     // Every hart maps it and gets the same address back
-    lapic_mmio = mmio_map(lapic_phys, PAGE_SIZE, VPROT_MMIO);
+    lapic_mmio = mmio_map(phys_addr(lapic_phys), PAGE_SIZE, VPROT_MMIO);
 
     if(lapic_mmio == nullptr) {
         panic("lapic: failed to map registers");

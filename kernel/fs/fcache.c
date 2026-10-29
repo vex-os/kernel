@@ -138,7 +138,7 @@ static void mark_clean(fcache_t* restrict cache, pframe_t* restrict pframe)
     atomic_fetch_sub(&dirty_pages, 1, ATOMIC_RELAXED);
 }
 
-static pframe_t* add_page(fcache_t* restrict cache, uint64_t index, uintptr_t phys)
+static pframe_t* add_page(fcache_t* restrict cache, uint64_t index, phys_addr_t phys)
 {
     memset(phys_to_virt(phys), 0, PAGE_SIZE);
 
@@ -177,10 +177,10 @@ static pframe_t* get_page(fcache_t* restrict cache, uint64_t index)
     }
 
     mutex_release(&cache->lock);
-    uintptr_t phys = pslab_alloc_phys();
+    phys_addr_t phys = pslab_alloc_phys();
     mutex_acquire(&cache->lock);
 
-    if(phys == 0) {
+    if(address_null(phys)) {
         return nullptr;
     }
 
@@ -767,7 +767,7 @@ int fcache_fault(vnode_t* restrict node, fcache_bmap_t bmap, off_t offset, off_t
 
     // Mapped under the cache lock, so a truncation either finds the mapping or comes before it,
     // and writeback either sees the page dirty or takes write access away before writing it
-    uintptr_t phys = pframe_phys(pframe);
+    phys_addr_t phys = pframe_phys(pframe);
     int retval = rmap_patch(pmap, virt, phys, vprot);
 
     if(retval == -EAGAIN) {

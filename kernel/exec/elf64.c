@@ -76,9 +76,9 @@ static bool segment_loads_range(const elf64_phdr_t* restrict phdr, uint64_t offs
 
 static int copy_page(vmspace_t* restrict vmspace, file_t* restrict file, const elf64_phdr_t* restrict phdr, uintptr_t page)
 {
-    uintptr_t phys = vms_touch(vmspace, page);
+    phys_addr_t phys = vms_touch(vmspace, page);
 
-    if(phys == 0) {
+    if(address_null(phys)) {
         return -ENOMEM;
     }
 
@@ -435,9 +435,9 @@ static int elf64_setup(vmspace_t* restrict vmspace, file_t* restrict file, const
     }
 
     // Arguments only get the topmost page, the rest is zeroed on first touch
-    uintptr_t args_phys = vms_touch(vmspace, ELF64_STACK_TOP - PAGE_SIZE);
+    phys_addr_t args_phys = vms_touch(vmspace, ELF64_STACK_TOP - PAGE_SIZE);
 
-    if(args_phys == 0) {
+    if(address_null(args_phys)) {
         retval = -ENOMEM;
         goto error;
     }

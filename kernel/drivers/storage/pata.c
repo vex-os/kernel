@@ -97,7 +97,7 @@ struct pata_channel_s {
     io_region_t command;
     io_region_t control; // Device Control and Alternate Status at offset 0
     io_region_t busmaster;
-    uintptr_t scratch_phys; // Below 16 MiB, as pdma gives it; 0 once the channel is torn down
+    phys_addr_t scratch_phys; // Below 16 MiB, as pdma gives it; null once the channel is torn down
     bool has_busmaster;
     bool irq;
     pata_drive_t drives[PATA_DRIVES];
@@ -147,7 +147,7 @@ static __nodiscard bool channel_acquire(pata_channel_t* restrict channel)
 {
     mutex_acquire(&channel->lock);
 
-    if(channel->scratch_phys == 0) {
+    if(address_null(channel->scratch_phys)) {
         mutex_release(&channel->lock);
         return false;
     }
@@ -314,7 +314,7 @@ static void move_data(pata_channel_t* restrict channel, pata_cursor_t* restrict 
             count = left;
         }
 
-        uint16_t* data = phys_to_virt(segment->phys + cursor->offset);
+        uint16_t* data = phys_to_virt(address_add(segment->phys, cursor->offset));
 
         if(write) {
             io_write16s(&channel->command, REG_DATA, data, count / 2);
@@ -361,25 +361,25 @@ static void write_taskfile(pata_channel_t* restrict channel, uint64_t lba, uint1
 
 static bool build_prdt(pata_channel_t* restrict channel, const block_segment_t* restrict segments, size_t num_segments)
 {
-    volatile pata_prd_t* prdt = phys_to_virt(channel->scratch_phys + PATA_PRDT_OFFSET);
+    volatile pata_prd_t* prdt = phys_to_virt(address_add(channel->scratch_phys, PATA_PRDT_OFFSET));
     size_t count = 0;
 
     for(size_t i = 0; i < num_segments; ++i) {
-        uint64_t phys = segments[i].phys;
+        phys_addr_t phys = segments[i].phys;
         size_t left = segments[i].length;
 
         while(left) {
-            size_t length = PRD_BOUNDARY - (phys & (PRD_BOUNDARY - 1));
+            size_t length = PRD_BOUNDARY - (phys.value & (PRD_BOUNDARY - 1));
 
             if(length > left) {
                 length = left;
             }
 
-            prdt[count].address = htole32(phys);
+            prdt[count].address = htole32(phys.value);
             prdt[count].length = htole16(length); // 64 KiB becomes 0, as the format wants
             prdt[count].flags = 0;
 
-            phys += length;
+            phys = address_add(phys, length);
             left -= length;
             count += 1;
         }
@@ -396,7 +396,7 @@ static bool build_prdt(pata_channel_t* restrict channel, const block_segment_t* 
 
 static void prepare_dma(pata_channel_t* restrict channel, bool write)
 {
-    io_write32(&channel->busmaster, BM_PRDT, channel->scratch_phys + PATA_PRDT_OFFSET);
+    io_write32(&channel->busmaster, BM_PRDT, address_add(channel->scratch_phys, PATA_PRDT_OFFSET).value);
     io_write8(&channel->busmaster, BM_STATUS, BM_STATUS_ERROR | BM_STATUS_IRQ);
     io_write8(&channel->busmaster, BM_COMMAND, write ? 0 : BM_COMMAND_READ);
 }
@@ -736,8 +736,8 @@ static void set_limits(block_interface_t* restrict interface, bool dma)
 {
     interface->max_transfer = PATA_MAX_TRANSFER;
     interface->max_segments = PATA_MAX_SEGMENTS;
-    interface->dma_limit = dma ? UINT32_MAX : UINTPTR_MAX; // PIO goes through the direct map
-    interface->dma_align = 1;                              // PRD entries and the data register both move words
+    interface->dma_limit = phys_addr(dma ? UINT32_MAX : UINTPTR_MAX); // PIO goes through the direct map
+    interface->dma_align = 1;                                         // PRD entries and the data register both move words
 }
 
 static unsigned drive_index(const pata_drive_t* restrict drive)
@@ -954,7 +954,7 @@ static int init_channel(pata_channel_t* restrict channel)
 
     channel->scratch_phys = pdma_alloc_phys(1);
 
-    if(channel->scratch_phys == 0) {
+    if(address_null(channel->scratch_phys)) {
         return -ENOMEM;
     }
 
@@ -986,7 +986,7 @@ static int pata_attach(device_t* restrict device, const driver_match_t* restrict
     int retval = init_channel(channel);
 
     if(retval < 0) {
-        if(channel->scratch_phys) {
+        if(address_valid(channel->scratch_phys)) {
             pdma_free_phys(channel->scratch_phys, 1);
         }
 
@@ -1031,7 +1031,7 @@ static void pata_detach(device_t* restrict device)
 
     write_control(channel, ATA_CONTROL_NIEN);
     pdma_free_phys(channel->scratch_phys, 1);
-    channel->scratch_phys = 0;
+    channel->scratch_phys = phys_addr(0);
 
     mutex_release(&channel->lock);
 }

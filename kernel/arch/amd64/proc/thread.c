@@ -39,7 +39,7 @@ void arch_thread_setup_kern(thread_t* restrict thread, void* restrict entry, voi
 
     // A kernel thread made from within a system call
     // must not keep that process's address space alive
-    thread->arch.cr3 = sys_pmap.phys;
+    thread->arch.cr3 = sys_pmap.phys.value;
 }
 
 void arch_thread_setup_user(thread_t* restrict thread, void* restrict entry, void* restrict user_stack_top, uintptr_t arg, uintptr_t tcb,
@@ -63,7 +63,7 @@ void arch_thread_setup_user(thread_t* restrict thread, void* restrict entry, voi
 
     thread->arch.gs_base = nullptr;
     thread->arch.fs_base = (void*)(tcb);
-    thread->arch.cr3 = vmspace->pmap->phys;
+    thread->arch.cr3 = vmspace->pmap->phys.value;
     thread->kernel_rsp = fpu_state;
 }
 
@@ -80,7 +80,7 @@ void arch_thread_setup_fork(thread_t* restrict thread, const hart_context_t* res
     // Inside the kernel, userspace's GS base waits in KERNEL_GS_BASE
     thread->arch.gs_base = (void*)((uintptr_t)(rdmsr(MSR_KERNEL_GS_BASE)));
     thread->arch.fs_base = (void*)((uintptr_t)(rdmsr(MSR_FS_BASE)));
-    thread->arch.cr3 = vmspace->pmap->phys;
+    thread->arch.cr3 = vmspace->pmap->phys.value;
     thread->kernel_rsp = fpu_state;
 }
 
@@ -115,7 +115,7 @@ void arch_thread_exec(thread_t* restrict thread, vmspace_t* restrict vmspace, ui
     wrmsr(MSR_FS_BASE, 0);
     fpu_reset();
 
-    thread->arch.cr3 = vmspace->pmap->phys;
+    thread->arch.cr3 = vmspace->pmap->phys.value;
     pmap_switch(vmspace->pmap);
 
     restore_interrupts(intr_state);

@@ -76,7 +76,7 @@ static int devfs_char_mmap(vnode_t* restrict node, off_t offset, size_t length)
     return char_interface_mmap(context->interface, offset, length);
 }
 
-static int devfs_char_resolve_page(vnode_t* restrict node, off_t offset, uintptr_t* restrict phys, unsigned* restrict cache)
+static int devfs_char_resolve_page(vnode_t* restrict node, off_t offset, phys_addr_t* restrict phys, unsigned* restrict cache)
 {
     const devfs_char_context_t* context = node->ctxdata;
 

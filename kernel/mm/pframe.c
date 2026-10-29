@@ -16,19 +16,19 @@
 static pframe_t* pframes = nullptr;
 static size_t num_pframes = 0U;
 
-static uintptr_t storage_start = 0U;
+static phys_addr_t storage_start = {};
 static size_t storage_length = 0U;
 
-pframe_t* pframe_of(uintptr_t phys)
+pframe_t* pframe_of(phys_addr_t phys)
 {
-    size_t index = phys / PAGE_SIZE;
+    size_t index = phys.value / PAGE_SIZE;
     kassert(index < num_pframes);
     return &pframes[index];
 }
 
-uintptr_t pframe_phys(const pframe_t* restrict pframe)
+phys_addr_t pframe_phys(const pframe_t* restrict pframe)
 {
-    return (uintptr_t)(pframe - pframes) * PAGE_SIZE;
+    return phys_addr((uintptr_t)(pframe - pframes) * PAGE_SIZE);
 }
 
 void pframe_incref(pframe_t* restrict pframe)
@@ -54,7 +54,7 @@ bool pframe_shared(const pframe_t* restrict pframe)
     return atomic_load(&pframe->refcount, ATOMIC_ACQUIRE) > 1;
 }
 
-void pframe_storage(uintptr_t* restrict start, size_t* restrict length)
+void pframe_storage(phys_addr_t* restrict start, size_t* restrict length)
 {
     *start = storage_start;
     *length = storage_length;
@@ -92,12 +92,12 @@ static void init_pframe(void)
         }
 
         if(end > start && end - start >= storage_length) {
-            storage_start = start;
+            storage_start = phys_addr(start);
             break;
         }
     }
 
-    if(storage_start == 0U) {
+    if(address_null(storage_start)) {
         panic("pframe: no room for %zu frames", num_pframes);
         unreachable();
     }
@@ -107,7 +107,7 @@ static void init_pframe(void)
 
     char hrsize_buffer[128];
     format_size_iec(hrsize_buffer, sizeof(hrsize_buffer), storage_length);
-    pr_verbose("pframe: %zu frames described in %s at %p", num_pframes, hrsize_buffer, (void*)(storage_start));
+    pr_verbose("pframe: %zu frames described in %s at %p", num_pframes, hrsize_buffer, (void*)(storage_start.value));
 }
 
 initcall_bsp_pmm(init_pframe, INIT_EARLY);

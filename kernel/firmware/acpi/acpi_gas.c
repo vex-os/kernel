@@ -17,7 +17,7 @@ int acpi_gas_region(const struct acpi_gas* restrict gas, size_t length, io_regio
         return -EINVAL;
     }
 
-    void* virt = mmio_map(gas->address, length, VPROT_MMIO);
+    void* virt = mmio_map(phys_addr(gas->address), length, VPROT_MMIO);
 
     if(virt == nullptr) {
         return -ENOMEM;

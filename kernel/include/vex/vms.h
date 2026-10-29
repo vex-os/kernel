@@ -1,5 +1,6 @@
 #pragma once
 
+#include <vex/address.h>
 #include <vex/compiler.h>
 #include <vex/mutex.h>
 #include <vex/types.h>
@@ -92,14 +93,14 @@ void vms_revoke(vnode_t* restrict node);
 /// Faults the page in and makes a private one the address space's own, without pinning it
 /// @pre Nothing runs in the address space, as in exec, or the frame may move right away
 /// @return The physical address of virt, or zero when it can't be mapped
-uintptr_t vms_touch(vmspace_t* restrict vmspace, uintptr_t virt) __nodiscard;
+phys_addr_t vms_touch(vmspace_t* restrict vmspace, uintptr_t virt) __nodiscard;
 
 /// Keeps the page at virt in place until vms_unpin
 /// @note Makes a private page the process's own first, so that a write cannot move the mapping to a copy
 /// @return The physical address of virt, or zero when it isn't mapped readable
-uintptr_t vms_pin(vmspace_t* restrict vmspace, uintptr_t virt) __nodiscard;
+phys_addr_t vms_pin(vmspace_t* restrict vmspace, uintptr_t virt) __nodiscard;
 
-void vms_unpin(uintptr_t phys);
+void vms_unpin(phys_addr_t phys);
 
 ssize_t vms_copyin(void* restrict dst, vmspace_t* restrict vmspace, uintptr_t src, size_t size);
 

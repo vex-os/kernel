@@ -15,9 +15,9 @@ static_assert(sizeof(rmap_entry_t) <= SLAB_MAX_SIZE);
 // Taken with interrupts off, as the scheduler's interrupt releases address spaces
 static spinlock_t locks[NUM_LOCKS];
 
-static spinlock_t* frame_lock(uintptr_t phys)
+static spinlock_t* frame_lock(phys_addr_t phys)
 {
-    return &locks[(phys / PAGE_SIZE) % NUM_LOCKS];
+    return &locks[(phys.value / PAGE_SIZE) % NUM_LOCKS];
 }
 
 // Pins come and go without the vmspace lock, so only the mappings and the
@@ -47,7 +47,7 @@ static rmap_entry_t* unlink_entry(pframe_t* restrict pframe, pmap_t* restrict pm
     return nullptr;
 }
 
-int rmap_map(pmap_t* restrict pmap, uintptr_t virt, uintptr_t phys, unsigned vprot)
+int rmap_map(pmap_t* restrict pmap, uintptr_t virt, phys_addr_t phys, unsigned vprot)
 {
     rmap_entry_t* entry = slab_alloc(sizeof(rmap_entry_t));
 
@@ -79,12 +79,12 @@ int rmap_map(pmap_t* restrict pmap, uintptr_t virt, uintptr_t phys, unsigned vpr
     return retval;
 }
 
-uintptr_t rmap_unmap(pmap_t* restrict pmap, uintptr_t virt)
+phys_addr_t rmap_unmap(pmap_t* restrict pmap, uintptr_t virt)
 {
-    uintptr_t phys = page_align(pmap_resolve_address(pmap, virt));
+    phys_addr_t phys = page_align(pmap_resolve_address(pmap, virt));
 
-    if(phys == 0) {
-        return 0;
+    if(address_null(phys)) {
+        return phys_addr(0);
     }
 
     pframe_t* pframe = pframe_of(phys);
@@ -102,7 +102,7 @@ uintptr_t rmap_unmap(pmap_t* restrict pmap, uintptr_t virt)
     spinlock_release_intr(lock, intr_state);
 
     if(entry == nullptr) {
-        return 0;
+        return phys_addr(0);
     }
 
     slab_free(entry);
@@ -110,7 +110,7 @@ uintptr_t rmap_unmap(pmap_t* restrict pmap, uintptr_t virt)
     return phys;
 }
 
-int rmap_replace(pmap_t* restrict pmap, uintptr_t virt, uintptr_t old_phys, uintptr_t new_phys, unsigned vprot)
+int rmap_replace(pmap_t* restrict pmap, uintptr_t virt, phys_addr_t old_phys, phys_addr_t new_phys, unsigned vprot)
 {
     pframe_t* old_pf = pframe_of(old_phys);
     pframe_t* new_pf = pframe_of(new_phys);
@@ -140,14 +140,14 @@ int rmap_replace(pmap_t* restrict pmap, uintptr_t virt, uintptr_t old_phys, uint
     return 0;
 }
 
-int rmap_patch(pmap_t* restrict pmap, uintptr_t virt, uintptr_t phys, unsigned vprot)
+int rmap_patch(pmap_t* restrict pmap, uintptr_t virt, phys_addr_t phys, unsigned vprot)
 {
     spinlock_t* lock = frame_lock(phys);
     bool intr_state = spinlock_acquire_intr(lock);
 
     int retval = -EAGAIN;
 
-    if(phys == page_align(pmap_resolve_address(pmap, virt))) {
+    if(address_equal(phys, page_align(pmap_resolve_address(pmap, virt)))) {
         retval = pmap_patch_noflush(pmap, virt, vprot);
     }
 
@@ -156,12 +156,12 @@ int rmap_patch(pmap_t* restrict pmap, uintptr_t virt, uintptr_t phys, unsigned v
     return retval;
 }
 
-uintptr_t rmap_pin(pmap_t* restrict pmap, uintptr_t virt, bool* restrict sole)
+phys_addr_t rmap_pin(pmap_t* restrict pmap, uintptr_t virt, bool* restrict sole)
 {
-    uintptr_t phys = page_align(pmap_resolve_address(pmap, virt));
+    phys_addr_t phys = page_align(pmap_resolve_address(pmap, virt));
 
-    if(phys == 0) {
-        return 0;
+    if(address_null(phys)) {
+        return phys_addr(0);
     }
 
     pframe_t* pframe = pframe_of(phys);
@@ -169,7 +169,7 @@ uintptr_t rmap_pin(pmap_t* restrict pmap, uintptr_t virt, bool* restrict sole)
 
     bool intr_state = spinlock_acquire_intr(lock);
 
-    bool mapped = phys == page_align(pmap_resolve_address(pmap, virt));
+    bool mapped = address_equal(phys, page_align(pmap_resolve_address(pmap, virt)));
 
     if(mapped) {
         if(sole) {
@@ -182,7 +182,7 @@ uintptr_t rmap_pin(pmap_t* restrict pmap, uintptr_t virt, bool* restrict sole)
     spinlock_release_intr(lock, intr_state);
 
     if(!mapped) {
-        return 0;
+        return phys_addr(0);
     }
 
     return phys;
