@@ -67,6 +67,9 @@ takes its pages when it appears (`alloc_region` in `vms.c`) and gives them back 
 `fork` fail with `ENOMEM` at the call and not on a page fault. A process with `CAP_VM_NORESERVE` can use `MAP_NORESERVE` to map memory
 that does not count. A touch of such memory that finds no page sends `SIGBUS`.
 
+Shared anonymous memory (`MAP_SHARED | MAP_ANONYMOUS`) is a mapping of a file that no name leads to (`kernel/mm/shmem.c`). The file lives on
+an internal tmpfs and takes its whole size from the commit limit when the mapping appears, so such a mapping counts once, and not per region.
+
 ## Device model
 
 `kernel/device/` holds one tree of `device_t` nodes, one per piece of hardware, changed only through `device_worker`. A bus is a node with

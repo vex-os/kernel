@@ -7,6 +7,7 @@
 #include <vex/page.h>
 #include <vex/pmap.h>
 #include <vex/process.h>
+#include <vex/shmem.h>
 #include <vex/syscall.h>
 #include <vex/thread.h>
 #include <vex/vms.h>
@@ -111,6 +112,33 @@ static intptr_t place_mapping(vmspace_t* restrict vmspace, virt_addr_t addr, uin
     return placed;
 }
 
+// The memory is a file that no name leads to, so that it is shared across fork like a mapping of any other file.
+// The file takes its whole size from the commit limit now, and MAP_NORESERVE does not change that
+static intptr_t map_shared_anonymous(vmspace_t* restrict vmspace, user_addr_t addr, uintptr_t length, uintptr_t flags, unsigned vprot,
+    unsigned vms_flags)
+{
+    file_t* file;
+    size_t size = page_align_up(length);
+    int retval = shmem_file_create(size, &file);
+
+    if(retval < 0) {
+        return retval;
+    }
+
+    vm_backing_t backing;
+    backing.file = file;
+    backing.file_offset = 0;
+    backing.shared = true;
+    backing.may_write = true;
+    backing.device = false;
+
+    intptr_t placed = place_mapping(vmspace, user_addr_to_virt(addr), length, flags, vprot, vms_flags, &backing);
+
+    file_close(file);
+
+    return placed;
+}
+
 static intptr_t sys_mmap(user_addr_t addr, uintptr_t length, uintptr_t prot, uintptr_t flags, int fd, uintptr_t offset)
 {
     thread_t* thread = this_thread();
@@ -145,12 +173,12 @@ static intptr_t sys_mmap(user_addr_t addr, uintptr_t length, uintptr_t prot, uin
         vms_flags |= VMS_NORESERVE;
     }
 
-    if(flags & MAP_ANONYMOUS) {
-        if(sharing == MAP_SHARED) {
-            return -ENOSYS; // Shared anonymous memory only differs from private across fork
-        }
-
+    if((flags & MAP_ANONYMOUS) && sharing == MAP_PRIVATE) {
         return place_mapping(process->vmspace, user_addr_to_virt(addr), length, flags, vprot, vms_flags, nullptr);
+    }
+
+    if(flags & MAP_ANONYMOUS) {
+        return map_shared_anonymous(process->vmspace, addr, length, flags, vprot, vms_flags);
     }
 
     if(page_offset(offset) || (off_t)(offset) < 0) {

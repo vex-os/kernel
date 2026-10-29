@@ -27,6 +27,7 @@ ktest_programs = [
     'mmap',
     'mlock',
     'commit',
+    'shmem',
     'fs',
     'fs_times',
     'pread',
