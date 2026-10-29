@@ -47,6 +47,11 @@ arch-specific halves.
 The kernel has two physical page allocators: `pdma` (the first 16 MiB, for ISA DMA) and `pslab` (a free list of single pages). Both names
 are terms, not abbreviations. The slab allocator serves objects up to `SLAB_MAX_SIZE` (half a page).
 
+Private writable memory counts against a commit limit (`kernel/mm/commit.c`): the pages of `pslab` minus a reserve for the kernel. A region
+takes its pages when it appears (`alloc_region` in `vms.c`) and gives them back when it goes (`free_region`), so `mmap`, `mprotect` and
+`fork` fail with `ENOMEM` at the call and not on a page fault. A process with `CAP_VM_NORESERVE` can use `MAP_NORESERVE` to map memory
+that does not count. A touch of such memory that finds no page sends `SIGBUS`.
+
 ## Device model
 
 `kernel/device/` holds one tree of `device_t` nodes, one per piece of hardware, changed only through `device_worker`. A bus is a node with
