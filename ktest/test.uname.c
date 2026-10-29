@@ -1,6 +1,7 @@
 #include <vex/capability.h>
 #include <vex/errno.h>
 #include <vex/syscall.h>
+#include <vex/sysinfo.h>
 #include <vex/utsname.h>
 
 #include "ktest.h"
@@ -69,6 +70,24 @@ static void test_sethostname(void)
     ktest_expect(nodename_is(original.nodename), 1);
 }
 
+static void test_sysinfo(void)
+{
+    struct __k_sysinfo first = {};
+    struct __k_sysinfo second = {};
+
+    ktest_expect(ktest_syscall1(__k_SYS_SYSINFO, (long)(&first)), 0);
+    ktest_expect(first.cpus_online >= 1, 1);
+    ktest_expect(first.cpus_online <= first.cpus_total, 1);
+    ktest_expect(first.total_pages > 0, 1);
+    ktest_expect(first.free_pages <= first.total_pages, 1);
+    ktest_expect(first.uptime_ns > 0, 1);
+
+    ktest_expect(ktest_syscall1(__k_SYS_SYSINFO, (long)(&second)), 0);
+    ktest_expect(second.uptime_ns >= first.uptime_ns, 1);
+
+    ktest_expect(ktest_syscall1(__k_SYS_SYSINFO, 0), -__k_EFAULT);
+}
+
 int main(int argc, char** argv)
 {
     struct __k_utsname name = {};
@@ -83,6 +102,7 @@ int main(int argc, char** argv)
     ktest_assert(ktest_string_equal(name.sysname, "Vex"));
 
     test_sethostname();
+    test_sysinfo();
 
     return ktest_result();
 }

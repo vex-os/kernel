@@ -29,13 +29,6 @@ struct priority_walk_s {
     int error;
 };
 
-static bool hart_online(unsigned long index)
-{
-    hart_local_t* hart = &harts[index];
-
-    return atomic_load_n(&hart->flags, ATOMIC_RELAXED) & HART_FLAG_ONLINE;
-}
-
 static bool owns_target(const thread_t* restrict caller, process_t* restrict target)
 {
     credentials_t* target_cred = process_get_cred(target);

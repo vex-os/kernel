@@ -50,6 +50,13 @@ hart_local_t* this_hart(void)
     return thread->last_hart;
 }
 
+bool hart_online(unsigned long index)
+{
+    hart_local_t* hart = &harts[index];
+
+    return atomic_load_n(&hart->flags, ATOMIC_RELAXED) & HART_FLAG_ONLINE;
+}
+
 hart_local_t* hart_register(bool is_boot)
 {
     hart_local_t* hart;

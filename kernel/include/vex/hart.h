@@ -48,6 +48,9 @@ extern unsigned long num_harts;
 
 hart_local_t* this_hart(void) __nodiscard;
 
+/// @pre index is below num_harts
+bool hart_online(unsigned long index) __nodiscard;
+
 hart_local_t* hart_register(bool is_boot);
 void hart_park(hart_local_t* restrict hart) __noreturn;
 
