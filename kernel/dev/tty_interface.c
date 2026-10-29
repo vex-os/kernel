@@ -1370,6 +1370,32 @@ int tty_interface_remove(tty_interface_t* restrict interface)
     return 0;
 }
 
+void tty_interface_leader_exit(process_t* restrict process)
+{
+    ctty_drop_t drop = {};
+
+    process_group_lock_acquire();
+
+    process_group_t* group = process->group;
+    session_t* session = group->session;
+    tty_interface_t* interface = session->tty;
+
+    if(interface && session->sid == process->pid) {
+        process_group_t* foreground = interface->priv.foreground;
+
+        // The foreground group goes with the terminal, so
+        // its stopped members get continued to see the hangup
+        process_group_signal_locked(foreground, SIGHUP);
+        process_group_signal_locked(foreground, SIGCONT);
+
+        detach_locked(interface, &drop);
+    }
+
+    process_group_lock_release();
+
+    drop_detached(&drop);
+}
+
 void tty_receive(tty_interface_t* restrict interface, const void* restrict bytes, size_t count)
 {
     const uint8_t* data = bytes;

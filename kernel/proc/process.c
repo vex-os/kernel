@@ -16,6 +16,7 @@
 #include <vex/spinlock.h>
 #include <vex/string.h>
 #include <vex/thread.h>
+#include <vex/tty_interface.h>
 #include <vex/vms.h>
 #include <vex/vnode.h>
 
@@ -259,6 +260,7 @@ void process_finish_exit(process_t* restrict process)
         return;
     }
 
+    tty_interface_leader_exit(process);
     process_group_check_orphans(process);
 
     // A zombie must not keep filesystems

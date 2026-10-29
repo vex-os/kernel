@@ -141,8 +141,8 @@ bool job_resume_wait(thread_t* thread) __nodiscard;
 /// @return Whether the caller took the report, and so tells it to the waiter
 bool job_claim_report(process_t* process, unsigned bit) __nodiscard;
 
-/// Does the part of the exit that may sleep, once for the process: hangs up the groups that the exit orphans and
-/// closes the files
+/// Does the part of the exit that may sleep, once for the process: lets go of the terminal of a session leader, hangs up the groups
+/// that the exit orphans and closes the files
 /// @pre The caller is a thread of the process on its way out, may sleep and does not hold process_group_lock
 /// @note Not in process_exit or process_kill, as a sender of SIGKILL to a group calls them under process_group_lock
 void process_finish_exit(process_t* restrict process);

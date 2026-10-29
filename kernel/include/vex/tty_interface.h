@@ -11,6 +11,7 @@
 #include <vex/types.h>
 
 typedef struct dev_unit_s dev_unit_t;
+typedef struct process_s process_t;
 typedef struct process_group_s process_group_t;
 typedef struct session_s session_t;
 
@@ -112,6 +113,12 @@ int tty_interface_add(tty_interface_t* restrict interface, dev_unit_t* restrict 
 /// Hangs the terminal up: readers get end of file, writers -EIO, and its session loses it
 /// @post The tty core makes no more calls into the driver, except release
 int tty_interface_remove(tty_interface_t* restrict interface);
+
+/// Takes the controlling terminal from the session that the exiting process leads, and sends SIGHUP and SIGCONT to its foreground
+/// group, as POSIX has it. A process that leads no session or a session without a terminal is left alone
+/// @pre The caller may sleep and does not hold process_group_lock
+/// @note Files that are open on the terminal stay usable
+void tty_interface_leader_exit(process_t* restrict process);
 
 /// Hands bytes from the line to the tty core; what doesn't fit is lost and counted
 /// @note Any context, an interrupt handler among them

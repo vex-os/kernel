@@ -450,6 +450,72 @@ static void test_tty_background(long pid)
     test_tty_orphaned();
 }
 
+static volatile int hung_up;
+
+static void on_hangup(__k_int32_t sig)
+{
+    hung_up = 1;
+}
+
+// A session leader that exits takes the terminal from its session, and the foreground group gets SIGHUP
+static void test_tty_leader_exit(void)
+{
+    volatile int* result = (volatile int*)(ktest_syscall6(__k_SYS_MMAP, 0, 4096, __k_PROT_READ | __k_PROT_WRITE,
+        __k_MAP_SHARED | __k_MAP_ANONYMOUS, -1, 0));
+    __k_int32_t value = 0;
+    int wstatus = -1;
+    long leader = ktest_syscall1(__k_SYS_FORK, 0);
+
+    if(leader == 0) {
+        struct __k_sigaction action = {};
+        action.sa_handler = &on_hangup;
+        action.sa_flags = __k_SA_RESTORER;
+        action.sa_restorer = &ktest_signal_restorer;
+        ktest_syscall3(__k_SYS_SIGACTION, __k_SIGHUP, (long)(&action), 0);
+        ktest_syscall1(__k_SYS_SETSID, 0);
+
+        if(ktest_syscall3(__k_SYS_IOCTL, tty_fd, __k_TIOCSCTTY, (long)&value) < 0) {
+            ktest_syscall1(__k_SYS_EXIT, 6);
+        }
+
+        long member = ktest_syscall1(__k_SYS_FORK, 0);
+
+        if(member == 0) {
+            struct __k_timespec delay = {};
+            delay.tv_nsec = 20000000;
+
+            // Closed first, so the terminal is free for the unbind once the result is in
+            ktest_close(tty_fd);
+
+            for(int round = 0; round < 100 && hung_up == 0; round += 1) {
+                ktest_syscall4(__k_SYS_NANOSLEEP, __k_CLOCK_MONOTONIC, 0, (long)&delay, 0);
+            }
+
+            *result = hung_up ? 7 : 6;
+            ktest_syscall1(__k_SYS_EXIT, 0);
+        }
+
+        ktest_syscall1(__k_SYS_EXIT, 0);
+    }
+
+    ktest_expect(wait_for(leader, 0, &wstatus), leader);
+    ktest_expect(wstatus, __k_W_EXITCODE(0, 0));
+
+    struct __k_timespec delay = {};
+    delay.tv_nsec = 20000000;
+
+    for(int round = 0; round < 150 && *result == 0; round += 1) {
+        ktest_syscall4(__k_SYS_NANOSLEEP, __k_CLOCK_MONOTONIC, 0, (long)&delay, 0);
+    }
+
+    ktest_expect(*result, 7);
+
+    // The terminal is free again, so this session takes it without force
+    value = 0;
+    ktest_expect(ktest_syscall3(__k_SYS_IOCTL, tty_fd, __k_TIOCSCTTY, (long)&value), 0);
+    ktest_expect(ktest_syscall3(__k_SYS_IOCTL, tty_fd, __k_TIOCNOTTY, 0), 0);
+}
+
 static void test_tty(void)
 {
     struct __k_termios saved;
@@ -565,6 +631,8 @@ static void test_tty(void)
 
     ktest_expect(ktest_syscall3(__k_SYS_IOCTL, tty_fd, __k_TIOCNOTTY, 0), 0);
     ktest_expect(ktest_syscall3(__k_SYS_IOCTL, tty_fd, __k_TIOCGPGRP, (long)&pgid), -__k_ENOTTY);
+
+    test_tty_leader_exit();
 
     /* The terminal goes away with the binding, but not while it is open */
     ktest_expect(ktest_syscall3(__k_SYS_IOCTL, serial_fd, __k_SERIAL_UNBIND, 0), -__k_EBUSY);
