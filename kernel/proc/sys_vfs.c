@@ -12,7 +12,7 @@
 
 #include "syscall_internal.h"
 
-static intptr_t sys_mount(uintptr_t user_source, uintptr_t user_target, uintptr_t user_type, uintptr_t flags, uintptr_t user_params)
+static intptr_t sys_mount(user_addr_t source, user_addr_t target, user_addr_t type, uintptr_t flags, user_addr_t params)
 {
     thread_t* thread = this_thread();
     process_t* process = thread->process;
@@ -31,8 +31,8 @@ static intptr_t sys_mount(uintptr_t user_source, uintptr_t user_target, uintptr_
         return -EINVAL;
     }
 
-    char target[PATH_MAX];
-    ssize_t copied = user_copyin_str(target, user_target, sizeof(target));
+    char mount_point[PATH_MAX];
+    ssize_t copied = user_copyin_str(mount_point, target, sizeof(mount_point));
 
     if(copied < 0) {
         return copied;
@@ -41,8 +41,8 @@ static intptr_t sys_mount(uintptr_t user_source, uintptr_t user_target, uintptr_
     char fstype[64];
     const char* fstype_ptr = nullptr;
 
-    if(user_type) {
-        copied = user_copyin_str(fstype, user_type, sizeof(fstype));
+    if(type.value) {
+        copied = user_copyin_str(fstype, type, sizeof(fstype));
 
         if(copied < 0) {
             return copied;
@@ -51,39 +51,39 @@ static intptr_t sys_mount(uintptr_t user_source, uintptr_t user_target, uintptr_
         fstype_ptr = fstype;
     }
 
-    char params[256];
+    char options[256];
     const char* params_ptr = nullptr;
 
-    if(user_params) {
-        copied = user_copyin_str(params, user_params, sizeof(params));
+    if(params.value) {
+        copied = user_copyin_str(options, params, sizeof(options));
 
         if(copied < 0) {
             return copied;
         }
 
-        params_ptr = params;
+        params_ptr = options;
     }
 
     const block_interface_t* interface = nullptr;
 
-    if(user_source) {
-        char source[PATH_MAX];
-        copied = user_copyin_str(source, user_source, sizeof(source));
+    if(source.value) {
+        char device_path[PATH_MAX];
+        copied = user_copyin_str(device_path, source, sizeof(device_path));
 
         if(copied < 0) {
             return copied;
         }
 
-        if(source[0]) {
+        if(device_path[0]) {
             vnode_t* base_dir;
-            int retval = syscall_dirfd(AT_FDCWD, source, &base_dir);
+            int retval = syscall_dirfd(AT_FDCWD, device_path, &base_dir);
 
             if(retval < 0) {
                 return retval;
             }
 
             vnode_t* source_node;
-            retval = path_resolve_at(base_dir, source, 0, credentials, &source_node);
+            retval = path_resolve_at(base_dir, device_path, 0, credentials, &source_node);
 
             if(base_dir) {
                 vnode_decref(base_dir);
@@ -109,7 +109,7 @@ static intptr_t sys_mount(uintptr_t user_source, uintptr_t user_target, uintptr_
         return -EINVAL;
     }
 
-    int retval = vfs_mount(fstype_ptr, target, interface, flags, params_ptr);
+    int retval = vfs_mount(fstype_ptr, mount_point, interface, flags, params_ptr);
 
     if(interface) {
         block_interface_decref(interface);
@@ -120,7 +120,7 @@ static intptr_t sys_mount(uintptr_t user_source, uintptr_t user_target, uintptr_
 
 define_syscall(sys_mount, SYS_MOUNT, 5);
 
-static intptr_t sys_umount(uintptr_t user_path)
+static intptr_t sys_umount(user_addr_t path)
 {
     thread_t* thread = this_thread();
     process_t* process = thread->process;
@@ -135,14 +135,14 @@ static intptr_t sys_umount(uintptr_t user_path)
         return -EPERM;
     }
 
-    char path[PATH_MAX];
-    ssize_t copied = user_copyin_str(path, user_path, sizeof(path));
+    char mount_point[PATH_MAX];
+    ssize_t copied = user_copyin_str(mount_point, path, sizeof(mount_point));
 
     if(copied < 0) {
         return copied;
     }
 
-    return vfs_unmount(path);
+    return vfs_unmount(mount_point);
 }
 
 define_syscall(sys_umount, SYS_UMOUNT, 1);
@@ -179,7 +179,7 @@ static intptr_t sys_syncfs(file_t* restrict file)
 
 define_syscall_fd(sys_syncfs, SYS_SYNCFS, 1);
 
-static intptr_t sys_statvfs(file_t* restrict file, uintptr_t buffer)
+static intptr_t sys_statvfs(file_t* restrict file, user_addr_t buffer)
 {
     vnode_t* node;
     int retval = vfs_cross_mount(file->node, &node);

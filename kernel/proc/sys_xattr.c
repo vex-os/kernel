@@ -13,9 +13,9 @@
 
 #define RESOLVE_FLAGS (AT_SYMLINK_NOFOLLOW | AT_EMPTY_PATH)
 
-static int copyin_name(char* restrict name, uintptr_t user_name)
+static int copyin_name(char* restrict buffer, user_addr_t name)
 {
-    ssize_t copied = user_copyin_str(name, user_name, XATTR_NAME_MAX + 1);
+    ssize_t copied = user_copyin_str(buffer, name, XATTR_NAME_MAX + 1);
 
     if(copied == -ENAMETOOLONG) {
         return -ERANGE;
@@ -28,7 +28,7 @@ static int copyin_name(char* restrict name, uintptr_t user_name)
     return 0;
 }
 
-static intptr_t sys_getxattrat(int dirfd, const char* restrict path, uintptr_t user_name, uintptr_t user_value, size_t size, unsigned flags)
+static intptr_t sys_getxattrat(int dirfd, const char* restrict path, user_addr_t name, user_addr_t value, size_t size, unsigned flags)
 {
     thread_t* thread = this_thread();
     if(thread->process == nullptr) {
@@ -43,8 +43,8 @@ static intptr_t sys_getxattrat(int dirfd, const char* restrict path, uintptr_t u
         size = XATTR_SIZE_MAX;
     }
 
-    char name[XATTR_NAME_MAX + 1];
-    int retval = copyin_name(name, user_name);
+    char attribute[XATTR_NAME_MAX + 1];
+    int retval = copyin_name(attribute, name);
 
     if(retval < 0) {
         return retval;
@@ -57,30 +57,30 @@ static intptr_t sys_getxattrat(int dirfd, const char* restrict path, uintptr_t u
         return retval;
     }
 
-    void* value = nullptr;
+    void* data = nullptr;
 
     if(size > 0) {
-        value = kmalloc(size);
+        data = kmalloc(size);
     }
 
     ssize_t length = -ENOMEM;
 
-    if(size == 0 || value) {
-        length = vnode_get_xattr(node, thread->credentials, name, value, size);
+    if(size == 0 || data) {
+        length = vnode_get_xattr(node, thread->credentials, attribute, data, size);
     }
 
     vnode_decref(node);
 
     if(length > 0 && size > 0) {
-        ssize_t copied = user_copyout(user_value, value, length);
+        ssize_t copied = user_copyout(value, data, length);
 
         if(copied < 0) {
             length = copied;
         }
     }
 
-    if(value) {
-        kfree(value);
+    if(data) {
+        kfree(data);
     }
 
     return length;
@@ -88,7 +88,7 @@ static intptr_t sys_getxattrat(int dirfd, const char* restrict path, uintptr_t u
 
 define_syscall_dirfd(sys_getxattrat, SYS_GETXATTRAT, 6);
 
-static intptr_t sys_setxattrat(int dirfd, const char* restrict path, uintptr_t user_name, uintptr_t user_value, size_t size, unsigned flags)
+static intptr_t sys_setxattrat(int dirfd, const char* restrict path, user_addr_t name, user_addr_t value, size_t size, unsigned flags)
 {
     thread_t* thread = this_thread();
     if(thread->process == nullptr) {
@@ -103,26 +103,26 @@ static intptr_t sys_setxattrat(int dirfd, const char* restrict path, uintptr_t u
         return -E2BIG;
     }
 
-    char name[XATTR_NAME_MAX + 1];
-    int retval = copyin_name(name, user_name);
+    char attribute[XATTR_NAME_MAX + 1];
+    int retval = copyin_name(attribute, name);
 
     if(retval < 0) {
         return retval;
     }
 
-    void* value = nullptr;
+    void* data = nullptr;
 
     if(size > 0) {
-        value = kmalloc(size);
+        data = kmalloc(size);
 
-        if(value == nullptr) {
+        if(data == nullptr) {
             return -ENOMEM;
         }
 
-        ssize_t copied = user_copyin(value, user_value, size);
+        ssize_t copied = user_copyin(data, value, size);
 
         if(copied < 0) {
-            kfree(value);
+            kfree(data);
             return copied;
         }
     }
@@ -131,12 +131,12 @@ static intptr_t sys_setxattrat(int dirfd, const char* restrict path, uintptr_t u
     retval = syscall_resolve_at(dirfd, path, flags & RESOLVE_FLAGS, &node);
 
     if(retval == 0) {
-        retval = vnode_set_xattr(node, thread->credentials, name, value, size, flags & (XATTR_CREATE | XATTR_REPLACE));
+        retval = vnode_set_xattr(node, thread->credentials, attribute, data, size, flags & (XATTR_CREATE | XATTR_REPLACE));
         vnode_decref(node);
     }
 
-    if(value) {
-        kfree(value);
+    if(data) {
+        kfree(data);
     }
 
     return retval;
@@ -144,7 +144,7 @@ static intptr_t sys_setxattrat(int dirfd, const char* restrict path, uintptr_t u
 
 define_syscall_dirfd(sys_setxattrat, SYS_SETXATTRAT, 6);
 
-static intptr_t sys_listxattrat(int dirfd, const char* restrict path, uintptr_t user_list, size_t size, unsigned flags)
+static intptr_t sys_listxattrat(int dirfd, const char* restrict path, user_addr_t list, size_t size, unsigned flags)
 {
     thread_t* thread = this_thread();
     if(thread->process == nullptr) {
@@ -166,30 +166,30 @@ static intptr_t sys_listxattrat(int dirfd, const char* restrict path, uintptr_t 
         return retval;
     }
 
-    char* list = nullptr;
+    char* names = nullptr;
 
     if(size > 0) {
-        list = kmalloc(size);
+        names = kmalloc(size);
     }
 
     ssize_t length = -ENOMEM;
 
-    if(size == 0 || list) {
-        length = vnode_list_xattr(node, thread->credentials, list, size);
+    if(size == 0 || names) {
+        length = vnode_list_xattr(node, thread->credentials, names, size);
     }
 
     vnode_decref(node);
 
     if(length > 0 && size > 0) {
-        ssize_t copied = user_copyout(user_list, list, length);
+        ssize_t copied = user_copyout(list, names, length);
 
         if(copied < 0) {
             length = copied;
         }
     }
 
-    if(list) {
-        kfree(list);
+    if(names) {
+        kfree(names);
     }
 
     return length;
@@ -197,7 +197,7 @@ static intptr_t sys_listxattrat(int dirfd, const char* restrict path, uintptr_t 
 
 define_syscall_dirfd(sys_listxattrat, SYS_LISTXATTRAT, 5);
 
-static intptr_t sys_removexattrat(int dirfd, const char* restrict path, uintptr_t user_name, unsigned flags)
+static intptr_t sys_removexattrat(int dirfd, const char* restrict path, user_addr_t name, unsigned flags)
 {
     thread_t* thread = this_thread();
     if(thread->process == nullptr) {
@@ -208,8 +208,8 @@ static intptr_t sys_removexattrat(int dirfd, const char* restrict path, uintptr_
         return -EINVAL;
     }
 
-    char name[XATTR_NAME_MAX + 1];
-    int retval = copyin_name(name, user_name);
+    char attribute[XATTR_NAME_MAX + 1];
+    int retval = copyin_name(attribute, name);
 
     if(retval < 0) {
         return retval;
@@ -222,7 +222,7 @@ static intptr_t sys_removexattrat(int dirfd, const char* restrict path, uintptr_
         return retval;
     }
 
-    retval = vnode_remove_xattr(node, thread->credentials, name);
+    retval = vnode_remove_xattr(node, thread->credentials, attribute);
 
     vnode_decref(node);
 

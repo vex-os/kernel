@@ -12,7 +12,7 @@
 
 #include "syscall_internal.h"
 
-static intptr_t sys_uname(uintptr_t buffer)
+static intptr_t sys_uname(user_addr_t buffer)
 {
     utsname_t uname;
     kstrncpy(uname.sysname, k_sysname, sizeof(uname.sysname));
@@ -32,7 +32,7 @@ static intptr_t sys_uname(uintptr_t buffer)
 
 define_syscall(sys_uname, SYS_UNAME, 1);
 
-static intptr_t sys_sethostname(uintptr_t user_name, size_t length)
+static intptr_t sys_sethostname(user_addr_t name, size_t length)
 {
     thread_t* thread = this_thread();
 
@@ -48,14 +48,14 @@ static intptr_t sys_sethostname(uintptr_t user_name, size_t length)
         return -EINVAL;
     }
 
-    char name[HOSTNAME_MAX];
-    ssize_t copied = user_copyin(name, user_name, length);
+    char hostname[HOSTNAME_MAX];
+    ssize_t copied = user_copyin(hostname, name, length);
 
     if(copied < 0) {
         return copied;
     }
 
-    return hostname_set(name, length);
+    return hostname_set(hostname, length);
 }
 
 define_syscall(sys_sethostname, SYS_SETHOSTNAME, 2);

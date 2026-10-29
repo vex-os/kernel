@@ -177,7 +177,7 @@ static intptr_t sys_tgkill(pid_t pid, pid_t tid, int sig)
 
 define_syscall(sys_tgkill, SYS_TGKILL, 3);
 
-static intptr_t sys_sigaction(int sig, uintptr_t user_act, uintptr_t user_oact)
+static intptr_t sys_sigaction(int sig, user_addr_t act, user_addr_t oact)
 {
     thread_t* thread = this_thread();
     process_t* process = thread->process;
@@ -190,32 +190,32 @@ static intptr_t sys_sigaction(int sig, uintptr_t user_act, uintptr_t user_oact)
         return -EINVAL;
     }
 
-    sigaction_t act;
+    sigaction_t new_action;
     sigaction_t old_action;
 
-    if(user_act) {
-        ssize_t copied = user_copyin(&act, user_act, sizeof(act));
+    if(act.value) {
+        ssize_t copied = user_copyin(&new_action, act, sizeof(new_action));
 
         if(copied < 0) {
             return copied;
         }
 
-        if(sig == SIGKILL || sig == SIGSTOP || (act.sa_flags & ~SA_KNOWN)) {
+        if(sig == SIGKILL || sig == SIGSTOP || (new_action.sa_flags & ~SA_KNOWN)) {
             return -EINVAL;
         }
 
         // There is no trampoline of the kernel's own to return through
-        if(act.sa_handler != SIG_DFL && act.sa_handler != SIG_IGN && 0 == (act.sa_flags & SA_RESTORER)) {
+        if(new_action.sa_handler != SIG_DFL && new_action.sa_handler != SIG_IGN && 0 == (new_action.sa_flags & SA_RESTORER)) {
             return -EINVAL;
         }
 
-        act.sa_mask &= ~(sigbit(SIGKILL) | sigbit(SIGSTOP));
+        new_action.sa_mask &= ~(sigbit(SIGKILL) | sigbit(SIGSTOP));
     }
 
-    signal_action(process, sig, user_act ? &act : nullptr, &old_action);
+    signal_action(process, sig, act.value ? &new_action : nullptr, &old_action);
 
-    if(user_oact) {
-        ssize_t copied = user_copyout(user_oact, &old_action, sizeof(old_action));
+    if(oact.value) {
+        ssize_t copied = user_copyout(oact, &old_action, sizeof(old_action));
 
         if(copied < 0) {
             return copied;
@@ -227,7 +227,7 @@ static intptr_t sys_sigaction(int sig, uintptr_t user_act, uintptr_t user_oact)
 
 define_syscall(sys_sigaction, SYS_SIGACTION, 3);
 
-static intptr_t sys_sigprocmask(int how, uintptr_t user_set, uintptr_t user_oset)
+static intptr_t sys_sigprocmask(int how, user_addr_t set, user_addr_t oset)
 {
     thread_t* thread = this_thread();
 
@@ -235,14 +235,14 @@ static intptr_t sys_sigprocmask(int how, uintptr_t user_set, uintptr_t user_oset
         return -ENOSYS;
     }
 
-    sigset_t set = 0;
+    sigset_t new_mask = 0;
 
-    if(user_set) {
+    if(set.value) {
         if(how != SIG_BLOCK && how != SIG_UNBLOCK && how != SIG_SETMASK) {
             return -EINVAL;
         }
 
-        ssize_t copied = user_copyin(&set, user_set, sizeof(set));
+        ssize_t copied = user_copyin(&new_mask, set, sizeof(new_mask));
 
         if(copied < 0) {
             return copied;
@@ -252,10 +252,10 @@ static intptr_t sys_sigprocmask(int how, uintptr_t user_set, uintptr_t user_oset
         how = SIG_BLOCK; // Blocking nothing more only reads the mask
     }
 
-    sigset_t oset = signal_mask(thread, how, set);
+    sigset_t old_mask = signal_mask(thread, how, new_mask);
 
-    if(user_oset) {
-        ssize_t copied = user_copyout(user_oset, &oset, sizeof(oset));
+    if(oset.value) {
+        ssize_t copied = user_copyout(oset, &old_mask, sizeof(old_mask));
 
         if(copied < 0) {
             return copied;
@@ -267,7 +267,7 @@ static intptr_t sys_sigprocmask(int how, uintptr_t user_set, uintptr_t user_oset
 
 define_syscall(sys_sigprocmask, SYS_SIGPROCMASK, 3);
 
-static intptr_t sys_sigpending(uintptr_t user_set)
+static intptr_t sys_sigpending(user_addr_t set)
 {
     thread_t* thread = this_thread();
 
@@ -276,7 +276,7 @@ static intptr_t sys_sigpending(uintptr_t user_set)
     }
 
     sigset_t pending = signal_pending(thread);
-    ssize_t copied = user_copyout(user_set, &pending, sizeof(pending));
+    ssize_t copied = user_copyout(set, &pending, sizeof(pending));
 
     if(copied < 0) {
         return copied;
@@ -312,7 +312,7 @@ static intptr_t sys_sigreturn(void)
 
 define_syscall(sys_sigreturn, SYS_SIGRETURN, 0);
 
-static intptr_t sys_sigaltstack(uintptr_t user_ss, uintptr_t user_old)
+static intptr_t sys_sigaltstack(user_addr_t ss, user_addr_t old)
 {
     thread_t* thread = this_thread();
 
@@ -322,47 +322,47 @@ static intptr_t sys_sigaltstack(uintptr_t user_ss, uintptr_t user_old)
 
     hart_context_t* ctx = thread->syscall_ctx;
 
-    stack_t old;
-    signal_altstack_get(thread, ctx->syscall_sp, &old);
+    stack_t old_stack;
+    signal_altstack_get(thread, ctx->syscall_sp, &old_stack);
 
-    if(user_ss) {
-        stack_t ss;
-        ssize_t copied = user_copyin(&ss, user_ss, sizeof(ss));
+    if(ss.value) {
+        stack_t new_stack;
+        ssize_t copied = user_copyin(&new_stack, ss, sizeof(new_stack));
 
         if(copied < 0) {
             return copied;
         }
 
-        if(old.ss_flags & SS_ONSTACK) {
+        if(old_stack.ss_flags & SS_ONSTACK) {
             return -EPERM;
         }
 
-        if(ss.ss_flags & ~SS_DISABLE) {
+        if(new_stack.ss_flags & ~SS_DISABLE) {
             return -EINVAL;
         }
 
-        if(ss.ss_flags & SS_DISABLE) {
+        if(new_stack.ss_flags & SS_DISABLE) {
             thread->sig_altstack = 0;
             thread->sig_altstack_size = 0;
         }
         else {
-            uintptr_t base = (uintptr_t)(ss.ss_sp);
+            uintptr_t base = (uintptr_t)(new_stack.ss_sp);
 
-            if(ss.ss_size < MINSIGSTKSZ || ss.ss_size > UINT32_MAX) {
+            if(new_stack.ss_size < MINSIGSTKSZ || new_stack.ss_size > UINT32_MAX) {
                 return -ENOMEM;
             }
 
-            if(base + ss.ss_size < base) {
+            if(base + new_stack.ss_size < base) {
                 return -EINVAL;
             }
 
             thread->sig_altstack = base;
-            thread->sig_altstack_size = ss.ss_size;
+            thread->sig_altstack_size = new_stack.ss_size;
         }
     }
 
-    if(user_old) {
-        ssize_t copied = user_copyout(user_old, &old, sizeof(old));
+    if(old.value) {
+        ssize_t copied = user_copyout(old, &old_stack, sizeof(old_stack));
 
         if(copied < 0) {
             return copied;

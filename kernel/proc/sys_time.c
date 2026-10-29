@@ -33,24 +33,24 @@ static int canonical_clock(uintptr_t clock)
     }
 }
 
-static intptr_t sys_gettime(uintptr_t clock, uintptr_t user_time)
+static intptr_t sys_gettime(uintptr_t clock, user_addr_t time)
 {
-    timespec_t time;
+    timespec_t now;
 
     switch(canonical_clock(clock)) {
         case CLOCK_REALTIME:
-            wallclock_get(&time);
+            wallclock_get(&now);
             break;
 
         case CLOCK_MONOTONIC:
-            timespec_from_nsec(&time, clock_source_now_ns());
+            timespec_from_nsec(&now, clock_source_now_ns());
             break;
 
         default:
             return -EINVAL;
     }
 
-    ssize_t copied = user_copyout(user_time, &time, sizeof(time));
+    ssize_t copied = user_copyout(time, &now, sizeof(now));
 
     if(copied < 0) {
         return copied;
@@ -61,7 +61,7 @@ static intptr_t sys_gettime(uintptr_t clock, uintptr_t user_time)
 
 define_syscall(sys_gettime, SYS_GETTIME, 2);
 
-static intptr_t sys_settime(uintptr_t clock, uintptr_t user_time)
+static intptr_t sys_settime(uintptr_t clock, user_addr_t time)
 {
     thread_t* thread = this_thread();
 
@@ -73,8 +73,8 @@ static intptr_t sys_settime(uintptr_t clock, uintptr_t user_time)
         return -EINVAL;
     }
 
-    timespec_t time;
-    ssize_t copied = user_copyin(&time, user_time, sizeof(time));
+    timespec_t new_time;
+    ssize_t copied = user_copyin(&new_time, time, sizeof(new_time));
 
     if(copied < 0) {
         return copied;
@@ -84,27 +84,27 @@ static intptr_t sys_settime(uintptr_t clock, uintptr_t user_time)
         return -EPERM;
     }
 
-    return wallclock_set(&time);
+    return wallclock_set(&new_time);
 }
 
 define_syscall(sys_settime, SYS_SETTIME, 2);
 
 // Both clocks tick from the active clock source
 // A null pointer only asks whether the clock exists, as in Linux
-static intptr_t sys_gettimeres(uintptr_t clock, uintptr_t user_resolution)
+static intptr_t sys_gettimeres(uintptr_t clock, user_addr_t resolution)
 {
     if(canonical_clock(clock) < 0) {
         return -EINVAL;
     }
 
-    if(user_resolution == 0) {
+    if(resolution.value == 0) {
         return 0;
     }
 
-    timespec_t resolution;
-    timespec_from_nsec(&resolution, clock_source_resolution_ns());
+    timespec_t step;
+    timespec_from_nsec(&step, clock_source_resolution_ns());
 
-    ssize_t copied = user_copyout(user_resolution, &resolution, sizeof(resolution));
+    ssize_t copied = user_copyout(resolution, &step, sizeof(step));
 
     if(copied < 0) {
         return copied;
@@ -135,7 +135,7 @@ static ssize_t sleep_nanoseconds(uint64_t timeout)
     return result;
 }
 
-static ssize_t sleep_relative(uint64_t timeout, uintptr_t remaining_address)
+static ssize_t sleep_relative(uint64_t timeout, user_addr_t remaining_address)
 {
     uint64_t start = clock_source_now_ns();
     ssize_t result = sleep_nanoseconds(timeout);
@@ -144,7 +144,7 @@ static ssize_t sleep_relative(uint64_t timeout, uintptr_t remaining_address)
         return result;
     }
 
-    if(remaining_address) {
+    if(remaining_address.value) {
         uint64_t elapsed = clock_source_now_ns() - start;
         timespec_t remaining = {};
 
@@ -191,7 +191,7 @@ static ssize_t sleep_until_realtime(const timespec_t* restrict target)
 }
 
 // A signal ends the sleep for good, as POSIX has it, so the call never restarts
-static intptr_t sys_nanosleep(uintptr_t clock_id, uintptr_t flags, uintptr_t user_request, uintptr_t user_remaining)
+static intptr_t sys_nanosleep(uintptr_t clock_id, uintptr_t flags, user_addr_t request, user_addr_t remaining)
 {
     thread_t* thread = this_thread();
 
@@ -209,26 +209,26 @@ static intptr_t sys_nanosleep(uintptr_t clock_id, uintptr_t flags, uintptr_t use
         return -EINVAL;
     }
 
-    timespec_t request;
-    ssize_t copied = user_copyin(&request, user_request, sizeof(request));
+    timespec_t duration;
+    ssize_t copied = user_copyin(&duration, request, sizeof(duration));
 
     if(copied < 0) {
         return copied;
     }
 
-    if(!timespec_valid(&request)) {
+    if(!timespec_valid(&duration)) {
         return -EINVAL;
     }
 
     if(flags & TIMER_ABSTIME) {
         if(clock == CLOCK_REALTIME) {
-            return sleep_until_realtime(&request);
+            return sleep_until_realtime(&duration);
         }
 
-        return sleep_until_monotonic(timespec_to_nsec(&request));
+        return sleep_until_monotonic(timespec_to_nsec(&duration));
     }
 
-    uint64_t timeout = timespec_to_nsec(&request);
+    uint64_t timeout = timespec_to_nsec(&duration);
 
     // Zero would mean to wait for as long as it takes
     if(timeout == 0) {
@@ -236,7 +236,7 @@ static intptr_t sys_nanosleep(uintptr_t clock_id, uintptr_t flags, uintptr_t use
         return 0;
     }
 
-    return sleep_relative(timeout, user_remaining);
+    return sleep_relative(timeout, remaining);
 }
 
 define_syscall(sys_nanosleep, SYS_NANOSLEEP, 4);

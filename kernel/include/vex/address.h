@@ -23,3 +23,8 @@ static __always_inline __nodiscard phys_addr_t phys_addr(uintptr_t value)
     result.value = value;
     return result;
 }
+
+static __always_inline __nodiscard user_addr_t user_addr_add(user_addr_t address, size_t offset)
+{
+    return user_addr(address.value + offset);
+}

@@ -9,16 +9,16 @@
 
 #include "syscall_internal.h"
 
-static int copyout_res(uintptr_t user_r, uintptr_t user_e, uintptr_t user_s, int32_t r, int32_t e, int32_t s)
+static int copyout_res(user_addr_t real, user_addr_t effective, user_addr_t saved, int32_t real_id, int32_t effective_id, int32_t saved_id)
 {
-    ssize_t copied = user_copyout(user_r, &r, sizeof(r));
+    ssize_t copied = user_copyout(real, &real_id, sizeof(real_id));
 
     if(copied >= 0) {
-        copied = user_copyout(user_e, &e, sizeof(e));
+        copied = user_copyout(effective, &effective_id, sizeof(effective_id));
     }
 
     if(copied >= 0) {
-        copied = user_copyout(user_s, &s, sizeof(s));
+        copied = user_copyout(saved, &saved_id, sizeof(saved_id));
     }
 
     if(copied < 0) {
@@ -28,7 +28,7 @@ static int copyout_res(uintptr_t user_r, uintptr_t user_e, uintptr_t user_s, int
     return 0;
 }
 
-static intptr_t sys_getresuid(uintptr_t user_ruid, uintptr_t user_euid, uintptr_t user_suid)
+static intptr_t sys_getresuid(user_addr_t ruid, user_addr_t euid, user_addr_t suid)
 {
     thread_t* thread = this_thread();
     process_t* process = thread->process;
@@ -39,7 +39,7 @@ static intptr_t sys_getresuid(uintptr_t user_ruid, uintptr_t user_euid, uintptr_
 
     const credentials_t* credentials = thread->credentials;
 
-    return copyout_res(user_ruid, user_euid, user_suid, credentials->uid, credentials->euid, credentials->suid);
+    return copyout_res(ruid, euid, suid, credentials->uid, credentials->euid, credentials->suid);
 }
 
 define_syscall(sys_getresuid, SYS_GETRESUID, 3);
@@ -76,7 +76,7 @@ static intptr_t sys_setresuid(uid_t ruid, uid_t euid, uid_t suid)
 
 define_syscall(sys_setresuid, SYS_SETRESUID, 3);
 
-static intptr_t sys_getresgid(uintptr_t user_rgid, uintptr_t user_egid, uintptr_t user_sgid)
+static intptr_t sys_getresgid(user_addr_t rgid, user_addr_t egid, user_addr_t sgid)
 {
     thread_t* thread = this_thread();
     process_t* process = thread->process;
@@ -87,7 +87,7 @@ static intptr_t sys_getresgid(uintptr_t user_rgid, uintptr_t user_egid, uintptr_
 
     const credentials_t* credentials = thread->credentials;
 
-    return copyout_res(user_rgid, user_egid, user_sgid, credentials->gid, credentials->egid, credentials->sgid);
+    return copyout_res(rgid, egid, sgid, credentials->gid, credentials->egid, credentials->sgid);
 }
 
 define_syscall(sys_getresgid, SYS_GETRESGID, 3);
@@ -124,7 +124,7 @@ static intptr_t sys_setresgid(gid_t rgid, gid_t egid, gid_t sgid)
 
 define_syscall(sys_setresgid, SYS_SETRESGID, 3);
 
-static intptr_t sys_getgroups(size_t size, uintptr_t user_list)
+static intptr_t sys_getgroups(size_t size, user_addr_t list)
 {
     thread_t* thread = this_thread();
     process_t* process = thread->process;
@@ -142,7 +142,7 @@ static intptr_t sys_getgroups(size_t size, uintptr_t user_list)
         return -EINVAL;
     }
 
-    ssize_t copied = user_copyout(user_list, credentials->groups, credentials->num_groups * sizeof(gid_t));
+    ssize_t copied = user_copyout(list, credentials->groups, credentials->num_groups * sizeof(gid_t));
 
     if(copied < 0) {
         return copied;
@@ -153,7 +153,7 @@ static intptr_t sys_getgroups(size_t size, uintptr_t user_list)
 
 define_syscall(sys_getgroups, SYS_GETGROUPS, 2);
 
-static intptr_t sys_setgroups(size_t size, uintptr_t user_list)
+static intptr_t sys_setgroups(size_t size, user_addr_t list)
 {
     thread_t* thread = this_thread();
     process_t* process = thread->process;
@@ -177,7 +177,7 @@ static intptr_t sys_setgroups(size_t size, uintptr_t user_list)
     int retval = -ENOMEM;
 
     if(credentials) {
-        ssize_t copied = user_copyin(credentials->groups, user_list, size * sizeof(gid_t));
+        ssize_t copied = user_copyin(credentials->groups, list, size * sizeof(gid_t));
 
         if(copied < 0) {
             retval = copied;
@@ -229,7 +229,7 @@ static intptr_t sys_setumask(mode_t mask)
 
 define_syscall(sys_setumask, SYS_SETUMASK, 1);
 
-static intptr_t sys_capget(uintptr_t user_caps)
+static intptr_t sys_capget(user_addr_t caps)
 {
     thread_t* thread = this_thread();
     process_t* process = thread->process;
@@ -240,14 +240,14 @@ static intptr_t sys_capget(uintptr_t user_caps)
 
     const credentials_t* credentials = thread->credentials;
 
-    caps_t caps = {};
-    caps.effective = credentials->cap_effective;
-    caps.permitted = credentials->cap_permitted;
-    caps.ambient = credentials->cap_ambient;
-    caps.bounding = credentials->cap_bounding;
-    caps.flags = credentials->cap_flags;
+    caps_t current = {};
+    current.effective = credentials->cap_effective;
+    current.permitted = credentials->cap_permitted;
+    current.ambient = credentials->cap_ambient;
+    current.bounding = credentials->cap_bounding;
+    current.flags = credentials->cap_flags;
 
-    ssize_t copied = user_copyout(user_caps, &caps, sizeof(caps));
+    ssize_t copied = user_copyout(caps, &current, sizeof(current));
 
     if(copied < 0) {
         return copied;
@@ -258,7 +258,7 @@ static intptr_t sys_capget(uintptr_t user_caps)
 
 define_syscall(sys_capget, SYS_CAPGET, 1);
 
-static intptr_t sys_capset(uintptr_t user_caps)
+static intptr_t sys_capset(user_addr_t caps)
 {
     thread_t* thread = this_thread();
     process_t* process = thread->process;
@@ -267,8 +267,8 @@ static intptr_t sys_capset(uintptr_t user_caps)
         return -ENOSYS;
     }
 
-    caps_t caps;
-    ssize_t copied = user_copyin(&caps, user_caps, sizeof(caps));
+    caps_t wanted;
+    ssize_t copied = user_copyin(&wanted, caps, sizeof(wanted));
 
     if(copied < 0) {
         return copied;
@@ -280,7 +280,7 @@ static intptr_t sys_capset(uintptr_t user_caps)
     int retval = -ENOMEM;
 
     if(credentials) {
-        retval = cred_setcaps(credentials, &caps);
+        retval = cred_setcaps(credentials, &wanted);
     }
 
     if(retval == 0) {

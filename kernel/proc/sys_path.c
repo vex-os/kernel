@@ -116,7 +116,7 @@ static bool getdents_emit(dir_context_t* restrict dir_context, const dirent_t* r
     return true;
 }
 
-static intptr_t sys_getdents(file_t* restrict file, uintptr_t user_buffer, size_t size)
+static intptr_t sys_getdents(file_t* restrict file, user_addr_t buffer, size_t size)
 {
     alignas(DIRENT_ALIGNMENT) char chunk[GETDENTS_CHUNK_SIZE];
     getdents_state_t state = {};
@@ -143,7 +143,7 @@ static intptr_t sys_getdents(file_t* restrict file, uintptr_t user_buffer, size_
         return -EINVAL;
     }
 
-    ssize_t copied = user_copyout(user_buffer, chunk, state.filled);
+    ssize_t copied = user_copyout(buffer, chunk, state.filled);
 
     if(copied < 0) {
         return copied;
@@ -156,7 +156,7 @@ static intptr_t sys_getdents(file_t* restrict file, uintptr_t user_buffer, size_
 
 define_syscall_fd(sys_getdents, SYS_GETDENTS, 3);
 
-static intptr_t sys_fstatat(int dirfd, const char* restrict path, uintptr_t user_stat, unsigned flags)
+static intptr_t sys_fstatat(int dirfd, const char* restrict path, user_addr_t stat, unsigned flags)
 {
     thread_t* thread = this_thread();
     process_t* process = thread->process;
@@ -185,7 +185,7 @@ static intptr_t sys_fstatat(int dirfd, const char* restrict path, uintptr_t user
         return retval;
     }
 
-    ssize_t copied = user_copyout(user_stat, &st, sizeof(st));
+    ssize_t copied = user_copyout(stat, &st, sizeof(st));
 
     if(copied < 0) {
         return copied;
@@ -306,7 +306,7 @@ static intptr_t sys_fchownat(int dirfd, const char* restrict path, uid_t uid, gi
 
 define_syscall_dirfd(sys_fchownat, SYS_FCHOWNAT, 5);
 
-static intptr_t sys_utimensat(int dirfd, const char* restrict path, uintptr_t user_times, unsigned flags)
+static intptr_t sys_utimensat(int dirfd, const char* restrict path, user_addr_t times, unsigned flags)
 {
     thread_t* thread = this_thread();
     process_t* process = thread->process;
@@ -319,17 +319,17 @@ static intptr_t sys_utimensat(int dirfd, const char* restrict path, uintptr_t us
         return -EINVAL;
     }
 
-    timespec_t times[2];
-    const timespec_t* times_ptr = nullptr;
+    timespec_t values[2];
+    const timespec_t* values_ptr = nullptr;
 
-    if(user_times) {
-        ssize_t copied = user_copyin(times, user_times, sizeof(times));
+    if(times.value) {
+        ssize_t copied = user_copyin(values, times, sizeof(values));
 
         if(copied < 0) {
             return copied;
         }
 
-        times_ptr = times;
+        values_ptr = values;
     }
 
     vnode_t* node;
@@ -339,7 +339,7 @@ static intptr_t sys_utimensat(int dirfd, const char* restrict path, uintptr_t us
         return retval;
     }
 
-    retval = vnode_utimes(node, thread->credentials, times_ptr);
+    retval = vnode_utimes(node, thread->credentials, values_ptr);
 
     vnode_decref(node);
 
@@ -446,7 +446,7 @@ static intptr_t sys_unlinkat(int dirfd, const char* restrict path, unsigned flag
 
 define_syscall_dirfd(sys_unlinkat, SYS_UNLINKAT, 3);
 
-static intptr_t sys_renameat(int old_dirfd, uintptr_t user_old_path, int new_dirfd, uintptr_t user_new_path)
+static intptr_t sys_renameat(int old_dirfd, user_addr_t old_path, int new_dirfd, user_addr_t new_path)
 {
     thread_t* thread = this_thread();
     process_t* process = thread->process;
@@ -455,15 +455,15 @@ static intptr_t sys_renameat(int old_dirfd, uintptr_t user_old_path, int new_dir
         return -ENOSYS;
     }
 
-    char oldpath[PATH_MAX];
-    ssize_t copied = user_copyin_str(oldpath, user_old_path, sizeof(oldpath));
+    char old_buffer[PATH_MAX];
+    ssize_t copied = user_copyin_str(old_buffer, old_path, sizeof(old_buffer));
 
     if(copied < 0) {
         return copied;
     }
 
-    char newpath[PATH_MAX];
-    copied = user_copyin_str(newpath, user_new_path, sizeof(newpath));
+    char new_buffer[PATH_MAX];
+    copied = user_copyin_str(new_buffer, new_path, sizeof(new_buffer));
 
     if(copied < 0) {
         return copied;
@@ -473,7 +473,7 @@ static intptr_t sys_renameat(int old_dirfd, uintptr_t user_old_path, int new_dir
 
     const char* oldname;
     vnode_t* olddir;
-    int retval = resolve_rename_parent(old_dirfd, oldpath, credentials, &olddir, &oldname);
+    int retval = resolve_rename_parent(old_dirfd, old_buffer, credentials, &olddir, &oldname);
 
     if(retval < 0) {
         return retval;
@@ -481,7 +481,7 @@ static intptr_t sys_renameat(int old_dirfd, uintptr_t user_old_path, int new_dir
 
     const char* newname;
     vnode_t* newdir;
-    retval = resolve_rename_parent(new_dirfd, newpath, credentials, &newdir, &newname);
+    retval = resolve_rename_parent(new_dirfd, new_buffer, credentials, &newdir, &newname);
 
     if(retval < 0) {
         vnode_decref(olddir);
@@ -498,7 +498,7 @@ static intptr_t sys_renameat(int old_dirfd, uintptr_t user_old_path, int new_dir
 
 define_syscall(sys_renameat, SYS_RENAMEAT, 4);
 
-static intptr_t sys_linkat(int old_dirfd, uintptr_t user_old_path, int new_dirfd, uintptr_t user_new_path, unsigned flags)
+static intptr_t sys_linkat(int old_dirfd, user_addr_t old_path, int new_dirfd, user_addr_t new_path, unsigned flags)
 {
     thread_t* thread = this_thread();
     process_t* process = thread->process;
@@ -511,15 +511,15 @@ static intptr_t sys_linkat(int old_dirfd, uintptr_t user_old_path, int new_dirfd
         return -EINVAL;
     }
 
-    char oldpath[PATH_MAX];
-    ssize_t copied = user_copyin_str(oldpath, user_old_path, sizeof(oldpath));
+    char old_buffer[PATH_MAX];
+    ssize_t copied = user_copyin_str(old_buffer, old_path, sizeof(old_buffer));
 
     if(copied < 0) {
         return copied;
     }
 
-    char newpath[PATH_MAX];
-    copied = user_copyin_str(newpath, user_new_path, sizeof(newpath));
+    char new_buffer[PATH_MAX];
+    copied = user_copyin_str(new_buffer, new_path, sizeof(new_buffer));
 
     if(copied < 0) {
         return copied;
@@ -534,7 +534,7 @@ static intptr_t sys_linkat(int old_dirfd, uintptr_t user_old_path, int new_dirfd
     }
 
     vnode_t* target;
-    int retval = syscall_resolve_at(old_dirfd, oldpath, resolve_flags, &target);
+    int retval = syscall_resolve_at(old_dirfd, old_buffer, resolve_flags, &target);
 
     if(retval < 0) {
         return retval;
@@ -542,7 +542,7 @@ static intptr_t sys_linkat(int old_dirfd, uintptr_t user_old_path, int new_dirfd
 
     const char* name;
     vnode_t* parent;
-    retval = resolve_new_parent(new_dirfd, newpath, thread->credentials, &parent, &name);
+    retval = resolve_new_parent(new_dirfd, new_buffer, thread->credentials, &parent, &name);
 
     if(retval == 0) {
         retval = vnode_link(parent, name, target);
@@ -556,7 +556,7 @@ static intptr_t sys_linkat(int old_dirfd, uintptr_t user_old_path, int new_dirfd
 
 define_syscall(sys_linkat, SYS_LINKAT, 5);
 
-static intptr_t sys_symlinkat(uintptr_t user_target, int dirfd, uintptr_t user_path)
+static intptr_t sys_symlinkat(user_addr_t target, int dirfd, user_addr_t path)
 {
     thread_t* thread = this_thread();
     process_t* process = thread->process;
@@ -565,15 +565,15 @@ static intptr_t sys_symlinkat(uintptr_t user_target, int dirfd, uintptr_t user_p
         return -ENOSYS;
     }
 
-    char target[PATH_MAX];
-    ssize_t copied = user_copyin_str(target, user_target, sizeof(target));
+    char link_target[PATH_MAX];
+    ssize_t copied = user_copyin_str(link_target, target, sizeof(link_target));
 
     if(copied < 0) {
         return copied;
     }
 
-    char path[PATH_MAX];
-    copied = user_copyin_str(path, user_path, sizeof(path));
+    char link_path[PATH_MAX];
+    copied = user_copyin_str(link_path, path, sizeof(link_path));
 
     if(copied < 0) {
         return copied;
@@ -581,14 +581,14 @@ static intptr_t sys_symlinkat(uintptr_t user_target, int dirfd, uintptr_t user_p
 
     const char* name;
     vnode_t* parent;
-    int retval = resolve_new_parent(dirfd, path, thread->credentials, &parent, &name);
+    int retval = resolve_new_parent(dirfd, link_path, thread->credentials, &parent, &name);
 
     if(retval < 0) {
         return retval;
     }
 
     vnode_t* created;
-    retval = vnode_symlink(parent, name, target, thread->credentials, &created);
+    retval = vnode_symlink(parent, name, link_target, thread->credentials, &created);
 
     vnode_decref(parent);
 
@@ -603,7 +603,7 @@ static intptr_t sys_symlinkat(uintptr_t user_target, int dirfd, uintptr_t user_p
 
 define_syscall(sys_symlinkat, SYS_SYMLINKAT, 3);
 
-static intptr_t sys_readlinkat(int dirfd, const char* restrict path, uintptr_t user_buffer, size_t size)
+static intptr_t sys_readlinkat(int dirfd, const char* restrict path, user_addr_t buffer, size_t size)
 {
     thread_t* thread = this_thread();
     process_t* process = thread->process;
@@ -636,7 +636,7 @@ static intptr_t sys_readlinkat(int dirfd, const char* restrict path, uintptr_t u
         return length;
     }
 
-    ssize_t copied = user_copyout(user_buffer, target, length);
+    ssize_t copied = user_copyout(buffer, target, length);
 
     if(copied < 0) {
         return copied;
@@ -647,7 +647,7 @@ static intptr_t sys_readlinkat(int dirfd, const char* restrict path, uintptr_t u
 
 define_syscall_dirfd(sys_readlinkat, SYS_READLINKAT, 4);
 
-static intptr_t sys_getcwd(uintptr_t user_buffer, size_t size)
+static intptr_t sys_getcwd(user_addr_t buffer, size_t size)
 {
     thread_t* thread = this_thread();
     process_t* process = thread->process;
@@ -679,7 +679,7 @@ static intptr_t sys_getcwd(uintptr_t user_buffer, size_t size)
         return -ERANGE;
     }
 
-    ssize_t copied = user_copyout(user_buffer, path, length);
+    ssize_t copied = user_copyout(buffer, path, length);
 
     if(copied < 0) {
         return copied;
@@ -690,7 +690,7 @@ static intptr_t sys_getcwd(uintptr_t user_buffer, size_t size)
 
 define_syscall(sys_getcwd, SYS_GETCWD, 2);
 
-static intptr_t sys_chdir(uintptr_t user_path)
+static intptr_t sys_chdir(user_addr_t path)
 {
     thread_t* thread = this_thread();
     process_t* process = thread->process;
@@ -699,15 +699,15 @@ static intptr_t sys_chdir(uintptr_t user_path)
         return -ENOSYS;
     }
 
-    char path[PATH_MAX];
-    ssize_t copied = user_copyin_str(path, user_path, sizeof(path));
+    char directory[PATH_MAX];
+    ssize_t copied = user_copyin_str(directory, path, sizeof(directory));
 
     if(copied < 0) {
         return copied;
     }
 
     vnode_t* base_dir;
-    int retval = syscall_dirfd(AT_FDCWD, path, &base_dir);
+    int retval = syscall_dirfd(AT_FDCWD, directory, &base_dir);
 
     if(retval < 0) {
         return retval;
@@ -716,7 +716,7 @@ static intptr_t sys_chdir(uintptr_t user_path)
     const credentials_t* credentials = thread->credentials;
 
     vnode_t* node;
-    retval = path_resolve_at(base_dir, path, 0, credentials, &node);
+    retval = path_resolve_at(base_dir, directory, 0, credentials, &node);
 
     if(base_dir) {
         vnode_decref(base_dir);

@@ -18,7 +18,7 @@ static int check_flags(uintptr_t flags)
     return 0;
 }
 
-static intptr_t sys_futex_wait(uintptr_t address, uint32_t value, uintptr_t user_timeout, uintptr_t flags)
+static intptr_t sys_futex_wait(uintptr_t address, uint32_t value, user_addr_t timeout, uintptr_t flags)
 {
     thread_t* thread = this_thread();
     process_t* process = thread->process;
@@ -35,19 +35,19 @@ static intptr_t sys_futex_wait(uintptr_t address, uint32_t value, uintptr_t user
 
     uint64_t deadline = 0;
 
-    if(user_timeout) {
-        timespec_t timeout;
-        ssize_t copied = user_copyin(&timeout, user_timeout, sizeof(timeout));
+    if(timeout.value) {
+        timespec_t relative;
+        ssize_t copied = user_copyin(&relative, timeout, sizeof(relative));
 
         if(copied < 0) {
             return copied;
         }
 
-        if(!timespec_valid(&timeout)) {
+        if(!timespec_valid(&relative)) {
             return -EINVAL;
         }
 
-        deadline = deadline_after_nsec(timespec_to_nsec(&timeout));
+        deadline = deadline_after_nsec(timespec_to_nsec(&relative));
     }
 
     return futex_wait(process->vmspace, address, value, deadline, flags & FUTEX_SHARED);

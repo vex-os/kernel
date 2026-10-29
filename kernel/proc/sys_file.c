@@ -1,3 +1,4 @@
+#include <vex/address.h>
 #include <vex/atomic.h>
 #include <vex/errno.h>
 #include <vex/fcntl.h>
@@ -25,10 +26,10 @@ typedef struct io_cursor_s io_cursor_t;
 // Where the data of a read or write goes to or comes from: one buffer, or the buffers of an iovec array
 // in user memory. The array is read one element at a time, as it can be larger than anything on the stack
 struct io_cursor_s {
-    uintptr_t iov; // Zero elements for a single buffer
+    user_addr_t iov; // Zero elements for a single buffer
     size_t count;
     size_t index;
-    uintptr_t base; // What is left of the current buffer
+    user_addr_t base; // What is left of the current buffer
     size_t left;
     size_t budget; // What the elements not read yet may add up to, so that an array changed meanwhile cannot overflow the total
     size_t size;   // All the buffers together
@@ -43,9 +44,9 @@ static char* io_page_of(thread_t* restrict thread)
     return thread->io_page;
 }
 
-static void io_cursor_init_buffer(io_cursor_t* restrict cursor, uintptr_t base, size_t size)
+static void io_cursor_init_buffer(io_cursor_t* restrict cursor, user_addr_t base, size_t size)
 {
-    cursor->iov = 0;
+    cursor->iov = user_addr(0);
     cursor->count = 0;
     cursor->index = 0;
     cursor->base = base;
@@ -55,7 +56,7 @@ static void io_cursor_init_buffer(io_cursor_t* restrict cursor, uintptr_t base, 
 }
 
 // The sum of the lengths has to fit in the result of the call, which is checked before any data moves
-static int io_cursor_init_vector(io_cursor_t* restrict cursor, uintptr_t user_iov, size_t count)
+static int io_cursor_init_vector(io_cursor_t* restrict cursor, user_addr_t iov, size_t count)
 {
     static_assert(sizeof(size_t) == sizeof(uint64_t));
 
@@ -66,24 +67,24 @@ static int io_cursor_init_vector(io_cursor_t* restrict cursor, uintptr_t user_io
     size_t size = 0;
 
     for(size_t i = 0; i < count; ++i) {
-        iovec_t iov;
-        ssize_t copied = user_copyin(&iov, user_iov + i * sizeof(iov), sizeof(iov));
+        iovec_t element;
+        ssize_t copied = user_copyin(&element, user_addr_add(iov, i * sizeof(element)), sizeof(element));
 
         if(copied < 0) {
             return copied;
         }
 
-        if(iov.len > (size_t)(INT64_MAX) - (size)) {
+        if(element.len > (size_t)(INT64_MAX) - (size)) {
             return -EINVAL;
         }
 
-        size += iov.len;
+        size += element.len;
     }
 
-    cursor->iov = user_iov;
+    cursor->iov = iov;
     cursor->count = count;
     cursor->index = 0;
-    cursor->base = 0;
+    cursor->base = user_addr(0);
     cursor->left = 0;
     cursor->budget = size;
     cursor->size = size;
@@ -102,7 +103,7 @@ static int io_cursor_fill(io_cursor_t* restrict cursor)
         }
 
         iovec_t iov;
-        ssize_t copied = user_copyin(&iov, cursor->iov + cursor->index * sizeof(iov), sizeof(iov));
+        ssize_t copied = user_copyin(&iov, user_addr_add(cursor->iov, cursor->index * sizeof(iov)), sizeof(iov));
 
         if(copied < 0) {
             return copied;
@@ -116,7 +117,7 @@ static int io_cursor_fill(io_cursor_t* restrict cursor)
 
         cursor->index += 1;
         cursor->budget -= length;
-        cursor->base = iov.base;
+        cursor->base = user_addr(iov.base);
         cursor->left = length;
     }
 
@@ -125,7 +126,7 @@ static int io_cursor_fill(io_cursor_t* restrict cursor)
 
 static void io_cursor_advance(io_cursor_t* restrict cursor, size_t size)
 {
-    cursor->base += size;
+    cursor->base = user_addr_add(cursor->base, size);
     cursor->left -= size;
 }
 
@@ -339,20 +340,20 @@ static intptr_t pwrite_chunks(file_t* restrict file, io_cursor_t* restrict curso
     return write_chunks(file, cursor, &position, false);
 }
 
-static intptr_t sys_read(file_t* restrict file, uintptr_t user_buffer, size_t count)
+static intptr_t sys_read(file_t* restrict file, user_addr_t buffer, size_t count)
 {
     io_cursor_t cursor;
-    io_cursor_init_buffer(&cursor, user_buffer, count);
+    io_cursor_init_buffer(&cursor, buffer, count);
 
     return read_chunks(file, &cursor, &file->offset);
 }
 
 define_syscall_fd(sys_read, SYS_READ, 3);
 
-static intptr_t sys_write(file_t* restrict file, uintptr_t user_buffer, size_t count)
+static intptr_t sys_write(file_t* restrict file, user_addr_t buffer, size_t count)
 {
     io_cursor_t cursor;
-    io_cursor_init_buffer(&cursor, user_buffer, count);
+    io_cursor_init_buffer(&cursor, buffer, count);
 
     bool append = file_flags(file) & O_APPEND;
 
@@ -361,30 +362,30 @@ static intptr_t sys_write(file_t* restrict file, uintptr_t user_buffer, size_t c
 
 define_syscall_fd(sys_write, SYS_WRITE, 3);
 
-static intptr_t sys_pread(file_t* restrict file, uintptr_t user_buffer, size_t count, off_t offset)
+static intptr_t sys_pread(file_t* restrict file, user_addr_t buffer, size_t count, off_t offset)
 {
     io_cursor_t cursor;
-    io_cursor_init_buffer(&cursor, user_buffer, count);
+    io_cursor_init_buffer(&cursor, buffer, count);
 
     return pread_chunks(file, &cursor, offset);
 }
 
 define_syscall_fd(sys_pread, SYS_PREAD, 4);
 
-static intptr_t sys_pwrite(file_t* restrict file, uintptr_t user_buffer, size_t count, off_t offset)
+static intptr_t sys_pwrite(file_t* restrict file, user_addr_t buffer, size_t count, off_t offset)
 {
     io_cursor_t cursor;
-    io_cursor_init_buffer(&cursor, user_buffer, count);
+    io_cursor_init_buffer(&cursor, buffer, count);
 
     return pwrite_chunks(file, &cursor, offset);
 }
 
 define_syscall_fd(sys_pwrite, SYS_PWRITE, 4);
 
-static intptr_t sys_readv(file_t* restrict file, uintptr_t user_iov, size_t count)
+static intptr_t sys_readv(file_t* restrict file, user_addr_t iov, size_t count)
 {
     io_cursor_t cursor;
-    int retval = io_cursor_init_vector(&cursor, user_iov, count);
+    int retval = io_cursor_init_vector(&cursor, iov, count);
 
     if(retval < 0) {
         return retval;
@@ -395,10 +396,10 @@ static intptr_t sys_readv(file_t* restrict file, uintptr_t user_iov, size_t coun
 
 define_syscall_fd(sys_readv, SYS_READV, 3);
 
-static intptr_t sys_writev(file_t* restrict file, uintptr_t user_iov, size_t count)
+static intptr_t sys_writev(file_t* restrict file, user_addr_t iov, size_t count)
 {
     io_cursor_t cursor;
-    int retval = io_cursor_init_vector(&cursor, user_iov, count);
+    int retval = io_cursor_init_vector(&cursor, iov, count);
 
     if(retval < 0) {
         return retval;
@@ -411,10 +412,10 @@ static intptr_t sys_writev(file_t* restrict file, uintptr_t user_iov, size_t cou
 
 define_syscall_fd(sys_writev, SYS_WRITEV, 3);
 
-static intptr_t sys_preadv(file_t* restrict file, uintptr_t user_iov, size_t count, off_t offset)
+static intptr_t sys_preadv(file_t* restrict file, user_addr_t iov, size_t count, off_t offset)
 {
     io_cursor_t cursor;
-    int retval = io_cursor_init_vector(&cursor, user_iov, count);
+    int retval = io_cursor_init_vector(&cursor, iov, count);
 
     if(retval < 0) {
         return retval;
@@ -425,10 +426,10 @@ static intptr_t sys_preadv(file_t* restrict file, uintptr_t user_iov, size_t cou
 
 define_syscall_fd(sys_preadv, SYS_PREADV, 4);
 
-static intptr_t sys_pwritev(file_t* restrict file, uintptr_t user_iov, size_t count, off_t offset)
+static intptr_t sys_pwritev(file_t* restrict file, user_addr_t iov, size_t count, off_t offset)
 {
     io_cursor_t cursor;
-    int retval = io_cursor_init_vector(&cursor, user_iov, count);
+    int retval = io_cursor_init_vector(&cursor, iov, count);
 
     if(retval < 0) {
         return retval;
@@ -455,7 +456,7 @@ static intptr_t sys_ftruncate(file_t* restrict file, off_t length)
 
 define_syscall_fd(sys_ftruncate, SYS_FTRUNCATE, 2);
 
-static intptr_t sys_fstat(file_t* restrict file, uintptr_t user_stat)
+static intptr_t sys_fstat(file_t* restrict file, user_addr_t stat)
 {
     stat_t st;
     int retval = vnode_stat(file->node, &st);
@@ -464,7 +465,7 @@ static intptr_t sys_fstat(file_t* restrict file, uintptr_t user_stat)
         return retval;
     }
 
-    ssize_t copied = user_copyout(user_stat, &st, sizeof(st));
+    ssize_t copied = user_copyout(stat, &st, sizeof(st));
 
     if(copied < 0) {
         return copied;

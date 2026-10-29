@@ -1,3 +1,4 @@
+#include <vex/address.h>
 #include <vex/atomic.h>
 #include <vex/capability.h>
 #include <vex/cred.h>
@@ -260,7 +261,7 @@ static intptr_t sys_getscheduler(pid_t pid)
 define_syscall(sys_getscheduler, SYS_GETSCHEDULER, 1);
 
 // The only policy is SCHED_OTHER, with priority 0. UNDONE: SCHED_FIFO and SCHED_RR
-static intptr_t set_scheduling(pid_t pid, uintptr_t policy, uintptr_t user_param)
+static intptr_t set_scheduling(pid_t pid, uintptr_t policy, user_addr_t param)
 {
     thread_t* thread = this_thread();
 
@@ -272,14 +273,14 @@ static intptr_t set_scheduling(pid_t pid, uintptr_t policy, uintptr_t user_param
         return -EINVAL;
     }
 
-    sched_param_t param;
-    ssize_t copied = user_copyin(&param, user_param, sizeof(param));
+    sched_param_t parameters;
+    ssize_t copied = user_copyin(&parameters, param, sizeof(parameters));
 
     if(copied < 0) {
         return copied;
     }
 
-    if(param.sched_priority != 0) {
+    if(parameters.sched_priority) {
         return -EINVAL;
     }
 
@@ -300,21 +301,21 @@ static intptr_t set_scheduling(pid_t pid, uintptr_t policy, uintptr_t user_param
     return retval;
 }
 
-static intptr_t sys_setscheduler(pid_t pid, uintptr_t policy, uintptr_t user_param)
+static intptr_t sys_setscheduler(pid_t pid, uintptr_t policy, user_addr_t param)
 {
-    return set_scheduling(pid, policy, user_param);
+    return set_scheduling(pid, policy, param);
 }
 
 define_syscall(sys_setscheduler, SYS_SETSCHEDULER, 3);
 
-static intptr_t sys_setschedparam(pid_t pid, uintptr_t user_param)
+static intptr_t sys_setschedparam(pid_t pid, user_addr_t param)
 {
-    return set_scheduling(pid, SCHED_OTHER, user_param);
+    return set_scheduling(pid, SCHED_OTHER, param);
 }
 
 define_syscall(sys_setschedparam, SYS_SETSCHEDPARAM, 2);
 
-static intptr_t sys_getschedparam(pid_t pid, uintptr_t user_param)
+static intptr_t sys_getschedparam(pid_t pid, user_addr_t param)
 {
     thread_t* thread = this_thread();
 
@@ -334,8 +335,8 @@ static intptr_t sys_getschedparam(pid_t pid, uintptr_t user_param)
 
     process_decref(process);
 
-    sched_param_t param = {};
-    ssize_t copied = user_copyout(user_param, &param, sizeof(param));
+    sched_param_t parameters = {};
+    ssize_t copied = user_copyout(param, &parameters, sizeof(parameters));
 
     if(copied < 0) {
         return copied;
@@ -346,14 +347,14 @@ static intptr_t sys_getschedparam(pid_t pid, uintptr_t user_param)
 
 define_syscall(sys_getschedparam, SYS_GETSCHEDPARAM, 2);
 
-static intptr_t sys_getschedrange(uintptr_t policy, uintptr_t user_range)
+static intptr_t sys_getschedrange(uintptr_t policy, user_addr_t range)
 {
     if(policy != SCHED_OTHER) {
         return -EINVAL;
     }
 
-    sched_range_t range = {};
-    ssize_t copied = user_copyout(user_range, &range, sizeof(range));
+    sched_range_t limits = {};
+    ssize_t copied = user_copyout(range, &limits, sizeof(limits));
 
     if(copied < 0) {
         return copied;
@@ -364,7 +365,7 @@ static intptr_t sys_getschedrange(uintptr_t policy, uintptr_t user_range)
 
 define_syscall(sys_getschedrange, SYS_GETSCHEDRANGE, 2);
 
-static intptr_t sys_getschedinterval(pid_t pid, uintptr_t user_interval)
+static intptr_t sys_getschedinterval(pid_t pid, user_addr_t interval)
 {
     thread_t* thread = this_thread();
 
@@ -386,10 +387,10 @@ static intptr_t sys_getschedinterval(pid_t pid, uintptr_t user_interval)
 
     process_decref(process);
 
-    timespec_t interval;
-    timespec_from_nsec(&interval, timeslice);
+    timespec_t slice;
+    timespec_from_nsec(&slice, timeslice);
 
-    ssize_t copied = user_copyout(user_interval, &interval, sizeof(interval));
+    ssize_t copied = user_copyout(interval, &slice, sizeof(slice));
 
     if(copied < 0) {
         return copied;
@@ -416,7 +417,7 @@ static uint64_t online_word(size_t word)
 }
 
 // The mask is in whole words, as Linux has it. The call returns the size of the mask, not zero
-static intptr_t sys_getaffinity(pid_t pid, size_t size, uintptr_t user_mask)
+static intptr_t sys_getaffinity(pid_t pid, size_t size, user_addr_t mask)
 {
     thread_t* thread = this_thread();
 
@@ -438,7 +439,7 @@ static intptr_t sys_getaffinity(pid_t pid, size_t size, uintptr_t user_mask)
 
     for(size_t word = 0; word < AFFINITY_WORDS; word += 1) {
         uint64_t bits = online_word(word);
-        ssize_t copied = user_copyout(user_mask + word * sizeof(bits), &bits, sizeof(bits));
+        ssize_t copied = user_copyout(user_addr_add(mask, word * sizeof(bits)), &bits, sizeof(bits));
 
         if(copied < 0) {
             return copied;
@@ -451,7 +452,7 @@ static intptr_t sys_getaffinity(pid_t pid, size_t size, uintptr_t user_mask)
 define_syscall(sys_getaffinity, SYS_GETAFFINITY, 3);
 
 // UNDONE: The scheduler keeps the thread off the harts that the mask leaves out
-static intptr_t sys_setaffinity(pid_t pid, size_t size, uintptr_t user_mask)
+static intptr_t sys_setaffinity(pid_t pid, size_t size, user_addr_t mask)
 {
     thread_t* thread = this_thread();
 
@@ -477,7 +478,7 @@ static intptr_t sys_setaffinity(pid_t pid, size_t size, uintptr_t user_mask)
                 chunk = sizeof(bits);
             }
 
-            ssize_t copied = user_copyin(&bits, user_mask + offset, chunk);
+            ssize_t copied = user_copyin(&bits, user_addr_add(mask, offset), chunk);
 
             if(copied < 0) {
                 return copied;

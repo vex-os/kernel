@@ -1,3 +1,4 @@
+#include <vex/address.h>
 #include <vex/atomic.h>
 #include <vex/binfmt.h>
 #include <vex/errno.h>
@@ -20,19 +21,19 @@
 
 #include "syscall_internal.h"
 
-static int copyin_string_array(uintptr_t user_array, const char** restrict out, char** restrict cursor, const char* restrict limit)
+static int copyin_string_array(user_addr_t array, const char** restrict out, char** restrict cursor, const char* restrict limit)
 {
     size_t count = 0;
 
-    for(; user_array; count += 1) {
-        uintptr_t user_string;
-        ssize_t copied = user_copyin(&user_string, user_array + count * sizeof(uintptr_t), sizeof(uintptr_t));
+    for(; array.value; count += 1) {
+        user_addr_t string;
+        ssize_t copied = user_copyin(&string, user_addr_add(array, count * sizeof(uintptr_t)), sizeof(uintptr_t));
 
         if(copied < 0) {
             return copied;
         }
 
-        if(user_string == 0) {
+        if(string.value == 0) {
             break;
         }
 
@@ -40,7 +41,7 @@ static int copyin_string_array(uintptr_t user_array, const char** restrict out, 
             return -E2BIG;
         }
 
-        copied = user_copyin_str(*cursor, user_string, limit - *cursor);
+        copied = user_copyin_str(*cursor, string, limit - *cursor);
 
         if(copied == -ENAMETOOLONG) {
             return -E2BIG;
@@ -129,23 +130,23 @@ static int exec_cred(const credentials_t* restrict credentials, const stat_t* re
     return 0;
 }
 
-static intptr_t exec_image(thread_t* restrict thread, char* restrict path, char* restrict strings, uintptr_t user_path, uintptr_t user_argv,
-    uintptr_t user_envp)
+static intptr_t exec_image(thread_t* restrict thread, char* restrict image_path, char* restrict strings, user_addr_t path, user_addr_t argv,
+    user_addr_t envp)
 {
-    ssize_t copied = user_copyin_str(path, user_path, PATH_MAX);
+    ssize_t copied = user_copyin_str(image_path, path, PATH_MAX);
 
     if(copied < 0) {
         return copied;
     }
 
-    const char* argv[BINFMT_ARGS_MAX + 1];
-    const char* envp[BINFMT_ARGS_MAX + 1];
+    const char* arguments[BINFMT_ARGS_MAX + 1];
+    const char* environment[BINFMT_ARGS_MAX + 1];
     char* cursor = strings;
 
-    int retval = copyin_string_array(user_argv, argv, &cursor, strings + PAGE_SIZE);
+    int retval = copyin_string_array(argv, arguments, &cursor, strings + PAGE_SIZE);
 
     if(retval == 0) {
-        retval = copyin_string_array(user_envp, envp, &cursor, strings + PAGE_SIZE);
+        retval = copyin_string_array(envp, environment, &cursor, strings + PAGE_SIZE);
     }
 
     if(retval < 0) {
@@ -156,7 +157,7 @@ static intptr_t exec_image(thread_t* restrict thread, char* restrict path, char*
     const credentials_t* credentials = thread->credentials;
 
     vnode_t* node;
-    retval = syscall_resolve_at(AT_FDCWD, path, 0, &node);
+    retval = syscall_resolve_at(AT_FDCWD, image_path, 0, &node);
 
     if(retval < 0) {
         return retval;
@@ -215,7 +216,7 @@ static intptr_t exec_image(thread_t* restrict thread, char* restrict path, char*
     }
 
     if(retval == 0) {
-        retval = load_binary(vmspace, file, argv, envp, new_cred, &entry);
+        retval = load_binary(vmspace, file, arguments, environment, new_cred, &entry);
     }
 
     mutex_release(&process->credentials_lock);
@@ -257,12 +258,12 @@ static intptr_t exec_image(thread_t* restrict thread, char* restrict path, char*
     return 0;
 }
 
-static intptr_t collect_child(process_t* restrict target, uintptr_t wstatus)
+static intptr_t collect_child(process_t* restrict target, user_addr_t wstatus)
 {
     int status = W_EXITCODE(target->exit_code, target->exit_signal);
     intptr_t retval = target->pid;
 
-    if(wstatus) {
+    if(wstatus.value) {
         ssize_t copied = user_copyout(wstatus, &status, sizeof(status));
 
         if(copied < 0) {
@@ -287,7 +288,7 @@ static bool wait_matches(process_t* restrict child, pid_t pid, const process_gro
     return pid == -1 || child->pid == pid;
 }
 
-static intptr_t wait_child(process_t* restrict caller, pid_t pid, const process_group_t* restrict group, uintptr_t wstatus,
+static intptr_t wait_child(process_t* restrict caller, pid_t pid, const process_group_t* restrict group, user_addr_t wstatus,
     uintptr_t options)
 {
     for(;;) {
@@ -404,7 +405,7 @@ static intptr_t sys_fork(void)
 
 define_syscall(sys_fork, SYS_FORK, 0);
 
-static intptr_t sys_exec(uintptr_t user_path, uintptr_t user_argv, uintptr_t user_envp)
+static intptr_t sys_exec(user_addr_t path, user_addr_t argv, user_addr_t envp)
 {
     thread_t* thread = this_thread();
 
@@ -412,24 +413,24 @@ static intptr_t sys_exec(uintptr_t user_path, uintptr_t user_argv, uintptr_t use
         return -ENOSYS;
     }
 
-    char* path = kmalloc(PATH_MAX);
+    char* image_path = kmalloc(PATH_MAX);
     char* strings = pslab_alloc_virt();
 
     intptr_t retval = -ENOMEM;
 
-    if(path && strings) {
-        retval = exec_image(thread, path, strings, user_path, user_argv, user_envp);
+    if(image_path && strings) {
+        retval = exec_image(thread, image_path, strings, path, argv, envp);
     }
 
     pslab_free_virt(strings);
-    kfree(path);
+    kfree(image_path);
 
     return retval;
 }
 
 define_syscall(sys_exec, SYS_EXEC, 3);
 
-static intptr_t sys_waitpid(pid_t pid, uintptr_t wstatus, uintptr_t options)
+static intptr_t sys_waitpid(pid_t pid, user_addr_t wstatus, uintptr_t options)
 {
     if(options & ~(uintptr_t)(WNOHANG)) {
         return -EINVAL;
