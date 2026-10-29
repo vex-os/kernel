@@ -22,3 +22,7 @@ endif
 if kconfig.get('CONFIG_FAT', 'n') == 'y'
     subdir('fat')
 endif
+
+if kconfig.get('CONFIG_TMPFS', 'n') == 'y'
+    subdir('tmpfs')
+endif

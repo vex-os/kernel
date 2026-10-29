@@ -83,6 +83,13 @@ config EXT2
       Second extended filesystem, used for
       the DATA partition of the boot image
 
+config TMPFS
+    bool "tmpfs"
+    default y
+    help
+      Files and directories kept in memory, for /tmp and /run.
+      The pages of the files count against the commit limit
+
 config FAT
     bool "FAT"
     default y
