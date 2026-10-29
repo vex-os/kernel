@@ -174,6 +174,8 @@ static void test_errors(void)
 
 int main(void)
 {
+    ktest_enter_work_directory("iov");
+
     test_small();
     test_big();
     test_errors();
