@@ -73,6 +73,8 @@ struct vnode_ops_s {
     int (*iterate)(vnode_t* restrict node, dir_context_t* restrict dir_context);
 
     /// @post On success out has one reference and fs and ino set, and isn't in the vcache: the VFS inserts it
+    /// @note A filesystem that keeps all its nodes cached may vcache_insert_pinned the node itself. It then also sets
+    /// the parent of a directory and holds a reference to it. The VFS keeps the node and adds the reference of the caller
     int (*create)(vnode_t* restrict node, const char* restrict name, unsigned type, mode_t mode, const credentials_t* restrict credentials,
         vnode_t** restrict out);
 

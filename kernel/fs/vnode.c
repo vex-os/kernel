@@ -124,7 +124,7 @@ static int lookup_crossed(vnode_t* restrict node, const char* restrict name, vno
 
 static int cache_created(vnode_t* restrict node, vnode_t* restrict created, vnode_t** restrict out)
 {
-    if(created->type == VNODE_DIRECTORY) {
+    if(created->type == VNODE_DIRECTORY && created->parent == nullptr) {
         created->parent = node;
         vnode_incref(node);
     }
