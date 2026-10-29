@@ -3,6 +3,9 @@
 #include <vex/compiler.h>
 #include <vex/types.h>
 
+extern size_t commit_limit_pages;
+extern size_t commit_charged_pages; // Atomic; read it with atomic_load
+
 /// Takes pages from the commit limit
 /// @retval -ENOMEM The total would pass the limit; nothing is taken
 /// @note Takes no lock, so any context may call it
