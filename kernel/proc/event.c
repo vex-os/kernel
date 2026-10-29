@@ -278,6 +278,25 @@ ssize_t event_await_unlock(event_t** restrict events, size_t count, spinlock_t* 
     return await_until(events, count, deadline, true, lock, intr_state);
 }
 
+ssize_t event_sleep(uint64_t timeout_nsec)
+{
+    event_t event;
+    event_init(&event);
+
+    event_t* event_pointer = &event;
+    spinlock_t lock = SPINLOCK_INIT;
+    bool intr_state = spinlock_acquire_intr(&lock);
+    ssize_t result = event_await_unlock(&event_pointer, 1, &lock, intr_state, timeout_nsec);
+
+    event_deinit(&event);
+
+    if(result == -ETIMEDOUT) {
+        return 0;
+    }
+
+    return result;
+}
+
 size_t event_trigger(event_t* restrict event, bool linger_pending)
 {
     if(linger_pending) {

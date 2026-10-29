@@ -115,30 +115,10 @@ static intptr_t sys_gettimeres(uintptr_t clock, user_addr_t resolution)
 
 define_syscall(sys_gettimeres, SYS_GETTIMERES, 2);
 
-// Nobody triggers the event, so only the timeout or a signal ends the wait
-static ssize_t sleep_nanoseconds(uint64_t timeout)
-{
-    event_t event;
-    event_init(&event);
-
-    event_t* event_pointer = &event;
-    spinlock_t lock = SPINLOCK_INIT;
-    bool intr_state = spinlock_acquire_intr(&lock);
-    ssize_t result = event_await_unlock(&event_pointer, 1, &lock, intr_state, timeout);
-
-    event_deinit(&event);
-
-    if(result == -ETIMEDOUT) {
-        return 0;
-    }
-
-    return result;
-}
-
 static ssize_t sleep_relative(uint64_t timeout, user_addr_t remaining_address)
 {
     uint64_t start = clock_source_now_ns();
-    ssize_t result = sleep_nanoseconds(timeout);
+    ssize_t result = event_sleep(timeout);
 
     if(result != -ERESTART) {
         return result;
@@ -170,7 +150,7 @@ static ssize_t sleep_until_monotonic(uint64_t target)
         return 0;
     }
 
-    ssize_t result = sleep_nanoseconds(target - now);
+    ssize_t result = event_sleep(target - now);
 
     if(result == -ERESTART) {
         return -EINTR;

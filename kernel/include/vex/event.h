@@ -67,6 +67,13 @@ ssize_t event_await_interruptible(event_t** restrict events, size_t count);
 /// as it is and runs again or fails with EINTR on the way out
 ssize_t event_await_unlock(event_t** restrict events, size_t count, spinlock_t* restrict lock, bool intr_state, uint64_t timeout_nsec);
 
+/// Sleeps with nothing to trigger it, so that only the timeout or pending work such as a signal ends the sleep
+/// @param timeout_nsec Zero sleeps for as long as it takes
+/// @retval 0 The timeout passed
+/// @retval -ERESTART Work is pending; a system call returns this
+/// as it is and runs again or fails with EINTR on the way out
+ssize_t event_sleep(uint64_t timeout_nsec);
+
 /// Wakes every thread waiting on the event
 /// @param linger_pending With nobody waiting, keep the wakeup for the next await
 /// instead; each call adds one, like a semaphore
