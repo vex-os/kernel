@@ -23,13 +23,16 @@
 #include <vex/thread.h>
 #include <vex/vms.h>
 
-#define SCHED_TIMESLICE_NS (1000 * UINT64_C(CONFIG_SCHED_TIMESLICE))
+// Each nice step takes a fifth off the timeslice, or
+// adds a quarter to it. The ends are cut, so that a
+// thread that asks for the most still gets the timer
+// to fire in a sane time, and the least still gets to run
 
-// Each nice step takes a fifth off the timeslice, or adds a quarter to it. The ends are cut, so that a
-// thread that asks for the most still gets the timer to fire in a sane time, and the least still gets to run
-#define SCHED_TIMESLICE_MIN_NS    UINT64_C(100000) // The least that the Kconfig option takes
+#define SCHED_TIMESLICE_NS        (1000 * UINT64_C(CONFIG_SCHED_TIMESLICE))
+#define SCHED_TIMESLICE_MIN_NS    UINT64_C(100000)
 #define SCHED_TIMESLICE_MAX_SCALE 4
-#define NICE_LEVELS               (NICE_MAX - NICE_MIN + 1)
+
+#define NICE_LEVELS (NICE_MAX - NICE_MIN + 1)
 
 #define THREAD_SIZE_BUDGET 512
 
