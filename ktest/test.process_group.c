@@ -1,11 +1,20 @@
 #include <vex/errno.h>
 #include <vex/signal.h>
 #include <vex/syscall.h>
+#include <vex/time.h>
 #include <vex/wait.h>
 
 #include "ktest.h"
 
+#define BROADCAST_WAIT_NSEC 10000000L
+
 static volatile unsigned int never_changes;
+static volatile int broadcast_seen;
+
+static void on_broadcast(__k_int32_t sig)
+{
+    broadcast_seen = 1;
+}
 
 static int run(void)
 {
@@ -53,6 +62,40 @@ static int run(void)
     ktest_expect(wstatus, 9);
     ktest_expect(ktest_syscall3(__k_SYS_WAITPID, -leader, (long)&wstatus, 0), -__k_ECHILD); // group gone
     ktest_expect(ktest_syscall2(__k_SYS_KILL, -leader, 0), -__k_ESRCH);
+
+    // kill(-1) reaches every process but the sender; the parent of this test only ignores the signal
+    ktest_expect(ktest_syscall2(__k_SYS_KILL, -1, 0), 0);
+
+    child = ktest_syscall1(__k_SYS_FORK, 0);
+
+    if(child == 0) {
+        struct __k_sigaction action = {};
+        action.sa_handler = &on_broadcast;
+        action.sa_flags = __k_SA_RESTORER;
+        action.sa_restorer = &ktest_signal_restorer;
+        ktest_syscall3(__k_SYS_SIGACTION, __k_SIGWINCH, (long)&action, 0);
+
+        struct __k_timespec timeout = {};
+        timeout.tv_nsec = BROADCAST_WAIT_NSEC;
+
+        while(!broadcast_seen) {
+            ktest_syscall4(__k_SYS_FUTEX_WAIT, (long)&never_changes, 0, (long)&timeout, 0);
+        }
+
+        ktest_syscall1(__k_SYS_EXIT, 7);
+    }
+
+    // Sent until it lands, as a signal before the handler exists is dropped
+    long reaped = 0;
+
+    while(reaped == 0) {
+        ktest_expect(ktest_syscall2(__k_SYS_KILL, -1, __k_SIGWINCH), 0);
+        ktest_syscall1(__k_SYS_YIELD, 0);
+        reaped = ktest_syscall3(__k_SYS_WAITPID, child, (long)&wstatus, __k_WNOHANG);
+    }
+
+    ktest_expect(reaped, child);
+    ktest_expect(wstatus, __k_W_EXITCODE(7, 0));
 
     // A session leader stays in its own group, and its session is out of the parent's reach
     child = ktest_syscall1(__k_SYS_FORK, 0);

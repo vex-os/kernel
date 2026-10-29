@@ -84,6 +84,37 @@ static intptr_t kill_group(thread_t* restrict thread, pid_t pgid, int sig)
     return kill.retval;
 }
 
+// Every process but the sender and init, the way Linux does it.
+// The result is 0 when someone was signalled, -EPERM when there
+// were processes and no permission for any, and -ESRCH when there were none
+static void kill_other(process_t* restrict process, void* restrict arg)
+{
+    group_kill_t* kill = arg;
+    process_t* sender = kill->thread->process;
+
+    if(process == sender || process->pid == INIT_PID) {
+        return;
+    }
+
+    if(kill->retval == -ESRCH) {
+        kill->retval = -EPERM;
+    }
+
+    kill_member(process, arg);
+}
+
+static intptr_t kill_all(thread_t* restrict thread, int sig)
+{
+    group_kill_t kill = {};
+    kill.thread = thread;
+    kill.sig = sig;
+    kill.retval = -ESRCH;
+
+    process_for_each(&kill_other, &kill);
+
+    return kill.retval;
+}
+
 static intptr_t sys_kill(pid_t pid, int sig)
 {
     thread_t* thread = this_thread();
@@ -98,7 +129,7 @@ static intptr_t sys_kill(pid_t pid, int sig)
     }
 
     if(pid == -1) {
-        return -EINVAL; // UNDONE: every process the sender may signal
+        return kill_all(thread, sig);
     }
 
     if(pid == INT32_MIN) {
