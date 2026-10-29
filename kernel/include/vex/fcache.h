@@ -17,6 +17,7 @@ struct fcache_s {
     radix_tree_t tree;
     size_t num_pages;
     size_t num_dirty;
+    bool memory;
     bool queued;
     vnode_t* dirty_next;
 };
@@ -33,6 +34,12 @@ typedef int (*fcache_bmap_t)(vnode_t* restrict node, uint64_t sector, bool creat
 
 void fcache_init(fcache_t* restrict cache);
 void fcache_deinit(fcache_t* restrict cache);
+
+/// Makes the cache the only copy of its pages
+/// @pre The cache holds no page
+/// @note The pages are never dirty and reclaim never takes them. The bmap of the calls is ignored,
+/// and the filesystem needs no volume. A read of a hole gives zeroes and takes no page
+void fcache_set_memory(fcache_t* restrict cache);
 
 ssize_t fcache_read(vnode_t* restrict node, fcache_bmap_t bmap, void* restrict buffer, size_t count, off_t offset, off_t file_size);
 ssize_t fcache_write(vnode_t* restrict node, fcache_bmap_t bmap, const void* restrict buffer, size_t count, off_t offset, off_t file_size);

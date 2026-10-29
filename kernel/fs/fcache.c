@@ -156,6 +156,11 @@ static pframe_t* add_page(fcache_t* restrict cache, uint64_t index, uintptr_t ph
 
     cache->num_pages += 1;
 
+    if(cache->memory) {
+        pframe->flags |= PFRAME_UPTODATE;
+        return pframe;
+    }
+
     spinlock_acquire(&lru_lock);
     lru_append(pframe);
     spinlock_release(&lru_lock);
@@ -191,9 +196,11 @@ static pframe_t* get_page(fcache_t* restrict cache, uint64_t index)
 
 static void remove_page(fcache_t* restrict cache, pframe_t* restrict pframe)
 {
-    spinlock_acquire(&lru_lock);
-    lru_unlink(pframe);
-    spinlock_release(&lru_lock);
+    if(!cache->memory) {
+        spinlock_acquire(&lru_lock);
+        lru_unlink(pframe);
+        spinlock_release(&lru_lock);
+    }
 
     mark_clean(cache, pframe);
 
@@ -490,6 +497,7 @@ void fcache_init(fcache_t* restrict cache)
     radix_init(&cache->tree);
     cache->num_pages = 0;
     cache->num_dirty = 0;
+    cache->memory = false;
     cache->queued = false;
     cache->dirty_next = nullptr;
 }
@@ -515,13 +523,22 @@ void fcache_deinit(fcache_t* restrict cache)
     mutex_deinit(&cache->lock);
 }
 
+void fcache_set_memory(fcache_t* restrict cache)
+{
+    kassert(cache->num_pages == 0);
+
+    cache->memory = true;
+}
+
 ssize_t fcache_read(vnode_t* restrict node, fcache_bmap_t bmap, void* restrict buffer, size_t count, off_t offset, off_t file_size)
 {
+    fcache_t* cache = &node->pages;
+
     if(offset < 0) {
         return -EINVAL;
     }
 
-    if(!sector_size_valid(node->fs->volume)) {
+    if(!cache->memory && !sector_size_valid(node->fs->volume)) {
         return -EINVAL;
     }
 
@@ -533,7 +550,6 @@ ssize_t fcache_read(vnode_t* restrict node, fcache_bmap_t bmap, void* restrict b
         count = file_size - offset;
     }
 
-    fcache_t* cache = &node->pages;
     size_t done = 0;
     int retval = 0;
 
@@ -549,7 +565,20 @@ ssize_t fcache_read(vnode_t* restrict node, fcache_bmap_t bmap, void* restrict b
             chunk = count - done;
         }
 
-        pframe_t* pframe = get_page(cache, index);
+        pframe_t* pframe = nullptr;
+
+        if(cache->memory) {
+            pframe = radix_lookup(&cache->tree, index);
+
+            if(pframe == nullptr) {
+                memset((uint8_t*)(buffer) + done, 0, chunk);
+                done += chunk;
+                continue;
+            }
+        }
+        else {
+            pframe = get_page(cache, index);
+        }
 
         if(pframe == nullptr) {
             retval = -ENOMEM;
@@ -583,15 +612,16 @@ ssize_t fcache_read(vnode_t* restrict node, fcache_bmap_t bmap, void* restrict b
 
 ssize_t fcache_write(vnode_t* restrict node, fcache_bmap_t bmap, const void* restrict buffer, size_t count, off_t offset, off_t file_size)
 {
+    fcache_t* cache = &node->pages;
+
     if(offset < 0) {
         return -EINVAL;
     }
 
-    if(!sector_size_valid(node->fs->volume)) {
+    if(!cache->memory && !sector_size_valid(node->fs->volume)) {
         return -EINVAL;
     }
 
-    fcache_t* cache = &node->pages;
     size_t done = 0;
     int retval = 0;
 
@@ -631,20 +661,25 @@ ssize_t fcache_write(vnode_t* restrict node, fcache_bmap_t bmap, const void* res
             }
         }
 
-        retval = allocate_span(node, bmap, pos, chunk);
+        if(!cache->memory) {
+            retval = allocate_span(node, bmap, pos, chunk);
 
-        if(retval < 0) {
-            if(0 == (pframe->flags & PFRAME_UPTODATE)) {
-                remove_page(cache, pframe);
+            if(retval < 0) {
+                if(0 == (pframe->flags & PFRAME_UPTODATE)) {
+                    remove_page(cache, pframe);
+                }
+
+                break;
             }
-
-            break;
         }
 
         memcpy((uint8_t*)(page_data(pframe)) + in_page, (const uint8_t*)(buffer) + done, chunk);
 
         pframe->flags |= PFRAME_UPTODATE | PFRAME_ACCESSED;
-        mark_dirty(node, pframe, sector_span(node, in_page, chunk));
+
+        if(!cache->memory) {
+            mark_dirty(node, pframe, sector_span(node, in_page, chunk));
+        }
 
         done += chunk;
 
@@ -655,7 +690,7 @@ ssize_t fcache_write(vnode_t* restrict node, fcache_bmap_t bmap, const void* res
 
     // The writer pays for going over the limit with its own pages;
     // it already holds what the filesystem needs for writeback
-    if(over_dirty_limit()) {
+    if(!cache->memory && over_dirty_limit()) {
         kick_writeback();
         writeback_locked(node, bmap, file_size);
     }
@@ -674,7 +709,9 @@ int fcache_fault(vnode_t* restrict node, fcache_bmap_t bmap, off_t offset, off_t
 {
     kassert(0 == page_offset(offset));
 
-    if(!sector_size_valid(node->fs->volume)) {
+    fcache_t* cache = &node->pages;
+
+    if(!cache->memory && !sector_size_valid(node->fs->volume)) {
         return -EINVAL;
     }
 
@@ -690,11 +727,9 @@ int fcache_fault(vnode_t* restrict node, fcache_bmap_t bmap, off_t offset, off_t
         return -EROFS;
     }
 
-    fcache_t* cache = &node->pages;
-
     mutex_acquire(&cache->lock);
 
-    if(write && over_dirty_limit()) {
+    if(write && !cache->memory && over_dirty_limit()) {
         kick_writeback();
         writeback_locked(node, bmap, size);
     }
@@ -716,7 +751,7 @@ int fcache_fault(vnode_t* restrict node, fcache_bmap_t bmap, off_t offset, off_t
         }
     }
 
-    if(write) {
+    if(write && !cache->memory) {
         size_t valid = valid_bytes(index, size);
         int retval = allocate_span(node, bmap, index * PAGE_SIZE, valid);
 
