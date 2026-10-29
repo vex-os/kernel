@@ -8,6 +8,7 @@
 #include <vex/slab.h>
 
 #define PROCESS_GROUP_BUCKETS 64
+#define ORPHAN_BATCH          8
 
 // Guards the table, every group's members, every process's group and every session's
 // tty; a mutex, as signals sent to a group's members may sleep. It nests outside process locks
@@ -232,6 +233,125 @@ bool process_group_orphaned_locked(const process_group_t* restrict group)
     }
 
     return true;
+}
+
+bool process_group_orphaned(process_t* restrict process)
+{
+    mutex_acquire(&process_group_lock);
+    bool orphaned = process_group_orphaned_locked(process->group);
+    mutex_release(&process_group_lock);
+
+    return orphaned;
+}
+
+static bool has_stopped_member(const process_group_t* restrict group)
+{
+    for(process_t* member = group->members; member; member = member->group_next) {
+        bool exiting = atomic_load_n(&member->flags, ATOMIC_ACQUIRE) & PROCESS_EXITING;
+        bool intr_state = spinlock_acquire_intr(&member->lock);
+        bool stopped = member->job.state == JOB_STOPPED && !exiting;
+        spinlock_release_intr(&member->lock, intr_state);
+
+        if(stopped) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+static void hang_up_orphaned_locked(process_group_t* restrict group)
+{
+    if(process_group_orphaned_locked(group) && has_stopped_member(group)) {
+        process_group_signal_locked(group, SIGHUP);
+        process_group_signal_locked(group, SIGCONT);
+    }
+}
+
+// Whether a process of the first group that has a child or a parent in the second one ties it to the rest of the session
+static bool ties_session(const process_group_t* restrict first, const process_group_t* restrict second)
+{
+    return first != second && first->session == second->session;
+}
+
+static process_group_t* parent_group_locked(const process_t* restrict process)
+{
+    process_t* parent = process_locate(atomic_load_n(&process->ppid, ATOMIC_SEQ_CST));
+
+    if(parent == nullptr) {
+        return nullptr;
+    }
+
+    process_group_t* group = parent->group;
+
+    process_decref(parent);
+
+    return group;
+}
+
+static bool in_batch(process_group_t* const* restrict batch, size_t count, const process_group_t* restrict group)
+{
+    for(size_t i = 0; i < count; ++i) {
+        if(batch[i] == group) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+void process_group_check_orphans(process_t* restrict process)
+{
+    mutex_acquire(&process_group_lock);
+
+    // The groups stay put while the lock is held, so the pointers need no references
+    process_group_t* own = process->group;
+    size_t skip = 0;
+    bool more = true;
+
+    // A group is hung up when the exit takes away its tie to the session, not whenever it is orphaned
+    process_group_t* parent_group = parent_group_locked(process);
+
+    if(parent_group && ties_session(parent_group, own)) {
+        hang_up_orphaned_locked(own);
+    }
+
+    while(more) {
+        process_group_t* batch[ORPHAN_BATCH];
+        size_t count = 0;
+        size_t visited = 0;
+        size_t index = 0;
+
+        bool intr_state = spinlock_acquire_intr(&process->lock);
+        process_t* child = process->children;
+
+        while(child && count < ORPHAN_BATCH) {
+            if(index >= skip) {
+                process_group_t* group = atomic_load_n(&child->group, ATOMIC_ACQUIRE);
+
+                if(ties_session(own, group) && !in_batch(batch, count, group)) {
+                    batch[count] = group;
+                    count += 1;
+                }
+
+                visited += 1;
+            }
+
+            index += 1;
+            child = child->sibling_next;
+        }
+
+        more = child != nullptr;
+        spinlock_release_intr(&process->lock, intr_state);
+
+        for(size_t i = 0; i < count; ++i) {
+            hang_up_orphaned_locked(batch[i]);
+        }
+
+        skip += visited;
+    }
+
+    mutex_release(&process_group_lock);
 }
 
 void session_incref(session_t* session)

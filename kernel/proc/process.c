@@ -251,6 +251,21 @@ pid_t process_alloc_id(void)
     return atomic_fetch_add(&next_pid, 1, ATOMIC_RELAXED);
 }
 
+void process_check_orphans(process_t* restrict process)
+{
+    uint8_t flags = atomic_load_n(&process->flags, ATOMIC_ACQUIRE);
+
+    if(0 == (flags & PROCESS_EXITING)) {
+        return;
+    }
+
+    if(atomic_fetch_or(&process->flags, PROCESS_ORPHANS_CHECKED, ATOMIC_ACQ_REL) & PROCESS_ORPHANS_CHECKED) {
+        return;
+    }
+
+    process_group_check_orphans(process);
+}
+
 process_t* process_create(process_t* restrict parent)
 {
     process_t* process = slab_alloc(sizeof(process_t));

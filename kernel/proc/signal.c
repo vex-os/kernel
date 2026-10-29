@@ -1,6 +1,7 @@
 #include <vex/atomic.h>
 #include <vex/errno.h>
 #include <vex/page.h>
+#include <vex/pgrp.h>
 #include <vex/process.h>
 #include <vex/pslab.h>
 #include <vex/sched.h>
@@ -515,6 +516,14 @@ void signal_deliver(hart_context_t* restrict ctx)
             return;
         }
 
+        // POSIX: the signals of a terminal do not stop a process
+        // of an orphaned group, as nobody could continue it
+        bool from_terminal = default_stops(sig) && sig != SIGSTOP;
+
+        if(from_terminal && process_group_orphaned(process)) {
+            return;
+        }
+
         if(default_stops(sig)) {
             job_stop(process, sig);
         }
@@ -619,15 +628,6 @@ sigset_t signal_pending(thread_t* restrict thread)
     return pending;
 }
 
-bool signal_handler_pending(thread_t* restrict thread)
-{
-    process_t* process = thread->process;
-    signal_actions_t* signal_actions = process->signal_actions;
-    bool found = false;
-
-    bool intr_state = spinlock_acquire_intr(&signal_actions->lock);
-    sigset_t deliverable = (thread->sig_pending | process->sig_pending) & ~thread->sig_blocked;
-
 bool signal_refused(thread_t* restrict thread, int sig)
 {
     process_t* process = thread->process;
@@ -639,6 +639,15 @@ bool signal_refused(thread_t* restrict thread, int sig)
 
     return ignored || (thread->sig_blocked & sigbit(sig));
 }
+
+bool signal_handler_pending(thread_t* restrict thread)
+{
+    process_t* process = thread->process;
+    signal_actions_t* signal_actions = process->signal_actions;
+    bool found = false;
+
+    bool intr_state = spinlock_acquire_intr(&signal_actions->lock);
+    sigset_t deliverable = (thread->sig_pending | process->sig_pending) & ~thread->sig_blocked;
 
     for(int sig = 1; sig <= NSIG && !found; sig += 1) {
         sighandler_t handler = signal_actions->actions[sig - 1].sa_handler;

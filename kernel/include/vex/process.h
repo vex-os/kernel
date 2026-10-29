@@ -17,10 +17,11 @@ typedef struct vnode_s vnode_t;
 
 #define INIT_PID 1
 
-#define PROCESS_EXITING   0x01U
-#define PROCESS_ZOMBIE    0x02U // Every thread is reaped
-#define PROCESS_COLLECTED 0x04U // A waiter claimed the zombie
-#define PROCESS_DID_EXEC  0x08U // Its parent can no longer move it to another group
+#define PROCESS_EXITING         0x01U
+#define PROCESS_ZOMBIE          0x02U // Every thread is reaped
+#define PROCESS_COLLECTED       0x04U // A waiter claimed the zombie
+#define PROCESS_DID_EXEC        0x08U // Its parent can no longer move it to another group
+#define PROCESS_ORPHANS_CHECKED 0x10U // process_check_orphans did its work
 
 #define JOB_RUNNING 0
 #define JOB_STOPPED 1
@@ -139,6 +140,10 @@ bool job_resume_wait(thread_t* thread) __nodiscard;
 /// @param bit JOB_REPORT_STOPPED or JOB_REPORT_CONTINUED
 /// @return Whether the caller took the report, and so tells it to the waiter
 bool job_claim_report(process_t* process, unsigned bit) __nodiscard;
+
+/// Has the groups that the exit of the process orphans hang up, once for the process
+/// @pre The caller is a thread of the process on its way out, may sleep and does not hold process_group_lock
+void process_check_orphans(process_t* restrict process);
 
 void process_exit(process_t* process, int exit_code);
 void process_kill(process_t* process, int sig);

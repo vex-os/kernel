@@ -19,6 +19,9 @@ struct counters {
     volatile unsigned long main_thread;
     volatile unsigned long other_thread;
     volatile unsigned long handled;
+    volatile unsigned long hangups;
+    volatile unsigned long continues;
+    volatile unsigned long after_stop;
 };
 
 static struct counters* counters;
@@ -58,6 +61,16 @@ static void spin_other(long arg)
 static void on_signal(__k_int32_t sig)
 {
     counters->handled += 1;
+}
+
+static void on_hangup(__k_int32_t sig)
+{
+    counters->hangups += 1;
+}
+
+static void on_continue(__k_int32_t sig)
+{
+    counters->continues += 1;
 }
 
 static void install(int sig, void (*handler)(__k_int32_t), unsigned long flags)
@@ -160,9 +173,11 @@ static void test_default_actions(void)
 {
     int status = 0;
 
-    // The other stop signals stop a process that has no handler for them
+    // The other stop signals stop a process that has no handler for them, unless its group is orphaned, as the group
+    // of the tests is: with a group of its own, the child has its parent outside of it
     long child = start_spinner(false);
 
+    ktest_expect(ktest_syscall2(__k_SYS_SETPGID, child, child), 0);
     ktest_expect(ktest_syscall2(__k_SYS_KILL, child, __k_SIGTSTP), 0);
     ktest_expect(wait_for(child, __k_WUNTRACED, &status), child);
     ktest_expect(__k_WSTOPSIG(status), __k_SIGTSTP);
@@ -275,6 +290,47 @@ static void test_sleep_survives_stop(void)
     ktest_expect(status, __k_W_EXITCODE(7, 0));
 }
 
+// A group that loses its last link to the rest of its session while a member is stopped gets SIGHUP and SIGCONT,
+// and the signals of a terminal no longer stop its members
+static void test_orphaned_group(void)
+{
+    int status = 0;
+    long middle = ktest_syscall1(__k_SYS_FORK, 0);
+
+    if(middle == 0) {
+        long grandchild = ktest_syscall1(__k_SYS_FORK, 0);
+
+        if(grandchild == 0) {
+            ktest_syscall2(__k_SYS_SETPGID, 0, 0);
+            install(__k_SIGHUP, &on_hangup, 0);
+            install(__k_SIGCONT, &on_continue, 0);
+
+            long pid = ktest_syscall1(__k_SYS_GETPID, 0);
+
+            ktest_syscall2(__k_SYS_KILL, pid, __k_SIGSTOP);
+
+            // It runs again because of the SIGCONT of the exit, and is orphaned now
+            ktest_syscall2(__k_SYS_KILL, pid, __k_SIGTSTP);
+            counters->after_stop = 1;
+            ktest_syscall1(__k_SYS_EXIT, 0);
+        }
+
+        // The grandchild is in a group of its own, and this process is its only link to the session
+        wait_for(grandchild, __k_WUNTRACED, &status);
+        ktest_syscall1(__k_SYS_EXIT, 0);
+    }
+
+    wait_for(middle, 0, &status);
+
+    for(int round = 0; round < 100 && counters->after_stop == 0; round += 1) {
+        sleep_for(SETTLE_NSEC / 4);
+    }
+
+    ktest_expect(counters->after_stop, 1);
+    ktest_expect(counters->hangups, 1);
+    ktest_expect(counters->continues, 1);
+}
+
 int main(void)
 {
     long address = ktest_syscall6(__k_SYS_MMAP, 0, 4096, SHARED_RW, SHARED_ANON, -1, 0);
@@ -289,6 +345,7 @@ int main(void)
     test_default_actions();
     test_parent_notice();
     test_sleep_survives_stop();
+    test_orphaned_group();
 
     return ktest_result();
 }

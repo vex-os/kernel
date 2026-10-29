@@ -36,6 +36,13 @@ process_group_t* process_group_find_locked(pid_t pgid) __nodiscard;
 /// @pre The caller holds process_group_lock
 bool process_group_orphaned_locked(const process_group_t* restrict group) __nodiscard;
 
+/// @pre The caller does not hold process_group_lock
+bool process_group_orphaned(process_t* restrict process) __nodiscard;
+
+/// Sends SIGHUP and SIGCONT to the groups, its own and those of its children, that its exit orphans while they hold a stopped member
+/// @pre The process is exiting, and the caller may sleep and does not hold process_group_lock
+void process_group_check_orphans(process_t* restrict process);
+
 /// Sends a signal from the kernel to every member of the group
 /// @pre The caller holds process_group_lock
 void process_group_signal_locked(process_group_t* restrict group, int sig);
