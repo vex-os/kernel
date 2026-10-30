@@ -79,7 +79,7 @@ There is no unit test suite. Boot the test image and run the tests in `kst`:
   takes over the machine (framebuffer) goes last.
 - A test returns 0 for success and checks with `ktest_expect` from `ktest/ktest.h`.
 - `-Dktest=false` skips the whole directory and drops the `ktest-image` and `ktest-run` targets.
-- After a run, check the DATA partition with `e2fsck -fn "build/ktest/vexsys.boot.img?offset=$((10240 * 512))"`.
+- After a run, check the DATA partition with `e2fsck -fn "build/ktest/vexsys.boot.img?offset=$((18432 * 512))"`.
 
 ## Code style
 
