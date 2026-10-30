@@ -253,10 +253,6 @@ int vnode_fsync(vnode_t* restrict node);
 /// @retval -EOPNOTSUPP The filesystem has no fallocate operation
 int vnode_fallocate(vnode_t* restrict node, unsigned mode, off_t offset, off_t length);
 
-/// The fallocate operation of a filesystem that stores no holes: making a file longer is what allocates its storage
-/// @retval -EOPNOTSUPP mode is not 0
-int vnode_fallocate_grow(vnode_t* restrict node, unsigned mode, off_t offset, off_t length);
-
 /// @retval VMS_FAULT_MINOR The page was in the cache
 /// @retval VMS_FAULT_MAJOR The page had to be read in first
 int vnode_fault(vnode_t* restrict node, off_t offset, pmap_t* restrict pmap, virt_addr_t virt, unsigned vprot);

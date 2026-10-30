@@ -1557,32 +1557,6 @@ int vnode_fallocate(vnode_t* restrict node, unsigned mode, off_t offset, off_t l
     return node->ops->fallocate(node, mode, offset, length);
 }
 
-int vnode_fallocate_grow(vnode_t* restrict node, unsigned mode, off_t offset, off_t length)
-{
-    if(mode) {
-        return -EOPNOTSUPP;
-    }
-
-    stat_t stat;
-    int retval = vnode_stat(node, &stat);
-
-    if(retval < 0) {
-        return retval;
-    }
-
-    off_t end = offset + length;
-
-    if(end <= stat.st_size) {
-        return 0;
-    }
-
-    vnode_attr_t attr = {};
-    attr.mask = VATTR_SIZE;
-    attr.size = end;
-
-    return vnode_set_attr(node, &attr);
-}
-
 int vnode_fault(vnode_t* restrict node, off_t offset, pmap_t* restrict pmap, virt_addr_t virt, unsigned vprot)
 {
     kassert(node);

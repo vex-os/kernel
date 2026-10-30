@@ -1015,6 +1015,36 @@ static int echfs_vnode_set_attr(vnode_t* restrict node, const vnode_attr_t* rest
     return retval;
 }
 
+// echfs stores no holes, so a file that is long enough has its blocks already
+static int echfs_vnode_fallocate(vnode_t* restrict node, unsigned mode, off_t offset, off_t length)
+{
+    if(mode) {
+        return -EOPNOTSUPP;
+    }
+
+    echfs_vnode_context_t* ctx = node->ctxdata;
+    uint64_t end = (uint64_t)(offset) + length;
+
+    vnode_attr_t attr = {};
+    attr.mask = VATTR_SIZE | VATTR_MTIME | VATTR_CTIME;
+    attr.size = end;
+    wallclock_get(&attr.ctime);
+    attr.mtime = attr.ctime;
+
+    int retval = 0;
+
+    // The size is compared under the lock, as a write can make the file longer than the range meanwhile
+    mutex_acquire(fs_lock(node));
+
+    if(end > ctx->size) {
+        retval = set_attr_locked(node, &attr);
+    }
+
+    mutex_release(fs_lock(node));
+
+    return retval;
+}
+
 const vnode_ops_t echfs_vnode_ops = {
     .release = &echfs_vnode_release,
     .lookup = &echfs_vnode_lookup,
@@ -1027,6 +1057,6 @@ const vnode_ops_t echfs_vnode_ops = {
     .stat = &echfs_vnode_stat,
     .set_attr = &echfs_vnode_set_attr,
     .fsync = &echfs_vnode_fsync,
-    .fallocate = &vnode_fallocate_grow,
+    .fallocate = &echfs_vnode_fallocate,
     .fault = &echfs_vnode_fault,
 };
