@@ -57,4 +57,4 @@ static ssize_t rdseed_poll(void* out, size_t size)
     return count * sizeof(uint64_t);
 }
 
-define_random_source(rdseed, true, VALUES * sizeof(uint64_t), VALUES * 64, rdseed_probe, rdseed_poll);
+define_random_source_polled(rdseed, true, VALUES * sizeof(uint64_t), VALUES * 64, rdseed_probe, rdseed_poll);

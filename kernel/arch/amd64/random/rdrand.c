@@ -57,4 +57,4 @@ static ssize_t rdrand_poll(void* out, size_t size)
     return count * sizeof(uint64_t);
 }
 
-define_random_source(rdrand, false, VALUES * sizeof(uint64_t), VALUES * 64, rdrand_probe, rdrand_poll);
+define_random_source_polled(rdrand, false, VALUES * sizeof(uint64_t), VALUES * 64, rdrand_probe, rdrand_poll);

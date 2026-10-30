@@ -48,7 +48,7 @@ static ssize_t limine_poll(void* out, size_t size)
 // Limine takes the values from RDSEED, RDRAND and the UEFI RNG and falls
 // back to PCG32, and its response does not say which one made a value. So
 // the bootloader is trusted as a whole, unless the command line says otherwise
-define_random_source(limine, true, ENTROPY_BYTES, ENTROPY_BITS, limine_probe, limine_poll);
+define_random_source_polled(limine, true, ENTROPY_BYTES, ENTROPY_BITS, limine_probe, limine_poll);
 
 static void init_limine_entropy(void)
 {

@@ -64,4 +64,4 @@ static ssize_t jitter_poll(void* out, size_t size)
     return size;
 }
 
-define_random_source(jitter, true, SAMPLES, CREDIT_BITS, jitter_probe, jitter_poll);
+define_random_source_polled(jitter, true, SAMPLES, CREDIT_BITS, jitter_probe, jitter_poll);
