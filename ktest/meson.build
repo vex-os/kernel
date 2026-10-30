@@ -24,6 +24,7 @@ ktest_programs = [
     'waitid',
     'sigsuspend',
     'sigtimedwait',
+    'sigqueue',
     'itimer',
     'process_group',
     'job',
