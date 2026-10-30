@@ -113,6 +113,8 @@ static void inherited(void)
 
 int main(void)
 {
+    ktest_enter_work_directory("chroot");
+
     ktest_expect(make_directory("jail"), 0);
     ktest_expect(make_directory("jail/inner"), 0);
     make_file("jail/inner/data", "jail\n");
