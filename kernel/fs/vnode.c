@@ -5,6 +5,7 @@
 #include <vex/limits.h>
 #include <vex/mount.h>
 #include <vex/mutex.h>
+#include <vex/pipe.h>
 #include <vex/poll.h>
 #include <vex/slab.h>
 #include <vex/spinlock.h>
@@ -193,6 +194,37 @@ static int symlink_crossed(vnode_t* restrict node, const char* restrict name, co
 
     vnode_t* created;
     retval = node->ops->symlink(node, name, target, credentials, &created);
+
+    if(retval < 0) {
+        return retval;
+    }
+
+    return cache_created(node, created, out);
+}
+
+// A FIFO or a device node on a filesystem does its I/O through the code of its kind
+static const vnode_ops_t* io_ops(const vnode_t* restrict node)
+{
+    if(node->special_ops) {
+        return node->special_ops;
+    }
+
+    return node->ops;
+}
+
+static int mknod_crossed(vnode_t* restrict node, const char* restrict name, unsigned type, mode_t mode, dev_t rdev,
+    const credentials_t* restrict credentials, vnode_t** restrict out)
+{
+    if(node->ops->mknod == nullptr) {
+        return -EPERM;
+    }
+
+    if(node->fs->readonly) {
+        return -EROFS;
+    }
+
+    vnode_t* created;
+    int retval = node->ops->mknod(node, name, type, mode, rdev, credentials, &created);
 
     if(retval < 0) {
         return retval;
@@ -793,6 +825,36 @@ int vnode_iterate(vnode_t* restrict node, dir_context_t* restrict dir_context)
     return retval;
 }
 
+void vnode_init_special(vnode_t* restrict node, dev_t rdev)
+{
+    node->rdev = rdev;
+
+    // UNDONE: device nodes, which find their interface by rdev
+    if(node->type == VNODE_FIFO) {
+        node->special_ops = &pipe_fifo_ops;
+    }
+}
+
+int vnode_mknod(vnode_t* restrict node, const char* restrict name, unsigned type, mode_t mode, dev_t rdev,
+    const credentials_t* restrict credentials, vnode_t** restrict out)
+{
+    kassert(node);
+    kassert(credentials);
+
+    vnode_t* target;
+    int retval = vfs_cross_mount(node, &target);
+
+    if(retval < 0) {
+        return retval;
+    }
+
+    retval = mknod_crossed(target, name, type, mode & ~S_IFMT, rdev, credentials, out);
+
+    vnode_decref(target);
+
+    return retval;
+}
+
 int vnode_create(vnode_t* restrict node, const char* restrict name, unsigned type, mode_t mode, const credentials_t* restrict credentials,
     vnode_t** restrict out)
 {
@@ -913,11 +975,13 @@ int vnode_open(vnode_t* restrict node, file_t* restrict file)
         return retval;
     }
 
-    if(target->ops->open == nullptr) {
+    const vnode_ops_t* ops = io_ops(target);
+
+    if(ops->open == nullptr) {
         retval = -ENOSYS;
     }
     else {
-        retval = target->ops->open(target, file);
+        retval = ops->open(target, file);
     }
 
     vnode_decref(target);
@@ -936,11 +1000,13 @@ int vnode_close(vnode_t* restrict node, file_t* restrict file)
         return retval;
     }
 
-    if(target->ops->close == nullptr) {
+    const vnode_ops_t* ops = io_ops(target);
+
+    if(ops->close == nullptr) {
         retval = -ENOSYS;
     }
     else {
-        retval = target->ops->close(target, file);
+        retval = ops->close(target, file);
     }
 
     vnode_decref(target);
@@ -959,11 +1025,13 @@ ssize_t vnode_read(vnode_t* restrict node, file_t* restrict file, void* restrict
         return retval;
     }
 
-    if(target->ops->read == nullptr) {
+    const vnode_ops_t* ops = io_ops(target);
+
+    if(ops->read == nullptr) {
         retval = -ENOSYS;
     }
     else {
-        retval = target->ops->read(target, file, buffer, size, offset);
+        retval = ops->read(target, file, buffer, size, offset);
     }
 
     if(retval >= 0) {
@@ -986,11 +1054,13 @@ ssize_t vnode_write(vnode_t* restrict node, file_t* restrict file, const void* r
         return retval;
     }
 
-    if(target->ops->write == nullptr) {
+    const vnode_ops_t* ops = io_ops(target);
+
+    if(ops->write == nullptr) {
         retval = -ENOSYS;
     }
     else {
-        retval = target->ops->write(target, file, buffer, size, offset);
+        retval = ops->write(target, file, buffer, size, offset);
     }
 
     vnode_decref(target);
@@ -1009,11 +1079,13 @@ off_t vnode_seek(vnode_t* restrict node, file_t* restrict file, off_t offset, in
         return retval;
     }
 
-    if(target->ops->seek == nullptr) {
+    const vnode_ops_t* ops = io_ops(target);
+
+    if(ops->seek == nullptr) {
         retval = -ENOSYS;
     }
     else {
-        retval = target->ops->seek(target, file, offset, origin);
+        retval = ops->seek(target, file, offset, origin);
     }
 
     vnode_decref(target);
@@ -1412,11 +1484,13 @@ int vnode_ioctl(vnode_t* restrict node, file_t* restrict file, uint32_t request,
         return retval;
     }
 
-    if(target->ops->ioctl == nullptr) {
+    const vnode_ops_t* ops = io_ops(target);
+
+    if(ops->ioctl == nullptr) {
         retval = -ENOSYS;
     }
     else {
-        retval = target->ops->ioctl(target, file, request, argument);
+        retval = ops->ioctl(target, file, request, argument);
     }
 
     vnode_decref(target);
@@ -1437,8 +1511,10 @@ unsigned vnode_poll(vnode_t* restrict node, file_t* restrict file, poll_table_t*
 
     unsigned revents = POLL_READABLE | POLL_WRITABLE;
 
-    if(target->ops->poll) {
-        revents = target->ops->poll(target, file, table);
+    const vnode_ops_t* ops = io_ops(target);
+
+    if(ops->poll) {
+        revents = ops->poll(target, file, table);
     }
 
     vnode_decref(target);

@@ -5,6 +5,11 @@
 #include <vex/types.h>
 
 typedef struct file_s file_t;
+typedef struct vnode_ops_s vnode_ops_t;
+
+/// The I/O of a FIFO on a filesystem, which vnode_init_special gives it
+/// @note The pipe lives in special_data of the node, from the first open to the last close
+extern const vnode_ops_t pipe_fifo_ops;
 
 /// Makes a pipe: one open file for each end
 /// @param flags O_NONBLOCK, which both files get

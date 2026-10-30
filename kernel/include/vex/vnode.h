@@ -92,6 +92,14 @@ struct vnode_ops_s {
     /// call vcache_rekey for the source under the same lock
     int (*rename)(vnode_t* olddir, const char* oldname, vnode_t* source, vnode_t* newdir, const char* newname, vnode_t* victim);
 
+    /// Makes a FIFO or a device node; nullptr makes mknod fail with EPERM
+    /// @param type VNODE_FIFO, VNODE_CHAR_DEV or VNODE_BLOCK_DEV
+    /// @param rdev The device that a device node stands for; zero for a FIFO
+    /// @post As for create, and the filesystem has called vnode_init_special on out, and does so on every vnode that it
+    /// makes for the node later
+    int (*mknod)(vnode_t* restrict node, const char* restrict name, unsigned type, mode_t mode, dev_t rdev,
+        const credentials_t* restrict credentials, vnode_t** restrict out);
+
     /// @pre The target isn't a directory
     int (*link)(vnode_t* restrict node, const char* restrict name, vnode_t* restrict target);
 
@@ -184,7 +192,10 @@ struct vnode_s {
     vcache_entry_t* cache_entry;
     const block_interface_t* volume;
     fcache_t pages;
-    file_locks_t* locks; // Made on the first lock, and kept until the node goes
+    file_locks_t* locks;            // Made on the first lock, and kept until the node goes
+    const vnode_ops_t* special_ops; // The I/O of a FIFO or a device node, which is not the one of its filesystem
+    void* special_data;             // What special_ops keep: the pipe of a FIFO while it is open
+    dev_t rdev;                     // The device of a device node
     void* ctxdata;
 };
 
@@ -195,6 +206,13 @@ void vnode_destroy(vnode_t* restrict node);
 
 int vnode_lookup(vnode_t* restrict node, const char* restrict name, vnode_t** restrict out);
 int vnode_iterate(vnode_t* restrict node, dir_context_t* restrict dir_context);
+/// Gives a FIFO or a device node of a filesystem the I/O of its kind: open, close, read, write, seek, ioctl and poll
+/// go to it, and the others stay with the filesystem
+/// @pre The node is new, and nothing has opened it
+void vnode_init_special(vnode_t* restrict node, dev_t rdev);
+
+int vnode_mknod(vnode_t* restrict node, const char* restrict name, unsigned type, mode_t mode, dev_t rdev,
+    const credentials_t* restrict credentials, vnode_t** restrict out);
 int vnode_create(vnode_t* restrict node, const char* restrict name, unsigned type, mode_t mode, const credentials_t* restrict credentials,
     vnode_t** restrict out);
 int vnode_unlink(vnode_t* restrict node, const char* restrict name, bool directory);

@@ -43,8 +43,12 @@ struct pipe_s {
     spinlock_t lock; // Guards all the fields below
     event_t readable;
     event_t writable;
-    unsigned readers; // Open files that can read
-    unsigned writers; // Open files that can write
+    event_t partner;       // Triggered by every open, for an open of a FIFO that waits for the other end
+    unsigned readers;      // Open files that can read
+    unsigned writers;      // Open files that can write
+    unsigned reader_opens; // Every open that could read so far, so that a waiter sees a reader that came and went
+    unsigned writer_opens;
+    unsigned users; // Of a FIFO: its open files and the opens on the way, under the lock of the node
     uid_t uid;
     gid_t gid;
     void* pages[PIPE_PAGES]; // A ring: the queue starts at first
@@ -200,9 +204,78 @@ static void send_sigpipe(void)
     signal_send(process, thread->tid, &info);
 }
 
+static pipe_t* pipe_alloc(uid_t uid, gid_t gid)
+{
+    pipe_t* pipe = slab_alloc(sizeof(pipe_t));
+
+    if(pipe == nullptr) {
+        return nullptr;
+    }
+
+    pipe->lock = SPINLOCK_INIT;
+    pipe->write_offset = PAGE_SIZE;
+    pipe->uid = uid;
+    pipe->gid = gid;
+
+    event_init(&pipe->readable);
+    event_init(&pipe->writable);
+    event_init(&pipe->partner);
+
+    return pipe;
+}
+
+static void pipe_free(pipe_t* restrict pipe)
+{
+    // The readers closed with data in the pipe
+    while(pipe->count) {
+        drop_first(pipe);
+    }
+
+    event_deinit(&pipe->readable);
+    event_deinit(&pipe->writable);
+    event_deinit(&pipe->partner);
+
+    slab_free(pipe);
+}
+
+static void count_open_locked(pipe_t* restrict pipe, unsigned flags)
+{
+    if(file_flags_allow_read(flags)) {
+        pipe->readers += 1;
+        pipe->reader_opens += 1;
+    }
+
+    if(file_flags_allow_write(flags)) {
+        pipe->writers += 1;
+        pipe->writer_opens += 1;
+    }
+
+    event_trigger(&pipe->partner, false);
+}
+
+// The last reader of a pipe leaves its writers with EPIPE, and the last writer leaves its readers with the end of the file
+static void count_close_locked(pipe_t* restrict pipe, unsigned flags)
+{
+    if(file_flags_allow_read(flags)) {
+        pipe->readers -= 1;
+
+        if(pipe->readers == 0) {
+            event_trigger(&pipe->writable, false);
+        }
+    }
+
+    if(file_flags_allow_write(flags)) {
+        pipe->writers -= 1;
+
+        if(pipe->writers == 0) {
+            event_trigger(&pipe->readable, false);
+        }
+    }
+}
+
 static ssize_t pipe_vnode_read(vnode_t* restrict node, file_t* restrict file, void* restrict buffer, size_t size, off_t offset)
 {
-    pipe_t* pipe = node->ctxdata;
+    pipe_t* pipe = node->special_data;
 
     if(size == 0) {
         return 0;
@@ -241,7 +314,7 @@ static ssize_t pipe_vnode_read(vnode_t* restrict node, file_t* restrict file, vo
 
 static ssize_t pipe_vnode_write(vnode_t* restrict node, file_t* restrict file, const void* restrict buffer, size_t size, off_t offset)
 {
-    pipe_t* pipe = node->ctxdata;
+    pipe_t* pipe = node->special_data;
     size_t written = 0;
     ssize_t error = 0;
 
@@ -309,48 +382,21 @@ static off_t pipe_vnode_seek(vnode_t* restrict node, file_t* restrict file, off_
 
 static int pipe_vnode_open(vnode_t* restrict node, file_t* restrict file)
 {
-    pipe_t* pipe = node->ctxdata;
-    unsigned flags = file_flags(file);
+    pipe_t* pipe = node->special_data;
 
     bool intr_state = spinlock_acquire_intr(&pipe->lock);
-
-    if(file_flags_allow_read(flags)) {
-        pipe->readers += 1;
-    }
-
-    if(file_flags_allow_write(flags)) {
-        pipe->writers += 1;
-    }
-
+    count_open_locked(pipe, file_flags(file));
     spinlock_release_intr(&pipe->lock, intr_state);
 
     return 0;
 }
 
-// The last reader of a pipe leaves its writers with EPIPE, and the last writer leaves its readers with the end of the file
 static int pipe_vnode_close(vnode_t* restrict node, file_t* restrict file)
 {
-    pipe_t* pipe = node->ctxdata;
-    unsigned flags = file_flags(file);
+    pipe_t* pipe = node->special_data;
 
     bool intr_state = spinlock_acquire_intr(&pipe->lock);
-
-    if(file_flags_allow_read(flags)) {
-        pipe->readers -= 1;
-
-        if(pipe->readers == 0) {
-            event_trigger(&pipe->writable, false);
-        }
-    }
-
-    if(file_flags_allow_write(flags)) {
-        pipe->writers -= 1;
-
-        if(pipe->writers == 0) {
-            event_trigger(&pipe->readable, false);
-        }
-    }
-
+    count_close_locked(pipe, file_flags(file));
     spinlock_release_intr(&pipe->lock, intr_state);
 
     return 0;
@@ -358,7 +404,7 @@ static int pipe_vnode_close(vnode_t* restrict node, file_t* restrict file)
 
 static int pipe_vnode_ioctl(vnode_t* restrict node, file_t* restrict file, uint32_t request, uintptr_t argument)
 {
-    pipe_t* pipe = node->ctxdata;
+    pipe_t* pipe = node->special_data;
 
     if(request != FIONREAD) {
         return -ENOTTY;
@@ -379,7 +425,7 @@ static int pipe_vnode_ioctl(vnode_t* restrict node, file_t* restrict file, uint3
 
 static unsigned pipe_vnode_poll(vnode_t* restrict node, file_t* restrict file, poll_table_t* restrict table)
 {
-    pipe_t* pipe = node->ctxdata;
+    pipe_t* pipe = node->special_data;
     unsigned flags = file_flags(file);
     bool reads = file_flags_allow_read(flags);
     bool writes = file_flags_allow_write(flags);
@@ -421,7 +467,7 @@ static unsigned pipe_vnode_poll(vnode_t* restrict node, file_t* restrict file, p
 
 static int pipe_vnode_stat(vnode_t* restrict node, stat_t* restrict out)
 {
-    const pipe_t* pipe = node->ctxdata;
+    const pipe_t* pipe = node->special_data;
 
     memset(out, 0, sizeof(stat_t));
 
@@ -438,17 +484,7 @@ static int pipe_vnode_stat(vnode_t* restrict node, stat_t* restrict out)
 
 static void pipe_vnode_release(vnode_t* restrict node)
 {
-    pipe_t* pipe = node->ctxdata;
-
-    // The readers closed with data in the pipe
-    while(pipe->count) {
-        drop_first(pipe);
-    }
-
-    event_deinit(&pipe->readable);
-    event_deinit(&pipe->writable);
-
-    slab_free(pipe);
+    pipe_free(node->special_data);
 }
 
 static const vnode_ops_t pipe_vnode_ops = {
@@ -461,6 +497,188 @@ static const vnode_ops_t pipe_vnode_ops = {
     .ioctl = &pipe_vnode_ioctl,
     .poll = &pipe_vnode_poll,
     .stat = &pipe_vnode_stat,
+};
+
+// The pipe of a FIFO lives while the FIFO
+// is open or an open() of it is on the way
+static pipe_t* attach_fifo(vnode_t* restrict node)
+{
+    bool intr_state = spinlock_acquire_intr(&node->lock);
+    pipe_t* pipe = node->special_data;
+
+    if(pipe) {
+        pipe->users += 1;
+        spinlock_release_intr(&node->lock, intr_state);
+        return pipe;
+    }
+
+    spinlock_release_intr(&node->lock, intr_state);
+
+    pipe_t* fresh = pipe_alloc(0, 0); // A FIFO shows the owner of its node
+
+    if(fresh == nullptr) {
+        return nullptr;
+    }
+
+    intr_state = spinlock_acquire_intr(&node->lock);
+    pipe = node->special_data;
+
+    if(pipe == nullptr) {
+        pipe = fresh;
+        node->special_data = pipe;
+        fresh = nullptr;
+    }
+
+    pipe->users += 1;
+    spinlock_release_intr(&node->lock, intr_state);
+
+    // Another open made the pipe first
+    if(fresh) {
+        pipe_free(fresh);
+    }
+
+    return pipe;
+}
+
+// The data in a FIFO goes with its last close, as POSIX has it
+static void detach_fifo(vnode_t* restrict node)
+{
+    bool intr_state = spinlock_acquire_intr(&node->lock);
+
+    pipe_t* pipe = node->special_data;
+    pipe->users -= 1;
+
+    bool last = pipe->users == 0;
+
+    if(last) {
+        node->special_data = nullptr;
+    }
+
+    spinlock_release_intr(&node->lock, intr_state);
+
+    if(last) {
+        pipe_free(pipe);
+    }
+}
+
+static bool partner_open_locked(const pipe_t* restrict pipe, bool for_writer)
+{
+    if(for_writer) {
+        return pipe->writers;
+    }
+
+    return pipe->readers;
+}
+
+static unsigned partner_opens_locked(const pipe_t* restrict pipe, bool for_writer)
+{
+    if(for_writer) {
+        return pipe->writer_opens;
+    }
+
+    return pipe->reader_opens;
+}
+
+// Waits for an open of the other end, which counts even
+// if that end is closed again by the time the waiter runs.
+// The counters are read through the pipe: the wait passes
+// on the lock in it, so the compiler reads them again after it
+static int wait_partner_locked(pipe_t* restrict pipe, bool for_writer, bool* restrict intr_state)
+{
+    unsigned seen = partner_opens_locked(pipe, for_writer);
+
+    for(;;) {
+        bool open = partner_open_locked(pipe, for_writer);
+        bool came = partner_opens_locked(pipe, for_writer) != seen;
+
+        if(open || came) {
+            return 0;
+        }
+
+        event_t* partner = &pipe->partner;
+        ssize_t result = event_await_unlock(&partner, 1, &pipe->lock, *intr_state, 0);
+
+        *intr_state = spinlock_acquire_intr(&pipe->lock);
+
+        if(result < 0) {
+            return result;
+        }
+    }
+}
+
+// An open for reading waits for a writer and one for writing
+// waits for a reader, unless it is O_NONBLOCK: then a reader
+// goes on, and a writer fails with ENXIO. An open for both never waits
+static int fifo_open(vnode_t* restrict node, file_t* restrict file)
+{
+    unsigned flags = file_flags(file);
+    bool reads = file_flags_allow_read(flags);
+    bool writes = file_flags_allow_write(flags);
+    bool nonblock = flags & O_NONBLOCK;
+
+    pipe_t* pipe = attach_fifo(node);
+
+    if(pipe == nullptr) {
+        return -ENOMEM;
+    }
+
+    bool intr_state = spinlock_acquire_intr(&pipe->lock);
+
+    bool only_writes = writes && !reads;
+    bool no_reader = only_writes && pipe->readers == 0;
+
+    if(no_reader && nonblock) {
+        spinlock_release_intr(&pipe->lock, intr_state);
+        detach_fifo(node);
+        return -ENXIO;
+    }
+
+    count_open_locked(pipe, flags);
+
+    int retval = 0;
+
+    if(reads && !writes && !nonblock) {
+        retval = wait_partner_locked(pipe, true, &intr_state);
+    }
+
+    if(no_reader) {
+        retval = wait_partner_locked(pipe, false, &intr_state);
+    }
+
+    if(retval < 0) {
+        count_close_locked(pipe, flags);
+    }
+
+    spinlock_release_intr(&pipe->lock, intr_state);
+
+    if(retval < 0) {
+        detach_fifo(node);
+    }
+
+    return retval;
+}
+
+static int fifo_close(vnode_t* restrict node, file_t* restrict file)
+{
+    pipe_t* pipe = node->special_data;
+
+    bool intr_state = spinlock_acquire_intr(&pipe->lock);
+    count_close_locked(pipe, file_flags(file));
+    spinlock_release_intr(&pipe->lock, intr_state);
+
+    detach_fifo(node);
+
+    return 0;
+}
+
+const vnode_ops_t pipe_fifo_ops = {
+    .open = &fifo_open,
+    .close = &fifo_close,
+    .read = &pipe_vnode_read,
+    .write = &pipe_vnode_write,
+    .seek = &pipe_vnode_seek,
+    .ioctl = &pipe_vnode_ioctl,
+    .poll = &pipe_vnode_poll,
 };
 
 static int pipefs_mount(vfs_t* restrict fs, const block_interface_t* restrict volume, const cmdline_t* restrict params)
@@ -503,28 +721,20 @@ int pipe_create(unsigned flags, const credentials_t* restrict credentials, file_
         return -ENOSYS;
     }
 
-    pipe_t* pipe = slab_alloc(sizeof(pipe_t));
+    pipe_t* pipe = pipe_alloc(credentials->euid, credentials->egid);
 
     if(pipe == nullptr) {
         return -ENOMEM;
     }
 
-    pipe->lock = SPINLOCK_INIT;
-    pipe->write_offset = PAGE_SIZE;
-    pipe->uid = credentials->euid;
-    pipe->gid = credentials->egid;
-
-    event_init(&pipe->readable);
-    event_init(&pipe->writable);
-
-    vnode_t* node = vnode_alloc(VNODE_FIFO, &pipe_vnode_ops, pipe);
+    vnode_t* node = vnode_alloc(VNODE_FIFO, &pipe_vnode_ops, nullptr);
 
     if(node == nullptr) {
-        event_deinit(&pipe->readable);
-        event_deinit(&pipe->writable);
-        slab_free(pipe);
+        pipe_free(pipe);
         return -ENOMEM;
     }
+
+    node->special_data = pipe;
 
     node->fs = pipefs;
     node->ino = atomic_fetch_add(&next_ino, 1, ATOMIC_RELAXED);
