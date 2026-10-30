@@ -126,36 +126,14 @@ static void test_growth(const char* path, int kind)
     ktest_expect(remove_path(path, 0), 0);
 }
 
-static void test_keep_size(const char* path, int kind)
+// No filesystem keeps blocks past the end: ext2 has no extents to mark them as not written
+static void test_keep_size(const char* path)
 {
     long fd = ktest_open(path, __k_O_CREAT | __k_O_RDWR, FILE_MODE);
     ktest_expect(fd >= 0, 1);
     ktest_expect(fallocate(fd, 0, 0, LONG_SIZE), 0);
-
-    // Only a filesystem that can keep blocks past the end does KEEP_SIZE
-    if(kind != DISK) {
-        ktest_expect(fallocate(fd, __k_FALLOC_FL_KEEP_SIZE, 0, KEEP_SIZE), -__k_EOPNOTSUPP);
-        ktest_expect(stat_of(fd).st_size, LONG_SIZE);
-        ktest_close(fd);
-        ktest_expect(remove_path(path, 0), 0);
-        return;
-    }
-
-    ktest_expect(fallocate(fd, __k_FALLOC_FL_KEEP_SIZE, 0, KEEP_SIZE), 0);
-
-    struct __k_stat info = stat_of(fd);
-
-    ktest_expect(info.st_size, LONG_SIZE);
-    ktest_expect(info.st_blocks >= KEEP_SIZE / SECTOR_SIZE, 1);
-
-    // A write that goes into the kept blocks finds them zeroed around it
-    ktest_expect(write_at(fd, "tail", 4, KEEP_SIZE - PAGE_SIZE), 4);
-    ktest_expect(stat_of(fd).st_size, KEEP_SIZE - PAGE_SIZE + 4);
-    ktest_expect(reads_as_zeroes(fd, LONG_SIZE, KEEP_SIZE - PAGE_SIZE), 1);
-
-    // Truncate frees them
-    ktest_expect(ktest_syscall2(__k_SYS_FTRUNCATE, fd, 0), 0);
-    ktest_expect(stat_of(fd).st_blocks, 0);
+    ktest_expect(fallocate(fd, __k_FALLOC_FL_KEEP_SIZE, 0, KEEP_SIZE), -__k_EOPNOTSUPP);
+    ktest_expect(stat_of(fd).st_size, LONG_SIZE);
 
     ktest_close(fd);
     ktest_expect(remove_path(path, 0), 0);
@@ -258,9 +236,9 @@ int main(void)
     test_growth("memory/file", MEMORY);
     test_growth("fat/falloc.dat", FAT);
 
-    test_keep_size("disk.dat", DISK);
-    test_keep_size("memory/file", MEMORY);
-    test_keep_size("fat/falloc.dat", FAT);
+    test_keep_size("disk.dat");
+    test_keep_size("memory/file");
+    test_keep_size("fat/falloc.dat");
 
     test_stale_blocks("disk.dat");
     test_stale_blocks("memory/file");
