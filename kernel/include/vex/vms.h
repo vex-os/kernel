@@ -40,6 +40,8 @@ struct vm_region_s {
     bool may_write;
     bool device;
     bool noreserve;
+    bool grows_down;          // A stack: a fault under it moves start down, as far as grow_floor
+    virt_addr_t grow_floor;   // The lowest start of a stack
     vm_region_t* device_next; // In the list of device regions vms_revoke walks
     pmap_t* device_pmap;      // The page table of a device region, for vms_revoke
 };
@@ -55,6 +57,11 @@ vmspace_t* vms_create(void) __nodiscard;
 /// @pre No hart has the address space loaded
 /// @note Nothing flushes the TLB entries that the address space left
 void vms_release(vmspace_t* restrict vmspace);
+
+/// Maps private anonymous memory that grows down on a fault under it, as far as floor
+/// @note The growth takes its pages from the commit limit only when it happens, and fails with a fault
+/// that finds no memory. A gap of free address space has to stay under the stack for it to grow
+int vms_map_stack(vmspace_t* restrict vmspace, virt_addr_t floor, virt_addr_t start, virt_addr_t end, unsigned vprot);
 
 /// @retval -EEXIST The range overlaps an existing mapping; vms_map_replace unmaps it instead
 int vms_map(vmspace_t* restrict vmspace, virt_addr_t start, virt_addr_t end, unsigned vprot, unsigned flags,

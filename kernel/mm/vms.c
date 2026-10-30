@@ -23,6 +23,11 @@
 
 #define FREE_BATCH 64
 
+// Free address space a stack keeps under
+// it to grow into, as stack_guard_gap in Linux
+#define STACK_GUARD_PAGES (UINT64_C(256))
+#define STACK_GUARD_BYTES (STACK_GUARD_PAGES * PAGE_SIZE)
+
 typedef struct user_access_s user_access_t;
 
 struct user_access_s {
@@ -132,6 +137,8 @@ static int split_region(vmspace_t* restrict vmspace, virt_addr_t virt)
     upper->may_write = region->may_write;
     upper->device = region->device;
     upper->noreserve = region->noreserve;
+    upper->grows_down = region->grows_down; // Only the lowest part has the free gap under it to grow into
+    upper->grow_floor = region->grow_floor;
     upper->next = region->next;
 
     // Under the lock, so vms_revoke finds the pages above virt in one region or the other
@@ -321,9 +328,59 @@ static int fault_device_locked(vmspace_t* restrict vmspace, const vm_region_t* r
     return pmap_map(vmspace->pmap, page, phys, region->vprot | (cache & VPROT_CACHE_MASK) | VPROT_USER);
 }
 
+static vm_region_t* region_above(vmspace_t* restrict vmspace, virt_addr_t virt)
+{
+    for(vm_region_t* it = vmspace->regions; it; it = it->next) {
+        if(address_greater(it->start, virt)) {
+            return it;
+        }
+    }
+
+    return nullptr;
+}
+
+/// A stack grows down to the page that faulted under it, as Linux does, also when the fault skips pages
+/// @return The stack, or nullptr when the page is past its floor, too close to another mapping, or over the commit limit
+static vm_region_t* grow_stack_locked(vmspace_t* restrict vmspace, virt_addr_t page)
+{
+    vm_region_t* stack = region_above(vmspace, page);
+
+    if(stack == nullptr || !stack->grows_down) {
+        return nullptr;
+    }
+
+    if(address_less(page, stack->grow_floor)) {
+        return nullptr;
+    }
+
+    virt_addr_t gap_start = virt_addr(0);
+
+    if(page.value > STACK_GUARD_BYTES) {
+        gap_start = address_sub(page, STACK_GUARD_BYTES);
+    }
+
+    if(!range_free(vmspace, gap_start, page)) {
+        return nullptr;
+    }
+
+    size_t pages = page_count(address_diff(stack->start, page));
+
+    if(region_counted(stack) && commit_charge(pages) < 0) {
+        return nullptr;
+    }
+
+    stack->start = page;
+
+    return stack;
+}
+
 static int fault_locked(vmspace_t* restrict vmspace, virt_addr_t page, unsigned access, bool exclusive)
 {
     vm_region_t* region = find_region(vmspace, page);
+
+    if(region == nullptr) {
+        region = grow_stack_locked(vmspace, page);
+    }
 
     if(region == nullptr) {
         return -EFAULT;
@@ -754,6 +811,25 @@ int vms_map(vmspace_t* restrict vmspace, virt_addr_t start, virt_addr_t end, uns
     return 0;
 }
 
+int vms_map_stack(vmspace_t* restrict vmspace, virt_addr_t floor, virt_addr_t start, virt_addr_t end, unsigned vprot)
+{
+    int retval = vms_map(vmspace, start, end, vprot, 0, nullptr);
+
+    if(retval < 0) {
+        return retval;
+    }
+
+    mutex_acquire(&vmspace->lock);
+
+    vm_region_t* stack = find_region(vmspace, start);
+    stack->grows_down = true;
+    stack->grow_floor = floor;
+
+    mutex_release(&vmspace->lock);
+
+    return 0;
+}
+
 int vms_map_replace(vmspace_t* restrict vmspace, virt_addr_t start, virt_addr_t end, unsigned vprot, unsigned flags,
     const vm_backing_t* restrict backing)
 {
@@ -1070,6 +1146,8 @@ int vms_clone(vmspace_t* restrict vmspace, vmspace_t* restrict source)
             break;
         }
 
+        region->grows_down = it->grows_down;
+        region->grow_floor = it->grow_floor;
         region->next = nullptr;
         *tail = region;
         tail = &region->next;
