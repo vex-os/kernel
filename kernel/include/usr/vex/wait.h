@@ -9,6 +9,18 @@
 #define __k_WUNTRACED  0x0002 /* Report a child that stopped */
 #define __k_WCONTINUED 0x0008 /* Report a child that continued */
 
+/* The options that only waitid takes. WSTOPPED is WUNTRACED under its other name */
+
+#define __k_WSTOPPED 0x0002
+#define __k_WEXITED  0x0004     /* Report a child that exited */
+#define __k_WNOWAIT  0x01000000 /* Leave the child to be waited for again */
+
+/* What waitid waits for */
+
+#define __k_P_ALL  0
+#define __k_P_PID  1
+#define __k_P_PGID 2
+
 /* The low seven bits hold the terminating signal, zero for a normal exit */
 
 #define __k_W_EXITCODE(code, sig) (((__k_int32_t)((code) & 0xFF) << 8) | ((sig) & 0x7F))

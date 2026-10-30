@@ -22,11 +22,14 @@
 
 #include "syscall_internal.h"
 
-typedef struct job_report_s job_report_t;
+typedef struct wait_result_s wait_result_t;
 
-// A stop or a continue that a waiter took from a child of the caller
-struct job_report_s {
+// What a wait found about a child. The code is a CLD_* value, and the status
+// is the exit code, the signal that ended or stopped the child, or SIGCONT
+struct wait_result_s {
     pid_t pid;
+    uid_t uid;
+    int code;
     int status;
 };
 
@@ -269,54 +272,85 @@ static intptr_t exec_image(thread_t* restrict thread, char* restrict image_path,
     return 0;
 }
 
-static intptr_t collect_child(process_t* restrict target, user_addr_t wstatus)
+static void fill_exited(wait_result_t* restrict out, const process_t* restrict child)
 {
-    int status = W_EXITCODE(target->exit_code, target->exit_signal);
+    out->pid = child->pid;
+    out->uid = child->credentials->uid;
+    out->code = CLD_EXITED;
+    out->status = child->exit_code;
+
+    if(child->exit_signal) {
+        out->code = CLD_KILLED;
+        out->status = child->exit_signal;
+    }
+}
+
+static intptr_t collect_child(process_t* restrict target, uintptr_t options, wait_result_t* restrict result)
+{
+    fill_exited(result, target);
+
     intptr_t retval = target->pid;
 
-    if(wstatus.value) {
-        ssize_t copied = user_copyout(wstatus, &status, sizeof(status));
-
-        if(copied < 0) {
-            retval = copied;
-        }
+    if(0 == (options & WNOWAIT)) {
+        process_destroy(target);
     }
 
-    process_destroy(target);
     process_decref(target);
 
     return retval;
 }
 
-// A stop or a continue is reported once, and the child stays where it is
-static intptr_t report_child(pid_t pid, int status, user_addr_t wstatus)
+// WNOWAIT only looks, and leaves the report for the next wait
+static bool take_report(process_t* restrict child, unsigned bit, uintptr_t options)
 {
-    if(wstatus.value) {
-        ssize_t copied = user_copyout(wstatus, &status, sizeof(status));
-
-        if(copied < 0) {
-            return copied;
-        }
+    if(options & WNOWAIT) {
+        return atomic_load_n(&child->job.report, ATOMIC_ACQUIRE) & bit;
     }
 
-    return pid;
+    return job_claim_report(child, bit);
 }
 
-static bool take_job_report(process_t* restrict child, uintptr_t options, job_report_t* restrict out)
+static bool take_job_report(process_t* restrict child, uintptr_t options, wait_result_t* restrict out)
 {
-    if((options & WUNTRACED) && job_claim_report(child, JOB_REPORT_STOPPED)) {
-        out->pid = child->pid;
-        out->status = W_STOPCODE(child->job.stop_signal);
-        return true;
+    bool stopped = (options & WSTOPPED) && take_report(child, JOB_REPORT_STOPPED, options);
+    bool continued = !stopped && (options & WCONTINUED) && take_report(child, JOB_REPORT_CONTINUED, options);
+
+    if(!stopped && !continued) {
+        return false;
     }
 
-    if((options & WCONTINUED) && job_claim_report(child, JOB_REPORT_CONTINUED)) {
-        out->pid = child->pid;
-        out->status = W_CONTINUED;
-        return true;
+    out->pid = child->pid;
+    out->uid = child->credentials->uid;
+    out->code = CLD_CONTINUED;
+    out->status = SIGCONT;
+
+    if(stopped) {
+        out->code = CLD_STOPPED;
+        out->status = child->job.stop_signal;
     }
 
-    return false;
+    return true;
+}
+
+// A zombie is claimed, and so reaped, only when the caller asks for exits and does not say WNOWAIT
+static process_t* take_zombie(process_t* restrict child, uintptr_t options)
+{
+    if(0 == (options & WEXITED)) {
+        return nullptr;
+    }
+
+    if(options & WNOWAIT) {
+        if(0 == (atomic_load_n(&child->flags, ATOMIC_ACQUIRE) & PROCESS_ZOMBIE)) {
+            return nullptr;
+        }
+    }
+    else if(!process_claim(child)) {
+        return nullptr;
+    }
+
+    process_incref(child);
+
+    return child;
 }
 
 // A group to wait for is compared by address, which the
@@ -330,13 +364,14 @@ static bool wait_matches(process_t* restrict child, pid_t pid, const process_gro
     return pid == -1 || child->pid == pid;
 }
 
-static intptr_t wait_child(process_t* restrict caller, pid_t pid, const process_group_t* restrict group, user_addr_t wstatus,
-    uintptr_t options)
+// @retval 0 With WNOHANG, no child has anything to report
+static intptr_t wait_child(process_t* restrict caller, pid_t pid, const process_group_t* restrict group, uintptr_t options,
+    wait_result_t* restrict result)
 {
     for(;;) {
         process_t* target = nullptr;
         bool has_match = false;
-        job_report_t report = {};
+        bool reported = false;
 
         bool intr_state = spinlock_acquire_intr(&caller->lock);
 
@@ -351,21 +386,22 @@ static intptr_t wait_child(process_t* restrict caller, pid_t pid, const process_
             }
 
             has_match = true;
+            target = take_zombie(it, options);
 
-            if(process_claim(it)) {
-                process_incref(it);
-                target = it;
+            if(target) {
                 break;
             }
 
-            if(take_job_report(it, options, &report)) {
+            reported = take_job_report(it, options, result);
+
+            if(reported) {
                 break;
             }
         }
 
-        if(report.pid) {
+        if(reported) {
             spinlock_release_intr(&caller->lock, intr_state);
-            return report_child(report.pid, report.status, wstatus);
+            return result->pid;
         }
 
         if(target == nullptr && has_match) {
@@ -375,10 +411,10 @@ static intptr_t wait_child(process_t* restrict caller, pid_t pid, const process_
             }
 
             event_t* child_exited = &caller->child_exited;
-            ssize_t result = event_await_unlock(&child_exited, 1, &caller->lock, intr_state, 0);
+            ssize_t result_wait = event_await_unlock(&child_exited, 1, &caller->lock, intr_state, 0);
 
-            if(result < 0) {
-                return result;
+            if(result_wait < 0) {
+                return result_wait;
             }
 
             continue;
@@ -390,7 +426,54 @@ static intptr_t wait_child(process_t* restrict caller, pid_t pid, const process_
             return -ECHILD;
         }
 
-        return collect_child(target, wstatus);
+        return collect_child(target, options, result);
+    }
+}
+
+// Waits as waitpid and waitid say, once the pid is a pid, -1, zero for the group of the caller, or minus a group
+static intptr_t wait_selected(process_t* restrict caller, pid_t pid, uintptr_t options, wait_result_t* restrict result)
+{
+    if(pid > 0 || pid == -1) {
+        return wait_child(caller, pid, nullptr, options, result);
+    }
+
+    if(pid == INT32_MIN) {
+        return -ECHILD; // No group has the negated id
+    }
+
+    process_group_t* group;
+
+    if(pid == 0) {
+        group = process_get_group(caller);
+    }
+    else {
+        group = process_group_find(-pid);
+    }
+
+    if(group == nullptr) {
+        return -ECHILD;
+    }
+
+    intptr_t retval = wait_child(caller, pid, group, options, result);
+    process_group_decref(group);
+
+    return retval;
+}
+
+static int status_of(const wait_result_t* restrict result)
+{
+    switch(result->code) {
+        case CLD_STOPPED:
+            return W_STOPCODE(result->status);
+
+        case CLD_CONTINUED:
+            return W_CONTINUED;
+
+        case CLD_KILLED:
+            return W_EXITCODE(0, result->status);
+
+        default:
+            return W_EXITCODE(result->status, 0);
     }
 }
 
@@ -495,34 +578,100 @@ static intptr_t sys_waitpid(pid_t pid, user_addr_t wstatus, uintptr_t options)
         return -ECHILD;
     }
 
-    if(pid > 0 || pid == -1) {
-        return wait_child(caller, pid, nullptr, wstatus, options);
+    wait_result_t result = {};
+    intptr_t retval = wait_selected(caller, pid, options | WEXITED, &result);
+
+    if(retval <= 0 || wstatus.value == 0) {
+        return retval;
     }
 
-    if(pid == INT32_MIN) {
-        return -ECHILD; // No group has the negated id
-    }
+    int status = status_of(&result);
+    ssize_t copied = user_copyout(wstatus, &status, sizeof(status));
 
-    process_group_t* group;
-
-    if(pid == 0) {
-        group = process_get_group(caller);
+    if(copied < 0) {
+        return copied;
     }
-    else {
-        group = process_group_find(-pid);
-    }
-
-    if(group == nullptr) {
-        return -ECHILD;
-    }
-
-    intptr_t retval = wait_child(caller, pid, group, wstatus, options);
-    process_group_decref(group);
 
     return retval;
 }
 
 define_syscall(sys_waitpid, SYS_WAITPID, 3);
+
+static pid_t wait_selector(unsigned idtype, pid_t id)
+{
+    switch(idtype) {
+        case P_ALL:
+            return -1;
+
+        case P_PID:
+            return id;
+
+        case P_PGID:
+            return -id;
+
+        default:
+            return INT32_MIN;
+    }
+}
+
+// Zero in si_signo and si_pid says that WNOHANG found nothing, as POSIX has it
+static intptr_t sys_waitid(unsigned idtype, pid_t id, user_addr_t info, uintptr_t options)
+{
+    uintptr_t known = WNOHANG | WNOWAIT | WEXITED | WSTOPPED | WCONTINUED;
+
+    if((options & ~known) || 0 == (options & (WEXITED | WSTOPPED | WCONTINUED))) {
+        return -EINVAL;
+    }
+
+    if(idtype != P_ALL && idtype != P_PID && idtype != P_PGID) {
+        return -EINVAL;
+    }
+
+    thread_t* thread = this_thread();
+    process_t* caller = thread->process;
+
+    if(caller == nullptr) {
+        return -ECHILD;
+    }
+
+    // A group with the id zero is the one of the caller, and a process with it does not exist
+    pid_t selector = wait_selector(idtype, id);
+
+    if(id < 0 || (idtype == P_PID && id == 0)) {
+        return -ECHILD;
+    }
+
+    wait_result_t result = {};
+    intptr_t retval = wait_selected(caller, selector, options, &result);
+
+    if(retval < 0) {
+        return retval;
+    }
+
+    if(info.value == 0) {
+        return 0;
+    }
+
+    siginfo_t reply = {};
+
+    if(retval > 0) {
+        reply.si_signo = SIGCHLD;
+        reply.si_code = result.code;
+        reply.si_pid = result.pid;
+        reply.si_uid = result.uid;
+        reply.si_status = result.status;
+    }
+
+    ssize_t copied = user_copyout(info, &reply, sizeof(reply));
+
+    if(copied < 0) {
+        return copied;
+    }
+
+    return 0;
+}
+
+define_syscall(sys_waitid, SYS_WAITID, 4);
 
 static intptr_t sys_getpid(void)
 {
