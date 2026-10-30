@@ -42,6 +42,11 @@
 #define __k_LOCK_NB 0x0004
 #define __k_LOCK_UN 0x0008
 
+/* Modes of fallocate. Mode 0 makes sure that the storage of the range exists, and makes the file longer if
+ * the range ends past its end. With KEEP_SIZE the file keeps its length. The other modes of Linux (punching
+ * a hole, zeroing, collapsing, inserting a range) do not exist */
+#define __k_FALLOC_FL_KEEP_SIZE 0x01
+
 #define __k_SEEK_SET 0
 #define __k_SEEK_CUR 1
 #define __k_SEEK_END 2

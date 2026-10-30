@@ -132,6 +132,15 @@ struct vnode_ops_s {
     int (*stat)(vnode_t* restrict node, stat_t* restrict out);
     int (*fsync)(vnode_t* restrict node);
 
+    /// Makes sure that the storage of the range exists, so that a write into it does not fail for lack of space
+    /// @pre The file is a regular one, offset is not negative, length is positive, offset + length does not overflow,
+    /// and mode has no bits but FALLOC_FL_KEEP_SIZE
+    /// @param mode 0 also makes the file longer if the range ends past its end. KEEP_SIZE leaves the size alone
+    /// @retval -EOPNOTSUPP The filesystem cannot do this mode
+    /// @retval -ENOSPC The storage ran out. What was made stays, and so does the size
+    /// @post What was newly made reads as zeroes. The mtime and the ctime move if anything changed
+    int (*fallocate)(vnode_t* restrict node, unsigned mode, off_t offset, off_t length);
+
     /// @pre Permission checks are done, and the VFS has set the ctime, and the mtime for a size change,
     /// unless the caller did
     int (*set_attr)(vnode_t* restrict node, const vnode_attr_t* restrict attr);
@@ -240,6 +249,13 @@ int vnode_remove_privs(vnode_t* restrict node, const credentials_t* restrict cre
 int vnode_ioctl(vnode_t* restrict node, file_t* restrict file, uint32_t request, uintptr_t argument);
 unsigned vnode_poll(vnode_t* restrict node, file_t* restrict file, poll_table_t* restrict table);
 int vnode_fsync(vnode_t* restrict node);
+
+/// @retval -EOPNOTSUPP The filesystem has no fallocate operation
+int vnode_fallocate(vnode_t* restrict node, unsigned mode, off_t offset, off_t length);
+
+/// The fallocate operation of a filesystem that stores no holes: making a file longer is what allocates its storage
+/// @retval -EOPNOTSUPP mode is not 0
+int vnode_fallocate_grow(vnode_t* restrict node, unsigned mode, off_t offset, off_t length);
 
 /// @retval VMS_FAULT_MINOR The page was in the cache
 /// @retval VMS_FAULT_MAJOR The page had to be read in first

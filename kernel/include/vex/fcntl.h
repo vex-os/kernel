@@ -39,6 +39,8 @@
 #define LOCK_NB __k_LOCK_NB
 #define LOCK_UN __k_LOCK_UN
 
+#define FALLOC_FL_KEEP_SIZE __k_FALLOC_FL_KEEP_SIZE
+
 #define F_OK __k_F_OK
 #define X_OK __k_X_OK
 #define W_OK __k_W_OK

@@ -43,6 +43,15 @@ ssize_t file_write(file_t* restrict file, const credentials_t* restrict credenti
     off_t* restrict position);
 
 int file_truncate(file_t* restrict file, const credentials_t* restrict credentials, off_t size);
+
+/// @retval -EBADF The file is not open for writing
+/// @retval -ESPIPE The file is a FIFO
+/// @retval -EISDIR The file is a directory
+/// @retval -ENODEV The file is not a regular file
+/// @retval -EFBIG The range ends past the largest offset
+/// @retval -EOPNOTSUPP A mode the kernel does not have, or one that the filesystem does not do
+int file_fallocate(file_t* restrict file, const credentials_t* restrict credentials, uintptr_t mode, off_t offset, off_t length);
+
 off_t file_seek(file_t* restrict file, off_t offset, int origin);
 int file_ioctl(file_t* restrict file, uint32_t request, uintptr_t argument);
 unsigned file_poll(file_t* restrict file, poll_table_t* restrict table);

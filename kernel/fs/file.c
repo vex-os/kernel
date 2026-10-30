@@ -269,6 +269,51 @@ int file_truncate(file_t* restrict file, const credentials_t* restrict credentia
     return vnode_set_attr(file->node, &attr);
 }
 
+int file_fallocate(file_t* restrict file, const credentials_t* restrict credentials, uintptr_t mode, off_t offset, off_t length)
+{
+    if(file == nullptr) {
+        return -EINVAL;
+    }
+
+    if(!file_flags_allow_write(file->flags)) {
+        return -EBADF;
+    }
+
+    unsigned type = file->node->type;
+
+    if(type == VNODE_FIFO) {
+        return -ESPIPE;
+    }
+
+    if(type == VNODE_DIRECTORY) {
+        return -EISDIR;
+    }
+
+    if(type != VNODE_FILE) {
+        return -ENODEV;
+    }
+
+    if(offset < 0 || length <= 0) {
+        return -EINVAL;
+    }
+
+    if(offset > INT64_MAX - length) {
+        return -EFBIG;
+    }
+
+    if(mode & ~(uintptr_t)(FALLOC_FL_KEEP_SIZE)) {
+        return -EOPNOTSUPP;
+    }
+
+    int retval = vnode_remove_privs(file->node, credentials);
+
+    if(retval < 0) {
+        return retval;
+    }
+
+    return vnode_fallocate(file->node, mode, offset, length);
+}
+
 off_t file_seek(file_t* restrict file, off_t offset, int origin)
 {
     if(file == nullptr) {
