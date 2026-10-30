@@ -22,6 +22,7 @@ kernel_sources += files(
     'sys_futex.c',
     'sys_mman.c',
     'sys_process.c',
+    'sys_random.c',
     'sys_signal.c',
     'sys_thread.c',
     'sys_time.c',

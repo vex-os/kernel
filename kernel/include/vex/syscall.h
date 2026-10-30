@@ -133,6 +133,7 @@ typedef struct vnode_s vnode_t;
 #define SYS_GETRLIMIT   __k_SYS_GETRLIMIT
 #define SYS_SETRLIMIT   __k_SYS_SETRLIMIT
 #define SYS_GETRUSAGE   __k_SYS_GETRUSAGE
+#define SYS_GETRANDOM   __k_SYS_GETRANDOM
 
 typedef struct syscall_s syscall_t;
 
