@@ -383,7 +383,6 @@ static intptr_t sys_munlock(user_addr_t addr, uintptr_t length)
 
 define_syscall(sys_munlock, SYS_MUNLOCK, 2);
 
-// UNDONE: As for mlock, and MCL_FUTURE has to reach the mappings made later
 static intptr_t sys_mremap(user_addr_t addr, uintptr_t old_size, uintptr_t new_size, uintptr_t flags)
 {
     thread_t* thread = this_thread();
@@ -425,6 +424,8 @@ static intptr_t sys_mremap(user_addr_t addr, uintptr_t old_size, uintptr_t new_s
 
 define_syscall(sys_mremap, SYS_MREMAP, 4);
 
+// UNDONE: As for mlock, and MCL_FUTURE
+// has to reach the mappings made later
 static intptr_t sys_mlockall(uintptr_t flags)
 {
     thread_t* thread = this_thread();
