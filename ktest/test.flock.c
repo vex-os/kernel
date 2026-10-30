@@ -277,6 +277,95 @@ static void test_errors(long fd)
     ktest_expect(ktest_syscall3(__k_SYS_FCNTL, fd, __k_F_SETLK, 1), -__k_EFAULT);
 }
 
+static long flock_fd(long fd, long operation)
+{
+    return ktest_syscall2(__k_SYS_FLOCK, fd, operation);
+}
+
+// flock locks the open file, so two opens conflict even in one process, and a copy of the descriptor shares the lock
+static void test_flock(void)
+{
+    long first = open_data(__k_O_RDONLY); // No write access needed, unlike F_WRLCK
+    long second = open_data(__k_O_RDONLY);
+
+    ktest_expect(flock_fd(first, __k_LOCK_EX), 0);
+    ktest_expect(flock_fd(second, __k_LOCK_EX | __k_LOCK_NB), -__k_EAGAIN);
+    ktest_expect(flock_fd(second, __k_LOCK_SH | __k_LOCK_NB), -__k_EAGAIN);
+
+    long copy = ktest_syscall3(__k_SYS_FCNTL, first, __k_F_DUPFD, 0);
+    ktest_assert(copy >= 0);
+    ktest_close(copy);
+    ktest_expect(flock_fd(second, __k_LOCK_SH | __k_LOCK_NB), -__k_EAGAIN);
+
+    ktest_expect(flock_fd(first, __k_LOCK_SH), 0);
+    ktest_expect(flock_fd(second, __k_LOCK_SH | __k_LOCK_NB), 0);
+
+    // A change of type drops the old lock first, so the failed one leaves second with nothing
+    ktest_expect(flock_fd(second, __k_LOCK_EX | __k_LOCK_NB), -__k_EAGAIN);
+    ktest_expect(flock_fd(first, __k_LOCK_EX | __k_LOCK_NB), 0);
+
+    // It meets the locks of fcntl, also those of the same process
+    ktest_expect(lock_range(second, __k_F_RDLCK, 0, 1), -__k_EAGAIN);
+
+    // The last close of the open file drops it
+    ktest_close(first);
+    ktest_expect(flock_fd(second, __k_LOCK_EX | __k_LOCK_NB), 0);
+    ktest_expect(flock_fd(second, __k_LOCK_EX | __k_LOCK_NB), 0);
+    ktest_expect(flock_fd(second, __k_LOCK_UN), 0);
+
+    ktest_expect(flock_fd(second, 0), -__k_EINVAL);
+    ktest_expect(flock_fd(second, __k_LOCK_SH | __k_LOCK_EX), -__k_EINVAL);
+    ktest_expect(flock_fd(second, 16), -__k_EINVAL);
+    ktest_expect(flock_fd(-1, __k_LOCK_SH), -__k_EBADF);
+
+    ktest_close(second);
+}
+
+static long ofd_range(long fd, short type, long start, long length)
+{
+    return set_lock(fd, __k_F_OFD_SETLK, type, __k_SEEK_SET, start, length);
+}
+
+// A lock of an open file survives the close of other descriptors, and F_GETLK reports it with pid -1
+static void test_ofd(void)
+{
+    long first = open_data(__k_O_RDWR);
+    long second = open_data(__k_O_RDWR);
+
+    ktest_expect(ofd_range(first, __k_F_WRLCK, 0, 10), 0);
+    ktest_expect(ofd_range(second, __k_F_WRLCK, 5, 10), -__k_EAGAIN);
+
+    struct __k_flock lock = {};
+    lock.l_type = __k_F_RDLCK;
+    lock.l_whence = __k_SEEK_SET;
+    lock.l_start = 0;
+    lock.l_len = 1;
+
+    ktest_expect(ktest_syscall3(__k_SYS_FCNTL, second, __k_F_OFD_GETLK, (long)(&lock)), 0);
+    ktest_expect(lock.l_type, __k_F_WRLCK);
+    ktest_expect(lock.l_start, 0);
+    ktest_expect(lock.l_len, 10);
+    ktest_expect(lock.l_pid, -1);
+
+    // The process is another owner than the open file
+    lock = test_range(second, 0, 1);
+    ktest_expect(lock.l_pid, -1);
+
+    long other = open_data(__k_O_RDONLY);
+    ktest_close(other);
+    ktest_expect(ofd_range(second, __k_F_WRLCK, 5, 10), -__k_EAGAIN);
+
+    lock = (struct __k_flock) {};
+    lock.l_type = __k_F_WRLCK;
+    lock.l_pid = 5;
+    ktest_expect(ktest_syscall3(__k_SYS_FCNTL, second, __k_F_OFD_SETLK, (long)(&lock)), -__k_EINVAL);
+
+    ktest_close(first);
+    ktest_expect(ofd_range(second, __k_F_WRLCK, 5, 10), 0);
+
+    ktest_close(second);
+}
+
 int main(void)
 {
     ktest_enter_work_directory("flock");
@@ -294,6 +383,8 @@ int main(void)
     test_wait(fd);
     test_interrupt(fd);
     test_errors(fd);
+    test_flock();
+    test_ofd();
 
     ktest_close(fd);
 
