@@ -22,6 +22,7 @@
 
 #define NSEC_PER_SEC  INT64_C(1000000000)
 #define NSEC_PER_USEC INT64_C(1000)
+#define NSEC_PER_MSEC INT64_C(1000000)
 
 typedef struct __k_timespec timespec_t;
 typedef struct __k_timeval timeval_t;
