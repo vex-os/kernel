@@ -91,6 +91,7 @@ typedef struct vnode_s vnode_t;
 #define SYS_PIPE      __k_SYS_PIPE
 #define SYS_PPOLL     __k_SYS_PPOLL
 #define SYS_FLOCK     __k_SYS_FLOCK
+#define SYS_FALLOCATE __k_SYS_FALLOCATE
 
 #define SYS_FSTATAT    __k_SYS_FSTATAT
 #define SYS_FCHMODAT   __k_SYS_FCHMODAT

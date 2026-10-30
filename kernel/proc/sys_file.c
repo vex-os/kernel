@@ -462,6 +462,15 @@ static intptr_t sys_ftruncate(file_t* restrict file, off_t length)
 
 define_syscall_fd(sys_ftruncate, SYS_FTRUNCATE, 2);
 
+static intptr_t sys_fallocate(file_t* restrict file, uintptr_t mode, off_t offset, off_t length)
+{
+    thread_t* thread = this_thread();
+
+    return file_fallocate(file, thread->credentials, mode, offset, length);
+}
+
+define_syscall_fd(sys_fallocate, SYS_FALLOCATE, 4);
+
 static intptr_t sys_fstat(file_t* restrict file, user_addr_t stat)
 {
     stat_t st;
