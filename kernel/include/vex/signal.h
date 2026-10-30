@@ -126,9 +126,18 @@ void signal_actions_exec(signal_actions_t* restrict signal_actions);
 /// Queues an asynchronous signal; SIGKILL ends the process at once, and init
 /// only ever receives signals it handles
 /// @param tid A thread of the process, or zero for whichever thread can take it
+/// @note A standard signal that is pending already is merged with the new one. A signal from SIGRTMIN up gets its own entry
+/// as long as the queue has room, and merges when it has none
 /// @retval 0 Queued, merged with one already pending, or dropped as ignored
 /// @retval -ESRCH No such thread in the process
 int signal_send(process_t* restrict process, pid_t tid, const siginfo_t* restrict info);
+
+/// Queues a signal with its siginfo for the process, as sigqueue does
+/// @pre The siginfo carries the value and the sender, and its code is SI_QUEUE
+/// @note A signal from SIGRTMIN up queues once per call. The queue of the process holds RLIMIT_SIGPENDING signals at most
+/// @retval 0 Queued, or dropped as ignored
+/// @retval -EAGAIN The limit is reached, a standard signal of this number is pending already, or there is no memory
+int signal_queue(process_t* restrict process, const siginfo_t* restrict info);
 
 /// Queues an asynchronous signal with no siginfo of its own, so that it allocates nothing and the scheduler tick can send it
 /// @note The receiver gets SI_KERNEL. The same rules apply as in signal_send

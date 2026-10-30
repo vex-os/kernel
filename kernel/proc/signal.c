@@ -4,6 +4,7 @@
 #include <vex/pgrp.h>
 #include <vex/process.h>
 #include <vex/pslab.h>
+#include <vex/rlimit.h>
 #include <vex/sched.h>
 #include <vex/signal.h>
 #include <vex/slab.h>
@@ -100,6 +101,49 @@ static pending_signal_t* queue_take(pending_signal_t** restrict queue, int sig)
     }
 
     return nullptr;
+}
+
+static size_t queue_length(const pending_signal_t* restrict queue)
+{
+    size_t length = 0;
+
+    for(const pending_signal_t* node = queue; node; node = node->next) {
+        length += 1;
+    }
+
+    return length;
+}
+
+// The bit stays set while the queue holds more of the signal, as only the real-time ones queue more than one
+static pending_signal_t* dequeue_locked(sigset_t* restrict pending, pending_signal_t** restrict queue, int sig)
+{
+    pending_signal_t* node = queue_take(queue, sig);
+    bool more = false;
+
+    for(const pending_signal_t* it = *queue; it; it = it->next) {
+        if(it->info.si_signo == sig) {
+            more = true;
+            break;
+        }
+    }
+
+    if(!more) {
+        *pending &= ~sigbit(sig);
+    }
+
+    return node;
+}
+
+// The entries of the process and of its threads count together, as the limit is the process's
+static size_t queued_locked(const process_t* restrict process)
+{
+    size_t count = queue_length(process->sig_queue);
+
+    for(const thread_t* thread = process->threads; thread; thread = thread->process_next) {
+        count += queue_length(thread->sig_queue);
+    }
+
+    return count;
 }
 
 static void recalc_locked(thread_t* restrict thread)
@@ -219,12 +263,23 @@ static void job_effects(process_t* restrict process, int sig)
     }
 }
 
-static int queue_signal(process_t* restrict process, pid_t tid, int sig, pending_signal_t* restrict node)
+// With strict set a signal that cannot get an entry of its own fails with -EAGAIN. Otherwise it merges with the one
+// pending, or goes in with no siginfo: kill must not lose a signal that sigqueue would refuse
+static int queue_signal(process_t* restrict process, pid_t tid, int sig, pending_signal_t* restrict node, bool strict)
 {
     job_effects(process, sig);
 
     signal_actions_t* signal_actions = process->signal_actions;
     sigset_t bit = sigbit(sig);
+    bool realtime = sig >= SIGRTMIN;
+
+    // Read before the locks are taken, as it takes one of them
+    uint64_t limit = RLIM_INFINITY;
+
+    if(node && (strict || realtime)) {
+        rlimit_t rlimit = process_get_rlimit(process, RLIMIT_SIGPENDING);
+        limit = rlimit.rlim_cur;
+    }
 
     bool intr_state = spinlock_acquire_intr(&signal_actions->lock);
     bool proc_intr_state = spinlock_acquire_intr(&process->lock);
@@ -247,7 +302,24 @@ static int queue_signal(process_t* restrict process, pid_t tid, int sig, pending
         queue = &target->sig_queue;
     }
 
-    if(*pending & bit) {
+    bool full = node && limit != RLIM_INFINITY && queued_locked(process) >= limit;
+
+    if(full && !strict) {
+        slab_free(node);
+        node = nullptr;
+    }
+
+    // Only the real-time signals queue more than one entry
+    bool merges = (*pending & bit) && (!realtime || node == nullptr);
+
+    if(strict && (full || merges)) {
+        spinlock_release_intr(&process->lock, proc_intr_state);
+        spinlock_release_intr(&signal_actions->lock, intr_state);
+        slab_free(node);
+        return -EAGAIN;
+    }
+
+    if(merges) {
         spinlock_release_intr(&process->lock, proc_intr_state);
         spinlock_release_intr(&signal_actions->lock, intr_state);
         slab_free(node);
@@ -343,9 +415,7 @@ static bool deliver(hart_context_t* restrict ctx, bool handlers)
         return false;
     }
 
-    *pending &= ~sigbit(sig);
-
-    pending_signal_t* node = queue_take(queue, sig);
+    pending_signal_t* node = dequeue_locked(pending, queue, sig);
     sigset_t old_mask = thread->sig_blocked;
 
     // The handler returns to the mask from before
@@ -487,17 +557,34 @@ int signal_send(process_t* restrict process, pid_t tid, const siginfo_t* restric
         node->info = *info;
     }
 
-    return queue_signal(process, tid, info->si_signo, node);
+    return queue_signal(process, tid, info->si_signo, node, false);
+}
+
+int signal_queue(process_t* restrict process, const siginfo_t* restrict info)
+{
+    if(info->si_signo == SIGKILL) {
+        return signal_send(process, 0, info);
+    }
+
+    pending_signal_t* node = slab_alloc(sizeof(pending_signal_t));
+
+    if(node == nullptr) {
+        return -EAGAIN;
+    }
+
+    node->info = *info;
+
+    return queue_signal(process, 0, info->si_signo, node, true);
 }
 
 void signal_raise(process_t* restrict process, int sig)
 {
-    queue_signal(process, 0, sig, nullptr);
+    queue_signal(process, 0, sig, nullptr, false);
 }
 
 void signal_send_node(process_t* restrict process, pending_signal_t* restrict node)
 {
-    queue_signal(process, 0, node->info.si_signo, node);
+    queue_signal(process, 0, node->info.si_signo, node, false);
 }
 
 void signal_retarget(process_t* restrict process)
@@ -695,9 +782,7 @@ int signal_take(thread_t* restrict thread, sigset_t set, siginfo_t* restrict inf
 
     int sig = __builtin_ctzll(taken) + 1;
 
-    *pending &= ~sigbit(sig);
-
-    pending_signal_t* node = queue_take(queue, sig);
+    pending_signal_t* node = dequeue_locked(pending, queue, sig);
 
     recalc_locked(thread);
 

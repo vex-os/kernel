@@ -214,6 +214,53 @@ static intptr_t sys_tgkill(pid_t pid, pid_t tid, int sig)
 
 define_syscall(sys_tgkill, SYS_TGKILL, 3);
 
+// The value goes in a register whole: sival_int is its low half on a little-endian machine
+static intptr_t sys_sigqueue(pid_t pid, int sig, uintptr_t value)
+{
+    thread_t* thread = this_thread();
+    process_t* sender = thread->process;
+
+    if(sender == nullptr) {
+        return -ESRCH;
+    }
+
+    if(sig < 0 || sig > NSIG || pid <= 0) {
+        return -EINVAL;
+    }
+
+    process_t* target = process_locate(pid);
+
+    if(target == nullptr) {
+        return -ESRCH;
+    }
+
+    credentials_t* target_cred = process_get_cred(target);
+    bool allowed = may_signal(thread->credentials, target_cred);
+    cred_decref(target_cred);
+
+    intptr_t retval = -EPERM;
+
+    if(allowed && sig == 0) {
+        retval = 0;
+    }
+    else if(allowed) {
+        siginfo_t info = {};
+        info.si_signo = sig;
+        info.si_code = SI_QUEUE;
+        info.si_pid = sender->pid;
+        info.si_uid = thread->credentials->uid;
+        info.si_value.sival_ptr = (void*)(value);
+
+        retval = signal_queue(target, &info);
+    }
+
+    process_decref(target);
+
+    return retval;
+}
+
+define_syscall(sys_sigqueue, SYS_SIGQUEUE, 3);
+
 static intptr_t sys_sigaction(int sig, user_addr_t act, user_addr_t oact)
 {
     thread_t* thread = this_thread();

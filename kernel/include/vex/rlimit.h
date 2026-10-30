@@ -11,6 +11,10 @@ typedef struct rlimits_s rlimits_t;
 /// The soft limit of the stack of a program that nothing set: the stack that the program gets from exec
 #define RLIMIT_STACK_DEFAULT (UINT64_C(1024) * CONFIG_USER_STACK_SIZE)
 
+/// The number of signals that may wait in the queues of a process, as in FreeBSD (kern.sigqueue.max_pending_per_proc)
+#define RLIMIT_SIGPENDING_DEFAULT UINT64_C(128)
+#define RLIMIT_SIGPENDING_CEILING UINT64_C(1024)
+
 /// Makes the limits that init starts with, with one reference
 rlimits_t* rlimits_create(void) __nodiscard;
 
