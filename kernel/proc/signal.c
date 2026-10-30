@@ -488,6 +488,11 @@ int signal_send(process_t* restrict process, pid_t tid, const siginfo_t* restric
     return queue_signal(process, tid, info->si_signo, node);
 }
 
+void signal_raise(process_t* restrict process, int sig)
+{
+    queue_signal(process, 0, sig, nullptr);
+}
+
 void signal_send_node(process_t* restrict process, pending_signal_t* restrict node)
 {
     queue_signal(process, 0, node->info.si_signo, node);

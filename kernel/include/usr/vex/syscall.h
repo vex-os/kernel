@@ -43,6 +43,7 @@
 #define __k_SYS_SIGALTSTACK  0x066
 #define __k_SYS_SIGSUSPEND   0x067
 #define __k_SYS_SIGTIMEDWAIT 0x068
+#define __k_SYS_SETITIMER    0x06A
 
 #define __k_SYS_GETRESUID 0x080
 #define __k_SYS_SETRESUID 0x081

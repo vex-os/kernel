@@ -16,9 +16,12 @@
 
 #define TIMER_ABSTIME __k_TIMER_ABSTIME
 
+#define ITIMER_REAL __k_ITIMER_REAL
+
 #define NSEC_PER_SEC INT64_C(1000000000)
 
 typedef struct __k_timespec timespec_t;
+typedef struct __k_itimerspec itimerspec_t;
 
 static __always_inline void timespec_from_nsec(timespec_t* restrict out, uint64_t nsec)
 {

@@ -16,9 +16,17 @@
  * is a point on the clock and not a duration */
 #define __k_TIMER_ABSTIME 1
 
+/* Timer of the setitimer call. Only the real time one exists */
+#define __k_ITIMER_REAL 0
+
 struct __k_timespec {
     __k_time_t tv_sec;
     __k_suseconds_t tv_nsec;
+};
+
+struct __k_itimerspec {
+    struct __k_timespec it_interval;
+    struct __k_timespec it_value;
 };
 
 #endif /* USR_VEX_TIME_H */

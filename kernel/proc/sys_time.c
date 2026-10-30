@@ -3,6 +3,7 @@
 #include <vex/cred.h>
 #include <vex/errno.h>
 #include <vex/event.h>
+#include <vex/itimer.h>
 #include <vex/process.h>
 #include <vex/sched.h>
 #include <vex/syscall.h>
@@ -247,3 +248,70 @@ static intptr_t sys_nanosleep(uintptr_t clock_id, uintptr_t flags, user_addr_t r
 }
 
 define_syscall(sys_nanosleep, SYS_NANOSLEEP, 4);
+
+static int read_itimer_state(user_addr_t source, itimer_state_t* restrict state)
+{
+    itimerspec_t request;
+    ssize_t copied = user_copyin(&request, source, sizeof(request));
+
+    if(copied < 0) {
+        return copied;
+    }
+
+    if(!timespec_valid(&request.it_value) || !timespec_valid(&request.it_interval)) {
+        return -EINVAL;
+    }
+
+    state->value = timespec_to_nsec(&request.it_value);
+    state->interval = timespec_to_nsec(&request.it_interval);
+
+    return 0;
+}
+
+// Reads the timer too: a null new setting changes nothing, and getitimer is that call
+static intptr_t sys_setitimer(int which, user_addr_t value, user_addr_t old)
+{
+    thread_t* thread = this_thread();
+    process_t* process = thread->process;
+
+    if(process == nullptr) {
+        return -ENOSYS;
+    }
+
+    if(which != ITIMER_REAL) {
+        return -EINVAL;
+    }
+
+    itimer_state_t next;
+    itimer_state_t previous;
+    const itimer_state_t* request = nullptr;
+
+    if(value.value) {
+        int retval = read_itimer_state(value, &next);
+
+        if(retval < 0) {
+            return retval;
+        }
+
+        request = &next;
+    }
+
+    itimer_set(process, request, &previous);
+
+    if(old.value) {
+        itimerspec_t reply;
+
+        timespec_from_nsec(&reply.it_value, previous.value);
+        timespec_from_nsec(&reply.it_interval, previous.interval);
+
+        ssize_t copied = user_copyout(old, &reply, sizeof(reply));
+
+        if(copied < 0) {
+            return copied;
+        }
+    }
+
+    return 0;
+}
+
+define_syscall(sys_setitimer, SYS_SETITIMER, 3);

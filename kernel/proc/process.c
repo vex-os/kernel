@@ -4,6 +4,7 @@
 #include <vex/event.h>
 #include <vex/fcntl.h>
 #include <vex/file.h>
+#include <vex/itimer.h>
 #include <vex/kmalloc.h>
 #include <vex/kprintf.h>
 #include <vex/mount.h>
@@ -260,6 +261,7 @@ void process_finish_exit(process_t* restrict process)
         return;
     }
 
+    itimer_cancel(process);
     tty_interface_leader_exit(process);
     process_group_check_orphans(process);
 

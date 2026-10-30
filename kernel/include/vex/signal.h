@@ -130,6 +130,10 @@ void signal_actions_exec(signal_actions_t* restrict signal_actions);
 /// @retval -ESRCH No such thread in the process
 int signal_send(process_t* restrict process, pid_t tid, const siginfo_t* restrict info);
 
+/// Queues an asynchronous signal with no siginfo of its own, so that it allocates nothing and the scheduler tick can send it
+/// @note The receiver gets SI_KERNEL. The same rules apply as in signal_send
+void signal_raise(process_t* restrict process, int sig);
+
 /// signal_send to the whole process for senders that cannot allocate,
 /// such as the scheduler; the node is consumed either way
 void signal_send_node(process_t* restrict process, pending_signal_t* restrict node);

@@ -2,6 +2,7 @@
 
 #include <vex/cred.h>
 #include <vex/event.h>
+#include <vex/itimer.h>
 #include <vex/limits.h>
 #include <vex/mutex.h>
 #include <vex/signal.h>
@@ -88,6 +89,8 @@ struct process_s {
     pending_signal_t* adopt_note;
     sigset_t sig_pending;
     pending_signal_t* sig_queue;
+
+    itimer_t itimer; // Not inherited by a fork, and kept over an exec
 
     vnode_t* cwd;
     mode_t umask;

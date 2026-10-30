@@ -7,6 +7,7 @@
 #include <vex/hart.h>
 #include <vex/initcall.h>
 #include <vex/irq.h>
+#include <vex/itimer.h>
 #include <vex/kmalloc.h>
 #include <vex/kstack.h>
 #include <vex/limits.h>
@@ -303,6 +304,7 @@ static void sched_irq_handler(unsigned number, const hart_context_t* restrict ct
     clock_source_update();
 
     wake_expired();
+    itimer_run_expired();
     event_run_deferred();
 
     hart_local_t* hart = this_hart();
