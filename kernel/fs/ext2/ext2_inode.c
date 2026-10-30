@@ -378,6 +378,10 @@ int ext2_inode_nodetype(uint16_t mode, unsigned* restrict out)
             *out = VNODE_SYM_LINK;
             return 0;
 
+        case S_IFIFO:
+            *out = VNODE_FIFO;
+            return 0;
+
         default:
             return -EOPNOTSUPP;
     }

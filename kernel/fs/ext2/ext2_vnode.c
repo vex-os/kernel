@@ -47,11 +47,15 @@ static int entry_nodetype(ext2_vfs_context_t* restrict fs_ctx, const ext2_dirent
             *out = VNODE_SYM_LINK;
             return 0;
 
+        case EXT2_FT_FIFO:
+            *out = VNODE_FIFO;
+            return 0;
+
         case EXT2_FT_UNKNOWN:
             break;
 
         default:
-            *out = VNODE_FILE; // No vnode types for devices, FIFOs and sockets yet
+            *out = VNODE_FILE; // No vnode types for devices and sockets of ext2 yet
             return 0;
     }
 
@@ -432,6 +436,9 @@ static uint8_t file_type_of(uint16_t mode)
         case S_IFLNK:
             return EXT2_FT_SYMLINK;
 
+        case S_IFIFO:
+            return EXT2_FT_FIFO;
+
         default:
             return EXT2_FT_UNKNOWN;
     }
@@ -578,7 +585,9 @@ static int create_locked(vnode_t* restrict node, const char* restrict name, unsi
         return -ENAMETOOLONG;
     }
 
-    if(type != VNODE_FILE && type != VNODE_DIRECTORY && type != VNODE_SYM_LINK) {
+    bool known = type == VNODE_FILE || type == VNODE_DIRECTORY || type == VNODE_SYM_LINK;
+
+    if(!known && type != VNODE_FIFO) {
         return -EINVAL;
     }
 
@@ -605,6 +614,9 @@ static int create_locked(vnode_t* restrict node, const char* restrict name, unsi
     }
     else if(type == VNODE_SYM_LINK) {
         inode_mode |= S_IFLNK;
+    }
+    else if(type == VNODE_FIFO) {
+        inode_mode |= S_IFIFO;
     }
     else {
         inode_mode |= S_IFREG;
@@ -670,6 +682,10 @@ static int create_locked(vnode_t* restrict node, const char* restrict name, unsi
 
     child->fs = node->fs;
     child->ino = ino;
+
+    if(type == VNODE_FIFO) {
+        vnode_init_special(child, 0);
+    }
 
     *out = child;
 
@@ -927,6 +943,17 @@ static int ext2_vnode_create(vnode_t* restrict node, const char* restrict name, 
     return retval;
 }
 
+// UNDONE: device nodes, once dev_t fits the 32 bits that an inode of ext2 has for it, or ext2 gets a format of its own
+static int ext2_vnode_mknod(vnode_t* restrict node, const char* restrict name, unsigned type, mode_t mode, dev_t rdev,
+    const credentials_t* restrict credentials, vnode_t** restrict out)
+{
+    if(type != VNODE_FIFO) {
+        return -EPERM;
+    }
+
+    return ext2_vnode_create(node, name, type, mode, credentials, out);
+}
+
 static int ext2_vnode_link(vnode_t* restrict node, const char* restrict name, vnode_t* restrict target)
 {
     mutex_acquire(fs_lock(node));
@@ -1137,6 +1164,7 @@ const vnode_ops_t ext2_vnode_ops = {
     .lookup = &ext2_vnode_lookup,
     .iterate = &ext2_vnode_iterate,
     .create = &ext2_vnode_create,
+    .mknod = &ext2_vnode_mknod,
     .unlink = &ext2_vnode_unlink,
     .rename = &ext2_vnode_rename,
     .link = &ext2_vnode_link,

@@ -455,6 +455,10 @@ static int ext2_fill_node(vfs_t* restrict fs, vnode_t* restrict node)
         retval = ext2_inode_nodetype(mode, &node->type);
     }
 
+    if(retval == 0 && node->type == VNODE_FIFO) {
+        vnode_init_special(node, 0);
+    }
+
     if(retval < 0) {
         slab_free(node_context);
         return retval;
