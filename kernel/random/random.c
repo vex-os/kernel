@@ -3,6 +3,7 @@
 #include <vex/clocksrc.h>
 #include <vex/kprintf.h>
 #include <vex/random.h>
+#include <vex/random_source.h>
 #include <vex/spinlock.h>
 #include <vex/string.h>
 #include <vex/strings.h>
@@ -12,7 +13,6 @@
 #define RANDOM_MIN_RESEED_MS  100
 #define RANDOM_CHUNK_SIZE     256
 
-#define NSEC_PER_MSEC       (NSEC_PER_USEC * 1000)
 #define MIN_RESEED_INTERVAL (RANDOM_MIN_RESEED_MS * NSEC_PER_MSEC)
 #define MAX_CREDIT_BITS     (BLAKE2S_MAX_DIGEST_SIZE * 8)
 #define MIN_CREDIT_BITS     (RANDOM_MIN_POOL_BYTES * 8)
@@ -96,6 +96,15 @@ static void generate(uint8_t* out, size_t size)
     memzero_explicit(&stream, sizeof(stream));
 }
 
+static bool needs_noise(void)
+{
+    bool intr_state = spinlock_acquire_intr(&lock);
+    bool needs = credit_bits < MIN_CREDIT_BITS;
+    spinlock_release_intr(&lock, intr_state);
+
+    return needs;
+}
+
 bool random_ready(void)
 {
     bool intr_state = spinlock_acquire_intr(&lock);
@@ -132,6 +141,10 @@ void random_add(const void* data, size_t size, unsigned bits)
 bool random_bytes(void* out, size_t size)
 {
     uint8_t* dest = out;
+
+    if(needs_noise()) {
+        random_source_poll_all();
+    }
 
     if(!random_ready()) {
         return false;

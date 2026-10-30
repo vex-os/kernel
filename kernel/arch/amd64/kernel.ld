@@ -66,6 +66,12 @@ SECTIONS
         KEEP(*(.limine_requests_end))
     } :data
 
+    .random_sources : {
+        random_sources_start = .;
+        KEEP(*(.random_sources))
+        random_sources_end = .;
+    } :data
+
     . = ALIGN(CONSTANT(MAXPAGESIZE));
 
     .data : {
