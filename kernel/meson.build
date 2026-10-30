@@ -80,6 +80,7 @@ kernel_subsystems = {
     'libk': 'KP_CORE',
     'mm': 'KP_MM',
     'proc': 'KP_PROC',
+    'random': 'KP_RANDOM',
     'time': 'KP_TIME',
 }
 
