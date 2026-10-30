@@ -8,6 +8,8 @@
 #include <vex/pdma.h>
 #include <vex/pmap.h>
 #include <vex/string.h>
+#include <vex/thread.h>
+#include <vex/usage.h>
 
 #define BLOCK_MAX_SEGMENTS 32 // Most segments block_read and block_write put in one request
 
@@ -248,9 +250,18 @@ int block_submit_wait(const block_interface_t* restrict interface, block_request
     return req->status;
 }
 
+// The thread that waits for the read is the one it is for, also for metadata that a filesystem reads
 int block_read(const block_interface_t* restrict interface, uintptr_t lba, size_t count, void* restrict buffer)
 {
-    return transfer(interface, BLOCK_REQ_READ, lba, count, buffer);
+    int retval = transfer(interface, BLOCK_REQ_READ, lba, count, buffer);
+
+    if(retval == 0) {
+        thread_t* thread = this_thread();
+        uint64_t blocks = usage_blocks_of(count * interface->sector_size);
+        usage_increase(&thread->usage.blocks_in, blocks);
+    }
+
+    return retval;
 }
 
 int block_write(const block_interface_t* restrict interface, uintptr_t lba, size_t count, const void* restrict buffer)

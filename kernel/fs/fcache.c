@@ -18,6 +18,7 @@
 #include <vex/string.h>
 #include <vex/thread.h>
 #include <vex/tlb.h>
+#include <vex/usage.h>
 #include <vex/vms.h>
 #include <vex/vnode.h>
 #include <vex/vprot.h>
@@ -123,6 +124,11 @@ static void mark_dirty(vnode_t* restrict node, pframe_t* restrict pframe, unsign
 
     pframe->flags |= PFRAME_DIRTY;
     cache->num_dirty += 1;
+
+    // Writeback runs for nobody in particular, so the
+    // write counts for the thread that dirties the page
+    thread_t* thread = this_thread();
+    usage_increase(&thread->usage.blocks_out, usage_blocks_of(PAGE_SIZE));
     atomic_fetch_add(&dirty_pages, 1, ATOMIC_RELAXED);
 
     queue_dirty(node);

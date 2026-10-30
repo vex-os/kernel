@@ -2,6 +2,7 @@
 
 #include <vex/atomic.h>
 #include <vex/compiler.h>
+#include <vex/limits.h>
 #include <vex/types.h>
 
 typedef struct hart_local_s hart_local_t;
@@ -16,6 +17,9 @@ struct usage_s {
     uint64_t user_ns;
     uint64_t system_ns;
     uint64_t minor_faults;
+    uint64_t major_faults;
+    uint64_t blocks_in;            // In S_BLKSIZE units, read by the thread
+    uint64_t blocks_out;           // In S_BLKSIZE units, dirtied by the thread, not written by it
     uint64_t voluntary_switches;   // The thread blocked
     uint64_t involuntary_switches; // The thread was preempted or yielded
     uint64_t signals;              // Delivered to a handler
@@ -50,6 +54,9 @@ static __always_inline void usage_add(usage_t* restrict sum, const usage_t* rest
     sum->user_ns += value->user_ns;
     sum->system_ns += value->system_ns;
     sum->minor_faults += value->minor_faults;
+    sum->major_faults += value->major_faults;
+    sum->blocks_in += value->blocks_in;
+    sum->blocks_out += value->blocks_out;
     sum->voluntary_switches += value->voluntary_switches;
     sum->involuntary_switches += value->involuntary_switches;
     sum->signals += value->signals;
@@ -57,6 +64,12 @@ static __always_inline void usage_add(usage_t* restrict sum, const usage_t* rest
     if(value->peak_pages > sum->peak_pages) {
         sum->peak_pages = value->peak_pages;
     }
+}
+
+/// The count of S_BLKSIZE blocks that the bytes take, rounded up
+static __always_inline uint64_t usage_blocks_of(uint64_t bytes)
+{
+    return (bytes + S_BLKSIZE - 1) / S_BLKSIZE;
 }
 
 /// Adds to a counter in the usage of a thread

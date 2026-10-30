@@ -87,9 +87,12 @@ static void page_fault_handler(hart_local_t* restrict hart, hart_context_t* rest
 
     int retval = vms_fault(process->vmspace, virt_addr(fault), access);
 
-    // UNDONE: a fault that reads the disk is a major one
-    if(retval == 0) {
+    if(retval == VMS_FAULT_MINOR) {
         usage_increase(&thread->usage.minor_faults, 1);
+    }
+
+    if(retval == VMS_FAULT_MAJOR) {
+        usage_increase(&thread->usage.major_faults, 1);
     }
 
     if(retval < 0) {

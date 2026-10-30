@@ -32,6 +32,9 @@ static void load_usage(const thread_t* restrict thread, usage_t* restrict out)
     out->user_ns = atomic_load_n(&thread->usage.user_ns, ATOMIC_RELAXED);
     out->system_ns = atomic_load_n(&thread->usage.system_ns, ATOMIC_RELAXED);
     out->minor_faults = atomic_load_n(&thread->usage.minor_faults, ATOMIC_RELAXED);
+    out->major_faults = atomic_load_n(&thread->usage.major_faults, ATOMIC_RELAXED);
+    out->blocks_in = atomic_load_n(&thread->usage.blocks_in, ATOMIC_RELAXED);
+    out->blocks_out = atomic_load_n(&thread->usage.blocks_out, ATOMIC_RELAXED);
     out->voluntary_switches = atomic_load_n(&thread->usage.voluntary_switches, ATOMIC_RELAXED);
     out->involuntary_switches = atomic_load_n(&thread->usage.involuntary_switches, ATOMIC_RELAXED);
     out->signals = atomic_load_n(&thread->usage.signals, ATOMIC_RELAXED);
@@ -106,7 +109,6 @@ void usage_of_process(process_t* restrict process, usage_t* restrict out)
     spinlock_release_intr(&process->lock, intr_state);
 }
 
-// UNDONE: ru_majflt needs a word from fcache that a fault read the disk
 void usage_to_rusage(const usage_t* restrict usage, rusage_t* restrict out)
 {
     memset(out, 0, sizeof(*out));
@@ -115,6 +117,9 @@ void usage_to_rusage(const usage_t* restrict usage, rusage_t* restrict out)
 
     out->ru_maxrss = usage->peak_pages * PAGE_SIZE / 1024; // In KiB
     out->ru_minflt = usage->minor_faults;
+    out->ru_majflt = usage->major_faults;
+    out->ru_inblock = usage->blocks_in;
+    out->ru_oublock = usage->blocks_out;
     out->ru_nvcsw = usage->voluntary_switches;
     out->ru_nivcsw = usage->involuntary_switches;
     out->ru_nsignals = usage->signals;

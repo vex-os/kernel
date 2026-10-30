@@ -7,6 +7,8 @@
 #include <vex/slab.h>
 #include <vex/stat.h>
 #include <vex/string.h>
+#include <vex/thread.h>
+#include <vex/usage.h>
 #include <vex/vnode.h>
 
 #include "devfs_internal.h"
@@ -110,7 +112,7 @@ static ssize_t devfs_block_read(vnode_t* restrict node, file_t* restrict file, v
     return size;
 }
 
-static ssize_t devfs_block_write(vnode_t* restrict node, file_t* restrict file, const void* restrict buffer, size_t size, off_t offset)
+static ssize_t write_bytes(vnode_t* restrict node, const void* restrict buffer, size_t size, off_t offset)
 {
     devfs_block_context_t* context = node->ctxdata;
     const block_interface_t* interface = context->interface;
@@ -202,6 +204,19 @@ static ssize_t devfs_block_write(vnode_t* restrict node, file_t* restrict file, 
     }
 
     return size;
+}
+
+// The write goes to the device at once, with no page cache to count it when it gets dirty
+static ssize_t devfs_block_write(vnode_t* restrict node, file_t* restrict file, const void* restrict buffer, size_t size, off_t offset)
+{
+    ssize_t written = write_bytes(node, buffer, size, offset);
+
+    if(written > 0) {
+        thread_t* thread = this_thread();
+        usage_increase(&thread->usage.blocks_out, usage_blocks_of(written));
+    }
+
+    return written;
 }
 
 static int devfs_block_stat(vnode_t* restrict node, stat_t* restrict out)
