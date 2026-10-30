@@ -16,8 +16,11 @@
  * is a point on the clock and not a duration */
 #define __k_TIMER_ABSTIME 1
 
-/* Timer of the setitimer call. Only the real time one exists */
-#define __k_ITIMER_REAL 0
+/* Timers of the setitimer call: wallclock time, user
+ * CPU time, and user and system CPU time of the process */
+#define __k_ITIMER_REAL    0
+#define __k_ITIMER_VIRTUAL 1
+#define __k_ITIMER_PROF    2
 
 struct __k_timespec {
     __k_time_t tv_sec;

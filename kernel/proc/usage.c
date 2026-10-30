@@ -45,6 +45,7 @@ void usage_enter_kernel(void)
     hart_local_t* hart = this_hart();
     uint64_t elapsed = take_since_mark(hart);
     usage_increase(&hart->curr_thread->usage.user_ns, elapsed);
+    hart->itimer_user_ns += elapsed;
 }
 
 void usage_exit_kernel(void)
@@ -52,6 +53,7 @@ void usage_exit_kernel(void)
     hart_local_t* hart = this_hart();
     uint64_t elapsed = take_since_mark(hart);
     usage_increase(&hart->curr_thread->usage.system_ns, elapsed);
+    hart->itimer_system_ns += elapsed;
 }
 
 // The time of the idle thread goes nowhere for now
@@ -61,6 +63,7 @@ void usage_switch(hart_local_t* restrict hart, thread_t* restrict curr)
 
     if(curr != hart->idle_thread) {
         usage_increase(&curr->usage.system_ns, elapsed);
+        hart->itimer_system_ns += elapsed;
     }
 }
 

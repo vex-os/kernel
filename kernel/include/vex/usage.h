@@ -31,7 +31,7 @@ struct usage_s {
 void usage_enter_kernel(void);
 
 /// Charges the time since the last mark to the system time of the current thread
-/// @pre Interrupts are disabled, and the hart goes to user mode next
+/// @pre Interrupts are disabled, and the hart is in the kernel for the current thread
 void usage_exit_kernel(void);
 
 /// Charges the time since the last mark to the system time of curr, which leaves the hart or stays on it

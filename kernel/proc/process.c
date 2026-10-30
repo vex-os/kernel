@@ -510,6 +510,7 @@ void process_decref(process_t* process)
         cred_decref(process->credentials);
         rlimits_decref(process->rlimits);
         signal_flush(process->sig_queue);
+        itimer_destroy(process);
         slab_free(process->adopt_note);
         slab_free(process->exit_note);
         signal_actions_destroy(process->signal_actions);

@@ -320,6 +320,7 @@ static void sched_irq_handler(unsigned number, const hart_context_t* restrict ct
     thread_t* curr = hart->curr_thread;
 
     usage_switch(hart, curr);
+    itimer_count_cpu(hart, curr);
 
     // preempt_enable switches away once the last spinlock is
     // released; a blocking or dying thread has none to hold

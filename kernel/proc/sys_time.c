@@ -329,7 +329,7 @@ static intptr_t sys_setitimer(int which, user_addr_t value, user_addr_t old)
         return -ENOSYS;
     }
 
-    if(which != ITIMER_REAL) {
+    if(which < ITIMER_REAL || which > ITIMER_PROF) {
         return -EINVAL;
     }
 
@@ -347,7 +347,11 @@ static intptr_t sys_setitimer(int which, user_addr_t value, user_addr_t old)
         request = &next;
     }
 
-    itimer_set(process, request, &previous);
+    int retval = itimer_set(process, which, request, &previous);
+
+    if(retval < 0) {
+        return retval;
+    }
 
     if(old.value) {
         itimerspec_t reply;

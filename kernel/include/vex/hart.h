@@ -34,6 +34,11 @@ struct hart_local_s {
 
     uint64_t cputime_mark; // local_clock_ns when the time of the hart was last charged to a thread
 
+    // Charged to the running thread since the
+    // CPU timers of its process last counted down
+    uint64_t itimer_user_ns;
+    uint64_t itimer_system_ns;
+
     bool tlb_online;
     uint64_t tlb_flushed;
 
