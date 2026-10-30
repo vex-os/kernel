@@ -277,6 +277,35 @@ static void test_errors(long fd)
     ktest_expect(ktest_syscall3(__k_SYS_FCNTL, fd, __k_F_SETLK, 1), -__k_EFAULT);
 }
 
+// The child holds byte 1 and waits for byte 0, so the parent that holds byte 0 must not wait for byte 1
+static void test_deadlock(long fd)
+{
+    ktest_expect(lock_range(fd, __k_F_WRLCK, 0, 1), 0);
+
+    long child = ktest_syscall1(__k_SYS_FORK, 0);
+
+    if(child == 0) {
+        long own = open_data(__k_O_RDWR);
+
+        ktest_expect(lock_range(own, __k_F_WRLCK, 1, 1), 0);
+        ktest_expect(set_lock(own, __k_F_SETLKW, __k_F_WRLCK, __k_SEEK_SET, 0, 1), 0);
+
+        ktest_close(own);
+        ktest_syscall1(__k_SYS_EXIT, ktest_result());
+    }
+
+    ktest_assert(child > 0);
+
+    sleep_for(SETTLE_NSEC);
+    ktest_expect(set_lock(fd, __k_F_SETLKW, __k_F_WRLCK, __k_SEEK_SET, 1, 1), -__k_EDEADLK);
+
+    // Without the wait, the parent only finds byte 1 taken
+    ktest_expect(lock_range(fd, __k_F_WRLCK, 1, 1), -__k_EAGAIN);
+
+    ktest_expect(lock_range(fd, __k_F_UNLCK, 0, 1), 0);
+    wait_child(child);
+}
+
 static long flock_fd(long fd, long operation)
 {
     return ktest_syscall2(__k_SYS_FLOCK, fd, operation);
@@ -383,6 +412,7 @@ int main(void)
     test_wait(fd);
     test_interrupt(fd);
     test_errors(fd);
+    test_deadlock(fd);
     test_flock();
     test_ofd();
 
