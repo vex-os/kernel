@@ -33,7 +33,7 @@ struct wait_result_s {
     uid_t uid;
     int code;
     int status;
-    cputime_t cputime; // Of an exit only, with the children that the child collected
+    cputime_t cputime; // With the children that the child collected
 };
 
 static int copyin_string_array(user_addr_t array, const char** restrict out, char** restrict cursor, const char* restrict limit)
@@ -325,6 +325,18 @@ static bool take_report(process_t* restrict child, unsigned bit, uintptr_t optio
     return job_claim_report(child, bit);
 }
 
+// A child that stops or continues still runs threads, so its time is a snapshot
+static void read_live_cputime(process_t* restrict child, cputime_t* restrict out)
+{
+    cputime_of_process(child, out);
+
+    bool intr_state = spinlock_acquire_intr(&child->lock);
+    cputime_add(out, &child->children_cputime);
+    spinlock_release_intr(&child->lock, intr_state);
+
+    process_decref(child);
+}
+
 static bool take_job_report(process_t* restrict child, uintptr_t options, wait_result_t* restrict out)
 {
     bool stopped = (options & WSTOPPED) && take_report(child, JOB_REPORT_STOPPED, options);
@@ -386,7 +398,7 @@ static intptr_t wait_child(process_t* restrict caller, pid_t pid, const process_
     for(;;) {
         process_t* target = nullptr;
         bool has_match = false;
-        bool reported = false;
+        process_t* reporter = nullptr;
 
         bool intr_state = spinlock_acquire_intr(&caller->lock);
 
@@ -407,15 +419,17 @@ static intptr_t wait_child(process_t* restrict caller, pid_t pid, const process_
                 break;
             }
 
-            reported = take_job_report(it, options, result);
-
-            if(reported) {
+            if(take_job_report(it, options, result)) {
+                reporter = it;
+                process_incref(reporter);
                 break;
             }
         }
 
-        if(reported) {
+        if(reporter) {
+            // The child is read after the lock of the caller goes, so the two locks are never held together
             spinlock_release_intr(&caller->lock, intr_state);
+            read_live_cputime(reporter, &result->cputime);
             return result->pid;
         }
 
@@ -580,7 +594,6 @@ static intptr_t sys_exec(user_addr_t path, user_addr_t argv, user_addr_t envp)
 
 define_syscall(sys_exec, SYS_EXEC, 3);
 
-// UNDONE: a stop or a continue reports zero times, where Linux reports the times of the child so far
 static ssize_t copyout_rusage(user_addr_t address, const wait_result_t* restrict result)
 {
     if(address.value == 0) {
