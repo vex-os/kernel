@@ -36,6 +36,7 @@ ktest_programs = [
     'pread',
     'iov',
     'pipe',
+    'poll',
     'getdents',
     'mount',
     'tmpfs',
