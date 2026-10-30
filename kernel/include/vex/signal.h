@@ -126,8 +126,8 @@ void signal_actions_exec(signal_actions_t* restrict signal_actions);
 /// Queues an asynchronous signal; SIGKILL ends the process at once, and init
 /// only ever receives signals it handles
 /// @param tid A thread of the process, or zero for whichever thread can take it
-/// @note A standard signal that is pending already is merged with the new one. A signal from SIGRTMIN up gets its own entry
-/// as long as the queue has room, and merges when it has none
+/// @note A standard signal that is pending already is merged with the new one. A
+/// signal from SIGRTMIN up gets its own entry, past RLIMIT_SIGPENDING too, as in Linux for kill
 /// @retval 0 Queued, merged with one already pending, or dropped as ignored
 /// @retval -ESRCH No such thread in the process
 int signal_send(process_t* restrict process, pid_t tid, const siginfo_t* restrict info);

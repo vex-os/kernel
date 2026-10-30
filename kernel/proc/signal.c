@@ -263,8 +263,9 @@ static void job_effects(process_t* restrict process, int sig)
     }
 }
 
-// With strict set a signal that cannot get an entry of its own fails with -EAGAIN. Otherwise it merges with the one
-// pending, or goes in with no siginfo: kill must not lose a signal that sigqueue would refuse
+// With strict set a signal that cannot get an entry of its own fails with -EAGAIN. Otherwise RLIMIT_SIGPENDING
+// does not apply, as in Linux for kill. With no memory for an entry, a signal merges with the one pending, or goes
+// in with no siginfo. NOTE: such a real-time signal is lost if entries of the same signal wait too, as in Linux
 static int queue_signal(process_t* restrict process, pid_t tid, int sig, pending_signal_t* restrict node, bool strict)
 {
     job_effects(process, sig);
@@ -276,7 +277,7 @@ static int queue_signal(process_t* restrict process, pid_t tid, int sig, pending
     // Read before the locks are taken, as it takes one of them
     uint64_t limit = RLIM_INFINITY;
 
-    if(node && (strict || realtime)) {
+    if(strict) {
         rlimit_t rlimit = process_get_rlimit(process, RLIMIT_SIGPENDING);
         limit = rlimit.rlim_cur;
     }
@@ -302,12 +303,7 @@ static int queue_signal(process_t* restrict process, pid_t tid, int sig, pending
         queue = &target->sig_queue;
     }
 
-    bool full = node && limit != RLIM_INFINITY && queued_locked(process) >= limit;
-
-    if(full && !strict) {
-        slab_free(node);
-        node = nullptr;
-    }
+    bool full = limit != RLIM_INFINITY && queued_locked(process) >= limit;
 
     // Only the real-time signals queue more than one entry
     bool merges = (*pending & bit) && (!realtime || node == nullptr);
