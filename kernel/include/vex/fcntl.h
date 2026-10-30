@@ -21,8 +21,15 @@
 #define F_GETFL         __k_F_GETFL
 #define F_SETFL         __k_F_SETFL
 #define F_DUPFD_CLOEXEC __k_F_DUPFD_CLOEXEC
+#define F_GETLK         __k_F_GETLK
+#define F_SETLK         __k_F_SETLK
+#define F_SETLKW        __k_F_SETLKW
 
 #define FD_CLOEXEC __k_FD_CLOEXEC
+
+#define F_RDLCK __k_F_RDLCK
+#define F_WRLCK __k_F_WRLCK
+#define F_UNLCK __k_F_UNLCK
 
 #define F_OK __k_F_OK
 #define X_OK __k_X_OK
@@ -35,3 +42,5 @@
 #define AT_EMPTY_PATH       __k_AT_EMPTY_PATH
 #define AT_EACCESS          __k_AT_EACCESS
 #define AT_SYMLINK_FOLLOW   __k_AT_SYMLINK_FOLLOW
+
+typedef struct __k_flock flock_t;

@@ -3,6 +3,7 @@
 #include <vex/errno.h>
 #include <vex/fcntl.h>
 #include <vex/file.h>
+#include <vex/file_lock.h>
 #include <vex/limits.h>
 #include <vex/mount.h>
 #include <vex/path.h>
@@ -544,6 +545,167 @@ static intptr_t fcntl_dupfd(file_t* restrict file, uintptr_t min_fd, uint32_t fd
     return fd;
 }
 
+static int file_end(file_t* restrict file, off_t* restrict out)
+{
+    stat_t st;
+    int retval = vnode_stat(file->node, &st);
+
+    if(retval < 0) {
+        return retval;
+    }
+
+    *out = st.st_size;
+    return 0;
+}
+
+static int lock_base(file_t* restrict file, int whence, off_t* restrict out)
+{
+    switch(whence) {
+        case SEEK_SET:
+            *out = 0;
+            return 0;
+
+        case SEEK_CUR:
+            *out = atomic_load(&file->offset, ATOMIC_RELAXED);
+            return 0;
+
+        case SEEK_END:
+            return file_end(file, out);
+
+        default:
+            return -EINVAL;
+    }
+}
+
+// A positive length counts forward from the start, zero runs on with no end, and a negative one counts back
+static int lock_range(file_t* restrict file, const flock_t* restrict lock, file_lock_request_t* restrict out)
+{
+    off_t base;
+    int retval = lock_base(file, lock->l_whence, &base);
+
+    if(retval < 0) {
+        return retval;
+    }
+
+    off_t start;
+
+    if(__builtin_add_overflow(base, lock->l_start, &start)) {
+        return -EOVERFLOW;
+    }
+
+    off_t end = FILE_LOCK_END;
+
+    if(lock->l_len > 0 && __builtin_add_overflow(start, lock->l_len - 1, &end)) {
+        return -EOVERFLOW;
+    }
+
+    if(lock->l_len < 0) {
+        end = start - 1;
+        start += lock->l_len;
+    }
+
+    if(start < 0) {
+        return -EINVAL;
+    }
+
+    out->start = start;
+    out->end = end;
+    return 0;
+}
+
+static int lock_request_of(file_t* restrict file, const flock_t* restrict lock, file_lock_request_t* restrict out)
+{
+    thread_t* thread = this_thread();
+    process_t* process = thread->process;
+
+    bool known = lock->l_type == F_RDLCK || lock->l_type == F_WRLCK || lock->l_type == F_UNLCK;
+
+    if(!known) {
+        return -EINVAL;
+    }
+
+    out->owner = process;
+    out->pid = process->pid;
+    out->type = lock->l_type;
+
+    return lock_range(file, lock, out);
+}
+
+static intptr_t fcntl_getlk(file_t* restrict file, user_addr_t address)
+{
+    flock_t lock;
+    ssize_t copied = user_copyin(&lock, address, sizeof(lock));
+
+    if(copied < 0) {
+        return copied;
+    }
+
+    file_lock_request_t request = {};
+    int retval = lock_request_of(file, &lock, &request);
+
+    if(retval < 0) {
+        return retval;
+    }
+
+    if(request.type == F_UNLCK) {
+        return -EINVAL;
+    }
+
+    lock.l_type = F_UNLCK;
+
+    if(file_lock_test(file->node, &request)) {
+        lock.l_type = request.type;
+        lock.l_whence = SEEK_SET;
+        lock.l_start = request.start;
+        lock.l_len = 0;
+        lock.l_pid = request.pid;
+
+        if(request.end != FILE_LOCK_END) {
+            lock.l_len = request.end - request.start + 1;
+        }
+    }
+
+    copied = user_copyout(address, &lock, sizeof(lock));
+
+    if(copied < 0) {
+        return copied;
+    }
+
+    return 0;
+}
+
+// A read lock takes a file open for reading, and a write lock one open for writing
+static intptr_t fcntl_setlk(file_t* restrict file, user_addr_t address, bool wait)
+{
+    flock_t lock;
+    ssize_t copied = user_copyin(&lock, address, sizeof(lock));
+
+    if(copied < 0) {
+        return copied;
+    }
+
+    file_lock_request_t request = {};
+    int retval = lock_request_of(file, &lock, &request);
+
+    if(retval < 0) {
+        return retval;
+    }
+
+    unsigned flags = file_flags(file);
+    bool readable = file_flags_allow_read(flags);
+    bool writable = file_flags_allow_write(flags);
+
+    if(request.type == F_RDLCK && !readable) {
+        return -EBADF;
+    }
+
+    if(request.type == F_WRLCK && !writable) {
+        return -EBADF;
+    }
+
+    return file_lock_set(file->node, &request, wait);
+}
+
 static intptr_t fcntl_command(file_t* restrict file, int fd, unsigned command, uintptr_t argument)
 {
     thread_t* thread = this_thread();
@@ -561,6 +723,12 @@ static intptr_t fcntl_command(file_t* restrict file, int fd, unsigned command, u
             return file_flags(file);
         case F_SETFL:
             return fcntl_setfl(file, argument);
+        case F_GETLK:
+            return fcntl_getlk(file, user_addr(argument));
+        case F_SETLK:
+            return fcntl_setlk(file, user_addr(argument), false);
+        case F_SETLKW:
+            return fcntl_setlk(file, user_addr(argument), true);
         default:
             return -EINVAL;
     }

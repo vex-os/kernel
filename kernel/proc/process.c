@@ -4,6 +4,7 @@
 #include <vex/event.h>
 #include <vex/fcntl.h>
 #include <vex/file.h>
+#include <vex/file_lock.h>
 #include <vex/initcall.h>
 #include <vex/itimer.h>
 #include <vex/kmalloc.h>
@@ -199,6 +200,17 @@ static void reparent_children(process_t* restrict process)
     }
 }
 
+// POSIX drops the locks of the process on a file when any of its descriptors of that file closes
+static void close_descriptor(process_t* restrict process, file_t* restrict file)
+{
+    if(file == nullptr) {
+        return;
+    }
+
+    file_lock_release(file->node, process);
+    file_close(file);
+}
+
 // Closing may sleep in a filesystem, so this runs in the exiting
 // thread rather than when the scheduler reaps the last thread
 static void release_files(process_t* restrict process)
@@ -218,7 +230,7 @@ static void release_files(process_t* restrict process)
     spinlock_release(&process->fd_lock);
 
     for(size_t i = 0; i < max_fds; ++i) {
-        file_close(fds[i].file);
+        close_descriptor(process, fds[i].file);
     }
 
     kfree(fds);
@@ -930,7 +942,7 @@ int process_fd_dup(process_t* process, int old_fd, int new_fd, uint32_t fd_flags
 
     // Closing may sleep in the filesystem
     // so it happens outside the lock
-    file_close(replaced);
+    close_descriptor(process, replaced);
 
     return new_fd;
 }
@@ -951,7 +963,7 @@ int process_fd_release(process_t* process, int fd)
 
     spinlock_release(&process->fd_lock);
 
-    file_close(file);
+    close_descriptor(process, file);
 
     return 0;
 }
@@ -1017,7 +1029,7 @@ void process_fds_close_on_exec(process_t* process)
             return;
         }
 
-        file_close(file);
+        close_descriptor(process, file);
     }
 }
 

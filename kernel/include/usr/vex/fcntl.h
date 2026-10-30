@@ -22,8 +22,15 @@
 #define __k_F_GETFL         3
 #define __k_F_SETFL         4
 #define __k_F_DUPFD_CLOEXEC 5
+#define __k_F_GETLK         6
+#define __k_F_SETLK         7
+#define __k_F_SETLKW        8
 
 #define __k_FD_CLOEXEC 0x0001
+
+#define __k_F_RDLCK 0
+#define __k_F_WRLCK 1
+#define __k_F_UNLCK 2
 
 #define __k_SEEK_SET 0
 #define __k_SEEK_CUR 1
@@ -40,5 +47,17 @@
 #define __k_AT_EMPTY_PATH       0x0400
 #define __k_AT_SYMLINK_FOLLOW   0x0800
 #define __k_AT_EACCESS          0x1000
+
+/* A range of l_len bytes from l_start, which
+ * l_whence counts from as lseek does. A zero
+ * length runs to the end of the file and past
+ * it, and a negative one ends before l_start */
+struct __k_flock {
+    __k_int16_t l_type;
+    __k_int16_t l_whence;
+    __k_off_t l_start;
+    __k_off_t l_len;
+    __k_pid_t l_pid; /* Of the process that holds the lock, for F_GETLK */
+};
 
 #endif /* USR_VEX_FCNTL_H */
