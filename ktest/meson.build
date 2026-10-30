@@ -44,6 +44,7 @@ ktest_programs = [
     'getdents',
     'mount',
     'tmpfs',
+    'fallocate',
     'path',
     'chroot',
     'flock',
