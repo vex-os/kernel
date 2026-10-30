@@ -247,6 +247,17 @@ static void begin_exit(process_t* restrict process, int exit_code, int exit_sign
     spinlock_release_intr(&process->lock, intr_state);
 }
 
+static vnode_t* current_process_root(void)
+{
+    thread_t* thread = this_thread();
+
+    if(thread == nullptr || thread->process == nullptr) {
+        return nullptr;
+    }
+
+    return process_get_root(thread->process);
+}
+
 pid_t process_alloc_id(void)
 {
     return atomic_fetch_add(&next_pid, 1, ATOMIC_RELAXED);
@@ -797,24 +808,6 @@ void process_set_root(process_t* process, vnode_t* node)
     }
 }
 
-static vnode_t* current_process_root(void)
-{
-    thread_t* thread = this_thread();
-
-    if(thread == nullptr || thread->process == nullptr) {
-        return nullptr;
-    }
-
-    return process_get_root(thread->process);
-}
-
-static void init_process_root(void)
-{
-    path_set_root_source(&current_process_root);
-}
-
-initcall_bsp_vfs(init_process_root, INIT_FIRST);
-
 file_t* process_fd_get(process_t* process, int fd)
 {
     spinlock_acquire(&process->fd_lock);
@@ -1033,3 +1026,10 @@ int process_fds_copy(process_t* restrict process, process_t* restrict source)
 
     return 0;
 }
+
+static void init_process_root(void)
+{
+    path_set_root_source(&current_process_root);
+}
+
+initcall_bsp_vfs(init_process_root, INIT_FIRST);
