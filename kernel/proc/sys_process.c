@@ -259,18 +259,16 @@ static intptr_t exec_image(thread_t* restrict thread, char* restrict image_path,
     process_set_cred(process, new_cred);
     mutex_release(&process->credentials_lock);
 
-    vmspace_t* old_vms = process->vmspace;
-
-    process->vmspace = vmspace;
+    process_set_vmspace(process, vmspace);
     arch_thread_exec(thread, vmspace, entry.address, entry.user_stack);
     signal_actions_exec(process->signal_actions);
+
     thread->sig_altstack = 0;
     thread->sig_altstack_size = 0;
     thread->clear_tid = 0; // An address in the image just left
     atomic_fetch_or(&process->flags, PROCESS_DID_EXEC, ATOMIC_RELEASE);
-    process_fds_close_on_exec(process);
 
-    vms_release(old_vms);
+    process_fds_close_on_exec(process);
 
     return 0;
 }

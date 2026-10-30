@@ -191,6 +191,11 @@ vnode_t* process_get_root(process_t* process) __nodiscard;
 /// Takes over the reference of the node
 void process_set_root(process_t* process, vnode_t* node);
 
+/// Puts the address space in place, or none with nullptr, and releases the old one
+/// @pre No thread of the process has the old address space loaded anymore
+/// @note The peak resident size of the old address space stays with the process, for getrusage
+void process_set_vmspace(process_t* process, vmspace_t* vmspace);
+
 file_t* process_fd_get(process_t* process, int fd) __nodiscard;
 int process_fd_alloc(process_t* process, file_t* file, int min_fd, uint32_t fd_flags) __nodiscard;
 

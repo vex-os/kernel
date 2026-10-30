@@ -13,6 +13,7 @@
 #include <vex/pgrp.h>
 #include <vex/process.h>
 #include <vex/rlimit.h>
+#include <vex/rmap.h>
 #include <vex/sched.h>
 #include <vex/signal.h>
 #include <vex/slab.h>
@@ -646,8 +647,7 @@ void process_thread_reaped(process_t* process, thread_t* thread)
     if(last) {
         // No thread of the process is on any hart anymore, so
         // nothing has its page tables loaded and they can go
-        vms_release(process->vmspace);
-        process->vmspace = nullptr;
+        process_set_vmspace(process, nullptr);
 
         atomic_fetch_or(&process->flags, PROCESS_ZOMBIE, ATOMIC_SEQ_CST);
 
@@ -806,6 +806,28 @@ void process_set_root(process_t* process, vnode_t* node)
 
     if(old_root) {
         vnode_decref(old_root);
+    }
+}
+
+void process_set_vmspace(process_t* process, vmspace_t* vmspace)
+{
+    bool intr_state = spinlock_acquire_intr(&process->lock);
+    vmspace_t* old_vms = process->vmspace;
+
+    process->vmspace = vmspace;
+
+    if(old_vms) {
+        size_t peak = rmap_peak_pages(old_vms->pmap);
+
+        if(peak > process->usage.peak_pages) {
+            process->usage.peak_pages = peak;
+        }
+    }
+
+    spinlock_release_intr(&process->lock, intr_state);
+
+    if(old_vms) {
+        vms_release(old_vms);
     }
 }
 

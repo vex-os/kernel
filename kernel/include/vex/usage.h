@@ -19,6 +19,7 @@ struct usage_s {
     uint64_t voluntary_switches;   // The thread blocked
     uint64_t involuntary_switches; // The thread was preempted or yielded
     uint64_t signals;              // Delivered to a handler
+    size_t peak_pages;             // Resident, of the address spaces the process had; the most of them, not their sum
 };
 
 /// Charges the time since the last mark to the user time of the current thread
@@ -52,6 +53,10 @@ static __always_inline void usage_add(usage_t* restrict sum, const usage_t* rest
     sum->voluntary_switches += value->voluntary_switches;
     sum->involuntary_switches += value->involuntary_switches;
     sum->signals += value->signals;
+
+    if(value->peak_pages > sum->peak_pages) {
+        sum->peak_pages = value->peak_pages;
+    }
 }
 
 /// Adds to a counter in the usage of a thread

@@ -1,13 +1,16 @@
 #include <vex/atomic.h>
 #include <vex/cycles.h>
 #include <vex/hart.h>
+#include <vex/page.h>
 #include <vex/process.h>
 #include <vex/resource.h>
+#include <vex/rmap.h>
 #include <vex/spinlock.h>
 #include <vex/string.h>
 #include <vex/thread.h>
 #include <vex/time.h>
 #include <vex/usage.h>
+#include <vex/vms.h>
 
 static uint64_t take_since_mark(hart_local_t* restrict hart)
 {
@@ -84,6 +87,16 @@ void usage_of_process(process_t* restrict process, usage_t* restrict out)
 
     *out = process->usage;
 
+    // Under the lock, as process_set_vmspace changes
+    // it under the lock before it releases the old one
+    if(process->vmspace) {
+        size_t peak = rmap_peak_pages(process->vmspace->pmap);
+
+        if(peak > out->peak_pages) {
+            out->peak_pages = peak;
+        }
+    }
+
     for(thread_t* thread = process->threads; thread; thread = thread->process_next) {
         usage_t thread_usage = {};
         usage_of_thread(thread, &thread_usage);
@@ -93,12 +106,14 @@ void usage_of_process(process_t* restrict process, usage_t* restrict out)
     spinlock_release_intr(&process->lock, intr_state);
 }
 
-// UNDONE: ru_maxrss needs a count of resident pages, and ru_majflt a word from fcache that a fault read the disk
+// UNDONE: ru_majflt needs a word from fcache that a fault read the disk
 void usage_to_rusage(const usage_t* restrict usage, rusage_t* restrict out)
 {
     memset(out, 0, sizeof(*out));
     timeval_from_nsec(&out->ru_utime, usage->user_ns);
     timeval_from_nsec(&out->ru_stime, usage->system_ns);
+
+    out->ru_maxrss = usage->peak_pages * PAGE_SIZE / 1024; // In KiB
     out->ru_minflt = usage->minor_faults;
     out->ru_nvcsw = usage->voluntary_switches;
     out->ru_nivcsw = usage->involuntary_switches;
