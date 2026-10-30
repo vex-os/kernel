@@ -1,0 +1,60 @@
+#include <arch/hart.h>
+#include <vex/cpucaps.h>
+#include <vex/errno.h>
+#include <vex/random_source.h>
+#include <vex/string.h>
+
+#define VALUES  4
+#define RETRIES 10
+
+static bool rdrand_probe(void)
+{
+    return cpu_has(CPU_FEATURE_RDRAND);
+}
+
+static bool rdrand_read(uint64_t* restrict value)
+{
+    bool ready;
+
+    asm volatile("rdrand %0" : "=r"(*value), "=@ccc"(ready));
+
+    return ready;
+}
+
+// The value is not ready when the carry flag stays clear
+static bool rdrand_read_retry(uint64_t* restrict value)
+{
+    for(int attempt = 0; attempt < RETRIES; attempt += 1) {
+        if(rdrand_read(value)) {
+            return true;
+        }
+
+        hart_relax();
+    }
+
+    return false;
+}
+
+static ssize_t rdrand_poll(void* out, size_t size)
+{
+    uint8_t* bytes = out;
+    size_t count = size / sizeof(uint64_t);
+
+    for(size_t i = 0; i < count; ++i) {
+        uint64_t value;
+
+        if(!rdrand_read_retry(&value)) {
+            if(i == 0) {
+                return -EAGAIN;
+            }
+
+            return i * sizeof(value);
+        }
+
+        memcpy(&bytes[i * sizeof(value)], &value, sizeof(value));
+    }
+
+    return count * sizeof(uint64_t);
+}
+
+define_random_source(rdrand, false, VALUES * sizeof(uint64_t), VALUES * 64, rdrand_probe, rdrand_poll);

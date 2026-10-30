@@ -80,7 +80,7 @@ static void compress(blake2s_t* restrict ctx, const uint8_t* restrict block, boo
         state[14] = ~state[14];
     }
 
-    for(size_t round = 0; round < ROUNDS; ++round) {
+    for(size_t round = 0; round < ROUNDS; round += 1) {
         const uint8_t* order = sigma[round];
 
         mix(state, 0, 4, 8, 12, message[order[0]], message[order[1]]);
