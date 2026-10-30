@@ -3,6 +3,7 @@
 #include <vex/fcntl.h>
 #include <vex/mman.h>
 #include <vex/resource.h>
+#include <vex/signal.h>
 #include <vex/syscall.h>
 #include <vex/wait.h>
 
@@ -198,37 +199,67 @@ static void test_nofile(void)
     ktest_expect(wait_status(child), __k_W_EXITCODE(63, 0));
 }
 
-// The probe runs in the program that exec made. It tells which of two places below the top of its stack are mapped:
-// 100 KiB gives 1 when it is, and 300 KiB gives 2 when it is not
-static int stack_child(void)
+static long parse_kib(const char* text)
+{
+    long value = 0;
+
+    while(*text >= '0' && *text <= '9') {
+        value = value * 10 + (*text - '0');
+        text += 1;
+    }
+
+    return value;
+}
+
+// The probe runs in the program that exec made. The page that depth KiB below the top of its stack is in
+// is not mapped at first, and a write to it grows the stack, or kills the program past the limit
+static int stack_child(long depth)
 {
     char marker;
     long top = (long)(&marker);
-    long inside = (top - 100 * KIB) & ~(long)(PAGE_SIZE - 1);
-    long outside = (top - 300 * KIB) & ~(long)(PAGE_SIZE - 1);
-    int code = 0;
+    long page = (top - depth * KIB) & ~(long)(PAGE_SIZE - 1);
 
-    if(ktest_syscall3(__k_SYS_MADVISE, inside, PAGE_SIZE, __k_MADV_NORMAL) == 0) {
-        code += 1;
+    if(ktest_syscall3(__k_SYS_MADVISE, page, PAGE_SIZE, __k_MADV_NORMAL) != -__k_ENOMEM) {
+        return 1;
     }
 
-    if(ktest_syscall3(__k_SYS_MADVISE, outside, PAGE_SIZE, __k_MADV_NORMAL) == -__k_ENOMEM) {
-        code += 2;
+    *(volatile char*)(page) = 1;
+
+    if(ktest_syscall3(__k_SYS_MADVISE, page, PAGE_SIZE, __k_MADV_NORMAL)) {
+        return 2;
     }
 
-    return code;
+    return 0;
 }
 
-static void test_stack(void)
+static volatile bool stop_recursion; // Never set; the compiler can't tell, and lets the recursion be
+
+// Each call keeps a page of its own alive, so the compiler can neither drop the frame nor make it a loop
+static long recurse(long depth)
+{
+    if(stop_recursion) {
+        return 0;
+    }
+
+    volatile char frame[PAGE_SIZE];
+    frame[0] = (char)(depth);
+
+    return recurse(depth + 1) + frame[0];
+}
+
+static long run_stack_child(long limit, const char* depth)
 {
     long child = ktest_syscall1(__k_SYS_FORK, 0);
 
     if(child == 0) {
-        const char* argv[] = { program_path, "stack-child", 0 };
+        const char* argv[] = { program_path, "stack-child", depth, 0 };
+
+        if(depth == nullptr) {
+            argv[1] = "stack-overflow";
+        }
         const char* envp[] = { 0 };
 
-        // Less than the least stack the kernel gives out: the least comes
-        if(set_limit(__k_RLIMIT_STACK, 16 * KIB, __k_RLIM_INFINITY)) {
+        if(set_limit(__k_RLIMIT_STACK, limit, __k_RLIM_INFINITY)) {
             ktest_syscall1(__k_SYS_EXIT, 100);
         }
 
@@ -236,31 +267,31 @@ static void test_stack(void)
         ktest_syscall1(__k_SYS_EXIT, 99);
     }
 
-    // 64 KiB is the least stack, so both places are out of it
-    ktest_expect(wait_status(child), __k_W_EXITCODE(2, 0));
+    return wait_status(child);
+}
 
-    child = ktest_syscall1(__k_SYS_FORK, 0);
+static void test_stack(void)
+{
+    // Less than the least stack the kernel gives out, which is 64 KiB
+    ktest_expect(run_stack_child(16 * KIB, "100"), __k_SIGSEGV);
 
-    if(child == 0) {
-        const char* argv[] = { program_path, "stack-child", 0 };
-        const char* envp[] = { 0 };
+    // The stack grows to where it is touched, also past a gap, up to the limit
+    ktest_expect(run_stack_child(2 * MIB, "300"), __k_W_EXITCODE(0, 0));
+    ktest_expect(run_stack_child(2 * MIB, "1900"), __k_W_EXITCODE(0, 0));
+    ktest_expect(run_stack_child(2 * MIB, "2100"), __k_SIGSEGV);
 
-        if(set_limit(__k_RLIMIT_STACK, 2 * MIB, __k_RLIM_INFINITY)) {
-            ktest_syscall1(__k_SYS_EXIT, 100);
-        }
-
-        ktest_syscall3(__k_SYS_EXEC, (long)(program_path), (long)(argv), (long)(envp));
-        ktest_syscall1(__k_SYS_EXIT, 99);
-    }
-
-    // Both places are in a stack of 2 MiB
-    ktest_expect(wait_status(child), __k_W_EXITCODE(1, 0));
+    // Endless recursion ends in SIGSEGV at the limit
+    ktest_expect(run_stack_child(512 * KIB, nullptr), __k_SIGSEGV);
 }
 
 int main(int argc, char** argv)
 {
-    if(argc > 1 && ktest_string_equal(argv[1], "stack-child")) {
-        return stack_child();
+    if(argc > 1 && ktest_string_equal(argv[1], "stack-overflow")) {
+        return (int)(recurse(0));
+    }
+
+    if(argc > 2 && ktest_string_equal(argv[1], "stack-child")) {
+        return stack_child(parse_kib(argv[2]));
     }
 
     program_path = argv[0];
