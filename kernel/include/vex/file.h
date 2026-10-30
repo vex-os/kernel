@@ -45,6 +45,7 @@ ssize_t file_write(file_t* restrict file, const credentials_t* restrict credenti
 int file_truncate(file_t* restrict file, const credentials_t* restrict credentials, off_t size);
 off_t file_seek(file_t* restrict file, off_t offset, int origin);
 int file_ioctl(file_t* restrict file, uint32_t request, uintptr_t argument);
+unsigned file_poll(file_t* restrict file, poll_table_t* restrict table);
 
 static __always_inline unsigned file_flags(const file_t* restrict file)
 {

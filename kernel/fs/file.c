@@ -323,3 +323,8 @@ int file_ioctl(file_t* restrict file, uint32_t request, uintptr_t argument)
         return -EINVAL;
     return vnode_ioctl(file->node, file, request, argument);
 }
+
+unsigned file_poll(file_t* restrict file, poll_table_t* restrict table)
+{
+    return vnode_poll(file->node, file, table);
+}

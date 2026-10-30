@@ -13,6 +13,7 @@
 
 typedef struct file_s file_t;
 typedef struct pmap_s pmap_t;
+typedef struct poll_table_s poll_table_t;
 typedef struct vcache_entry_s vcache_entry_t;
 typedef struct block_interface_s block_interface_t;
 typedef struct vfs_s vfs_t;
@@ -113,6 +114,12 @@ struct vnode_ops_s {
 
     ssize_t (*readlink)(vnode_t* restrict node, char* restrict buf, size_t size);
     int (*ioctl)(vnode_t* restrict node, file_t* restrict file, uint32_t request, uintptr_t argument);
+
+    /// Reports the state of the file as POLL bits, without a wait
+    /// @param table Gets, through poll_table_add, each event whose trigger can change the result
+    /// @note nullptr makes the file always ready to read and write
+    unsigned (*poll)(vnode_t* restrict node, file_t* restrict file, poll_table_t* restrict table);
+
     int (*stat)(vnode_t* restrict node, stat_t* restrict out);
     int (*fsync)(vnode_t* restrict node);
 
@@ -209,6 +216,7 @@ int vnode_may_delete(vnode_t* restrict dir, const char* restrict name, const cre
 int vnode_access(vnode_t* restrict node, const credentials_t* restrict credentials, unsigned mask) __nodiscard;
 int vnode_remove_privs(vnode_t* restrict node, const credentials_t* restrict credentials) __nodiscard;
 int vnode_ioctl(vnode_t* restrict node, file_t* restrict file, uint32_t request, uintptr_t argument);
+unsigned vnode_poll(vnode_t* restrict node, file_t* restrict file, poll_table_t* restrict table);
 int vnode_fsync(vnode_t* restrict node);
 int vnode_fault(vnode_t* restrict node, off_t offset, pmap_t* restrict pmap, virt_addr_t virt, unsigned vprot);
 int vnode_mmap(vnode_t* restrict node, off_t offset, size_t length);

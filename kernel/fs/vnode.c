@@ -4,6 +4,7 @@
 #include <vex/limits.h>
 #include <vex/mount.h>
 #include <vex/mutex.h>
+#include <vex/poll.h>
 #include <vex/slab.h>
 #include <vex/spinlock.h>
 #include <vex/string.h>
@@ -1419,6 +1420,28 @@ int vnode_ioctl(vnode_t* restrict node, file_t* restrict file, uint32_t request,
     vnode_decref(target);
 
     return retval;
+}
+
+unsigned vnode_poll(vnode_t* restrict node, file_t* restrict file, poll_table_t* restrict table)
+{
+    kassert(node);
+
+    vnode_t* target;
+    int retval = vfs_cross_mount(node, &target);
+
+    if(retval < 0) {
+        return POLLERR;
+    }
+
+    unsigned revents = POLL_READABLE | POLL_WRITABLE;
+
+    if(target->ops->poll) {
+        revents = target->ops->poll(target, file, table);
+    }
+
+    vnode_decref(target);
+
+    return revents;
 }
 
 int vnode_fsync(vnode_t* restrict node)
