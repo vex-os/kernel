@@ -542,7 +542,7 @@ static intptr_t sys_fork(void)
     thread_t* child_thread = nullptr;
 
     if(retval == 0) {
-        child_thread = thread_create_fork(child, thread->syscall_ctx);
+        child_thread = thread_create_fork(child, thread, thread->syscall_ctx);
 
         if(child_thread == nullptr) {
             retval = -ENOMEM;

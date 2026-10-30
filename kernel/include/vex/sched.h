@@ -2,6 +2,7 @@
 
 #include <arch/sched.h>
 #include <usr/vex/sched.h>
+#include <vex/hart.h>
 #include <vex/types.h>
 
 typedef struct hart_context_s hart_context_t;
@@ -25,6 +26,10 @@ typedef struct __k_sched_range sched_range_t;
 #define SCHED_BATCH __k_SCHED_BATCH
 #define SCHED_IDLE  __k_SCHED_IDLE
 
+/// The words of the affinity mask of a thread:
+/// a bit for each hart that the kernel can have
+#define SCHED_AFFINITY_WORDS ((MAX_HARTS + 63U) / 64U)
+
 typedef void (*kernel_thread_entry_t)(void* restrict arg);
 
 /// How long a thread of a process with this nice value runs before the scheduler lets another thread on its hart
@@ -43,12 +48,22 @@ thread_t* thread_create_user(process_t* restrict process, uintptr_t entry, uintp
 /// thread_create_user, then sched_enqueue
 thread_t* thread_spawn_user(process_t* restrict process, uintptr_t entry, uintptr_t stack_top);
 
-/// The new thread stays blocked until sched_enqueue
+/// The new thread stays blocked until sched_enqueue, and starts with the affinity of the creator
 /// @param ctx The parent's system call frame, which the child resumes from
-thread_t* thread_create_fork(process_t* restrict process, const hart_context_t* restrict ctx);
+thread_t* thread_create_fork(process_t* restrict process, const thread_t* restrict creator, const hart_context_t* restrict ctx);
 
-/// The new thread stays blocked until sched_enqueue, and starts with the signal mask of the creator
+/// The new thread stays blocked until sched_enqueue, and starts with the signal mask and the affinity of the creator
 thread_t* thread_create_sibling(const thread_t* restrict creator, uintptr_t entry, uintptr_t stack_top, uintptr_t arg, uintptr_t tcb);
+
+/// Lets the thread run only on the harts of the mask, and moves it off a hart that the mask leaves out
+/// @param mask SCHED_AFFINITY_WORDS words, with a bit set for at least one hart that is online
+/// @pre The caller keeps the thread from being reaped, as the process lock held does
+/// @retval -ENOMEM The thread has no mask yet, and there is no memory for one
+int thread_set_affinity(thread_t* restrict thread, const uint64_t* restrict mask);
+
+/// Fills SCHED_AFFINITY_WORDS words; a thread with no mask of its own gets every bit set
+/// @pre As for thread_set_affinity
+void thread_get_affinity(const thread_t* restrict thread, uint64_t* restrict mask);
 
 /// Wakes a blocked thread, whatever it waits for. Does nothing to a thread that is not blocked
 /// @note Any context, with interrupts disabled or spinlocks held

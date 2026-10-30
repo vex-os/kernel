@@ -53,6 +53,12 @@ struct thread_s {
     hart_local_t* last_hart;  // The hart this thread runs on or last to be running on
     hart_local_t* bound_hart; // The hart this thread MUST run on, nullptr otherwise
 
+    // The harts that user space let this thread run
+    // on, one bit each. Made by the first sched_setaffinity
+    // for the thread and changed in place after that, so the scheduler
+    // reads it without a lock; nullptr stands for every hart
+    uint64_t* affinity;
+
     runqueue_t* runqueue;
     thread_t* runqueue_next;
     thread_t* runqueue_prev;

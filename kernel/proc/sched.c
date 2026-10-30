@@ -3,6 +3,7 @@
 #include <vex/atomic.h>
 #include <vex/clockevt.h>
 #include <vex/clocksrc.h>
+#include <vex/errno.h>
 #include <vex/event.h>
 #include <vex/hart.h>
 #include <vex/initcall.h>
@@ -53,6 +54,25 @@ static uint64_t nice_timeslices[NICE_LEVELS];
 static unsigned sched_irq_number;
 static spinlock_t sleep_lock = SPINLOCK_INIT;
 static thread_t* sleep_head;
+
+// The mask is changed in place word by word, so a read can see a mix of the old and the new bits. That only decides
+// where the thread goes next, and the next look at the mask corrects it
+static bool thread_may_run_on(const thread_t* restrict thread, const hart_local_t* restrict hart)
+{
+    if(thread->bound_hart && thread->bound_hart != hart) {
+        return false;
+    }
+
+    const uint64_t* mask = atomic_load_n(&thread->affinity, ATOMIC_ACQUIRE);
+
+    if(mask == nullptr) {
+        return true;
+    }
+
+    uint64_t word = atomic_load_n(&mask[hart->index / 64U], ATOMIC_RELAXED);
+
+    return word & (UINT64_C(1) << (hart->index % 64U));
+}
 
 static void rq_push_nolock(runqueue_t* restrict runqueue, thread_t* restrict thread)
 {
@@ -110,7 +130,7 @@ static void rq_unlink(thread_t* restrict thread)
 static thread_t* rq_take_nolock(runqueue_t* restrict runqueue, hart_local_t* restrict hart)
 {
     for(thread_t* thread = runqueue->head; thread; thread = thread->runqueue_next) {
-        if(thread->bound_hart && thread->bound_hart != hart) {
+        if(!thread_may_run_on(thread, hart)) {
             continue;
         }
 
@@ -212,6 +232,10 @@ static hart_local_t* choose_hart(const thread_t* restrict thread)
 
     hart_local_t* last = atomic_load(&thread->last_hart, ATOMIC_RELAXED);
 
+    if(last && !thread_may_run_on(thread, last)) {
+        last = nullptr;
+    }
+
     if(last) {
         if(SPINLOCK_LOCK == atomic_load(&thread->hart_lock, ATOMIC_ACQUIRE)) {
             return last;
@@ -225,7 +249,7 @@ static hart_local_t* choose_hart(const thread_t* restrict thread)
     for(unsigned long i = 0; i < num_harts; ++i) {
         hart_local_t* hart = &harts[i];
 
-        if(hart_is_idle(hart)) {
+        if(hart_is_idle(hart) && thread_may_run_on(thread, hart)) {
             return hart;
         }
     }
@@ -237,12 +261,27 @@ static hart_local_t* choose_hart(const thread_t* restrict thread)
         return last;
     }
 
-    return this_hart();
+    hart_local_t* here = this_hart();
+
+    if(thread_may_run_on(thread, here)) {
+        return here;
+    }
+
+    // The mask always holds an online hart, so this finds one
+    for(unsigned long i = 0; i < num_harts; ++i) {
+        hart_local_t* hart = &harts[i];
+
+        if(thread_may_run_on(thread, hart)) {
+            return hart;
+        }
+    }
+
+    return here;
 }
 
 static void kick_hart(hart_local_t* restrict target, const thread_t* restrict thread)
 {
-    if(hart_is_idle(target)) {
+    if(hart_is_idle(target) && thread_may_run_on(thread, target)) {
         hart_ipi(target, sched_irq_number);
         return;
     }
@@ -254,7 +293,7 @@ static void kick_hart(hart_local_t* restrict target, const thread_t* restrict th
     for(unsigned long i = 0; i < num_harts; ++i) {
         hart_local_t* hart = &harts[i];
 
-        if(hart_is_idle(hart)) {
+        if(hart_is_idle(hart) && thread_may_run_on(thread, hart)) {
             hart_ipi(hart, sched_irq_number);
             return;
         }
@@ -290,6 +329,7 @@ static void reap_thread(thread_t* restrict thread)
     kstack_free(thread->kstack_top);
     pslab_free_virt(thread->io_page);
     kfree(thread->events);
+    slab_free(thread->affinity);
     slab_free(thread);
 }
 
@@ -343,6 +383,10 @@ static void sched_irq_handler(unsigned number, const hart_context_t* restrict ct
 
     thread_t* next = rq_take_nolock(runqueue, hart);
 
+    // A mask that changed under the thread leaves it here until this tick, which makes it go
+    bool misplaced = curr != hart->idle_thread && !thread_may_run_on(curr, hart);
+    bool rehome = false;
+
     // The handler runs on curr's stack, so curr
     // may only be handed over once sched_enter is off it
     spinlock_t* curr_hart_lock = nullptr;
@@ -353,7 +397,7 @@ static void sched_irq_handler(unsigned number, const hart_context_t* restrict ct
 
             hart->dead_thread = curr;
         }
-        else if(next == nullptr && curr->state != THREAD_BLOCKED) {
+        else if(next == nullptr && curr->state != THREAD_BLOCKED && !misplaced) {
             // Nothing else to run: keep going, even
             // if curr was woken up while blocking
             if(curr->state == THREAD_RUNNABLE) {
@@ -381,7 +425,13 @@ static void sched_irq_handler(unsigned number, const hart_context_t* restrict ct
                 usage_increase(&curr->usage.voluntary_switches, 1);
             }
 
-            if(curr->state == THREAD_RUNNING) {
+            if(curr->state == THREAD_RUNNING && misplaced) {
+                // The queue of this hart is no place for a thread that it cannot run: nothing here would ever take it
+                // out, and the idle thread would spin on it. It is woken instead, onto a hart that may run it
+                curr->state = THREAD_BLOCKED;
+                rehome = true;
+            }
+            else if(curr->state == THREAD_RUNNING) {
                 curr->state = THREAD_RUNNABLE;
                 rq_push_nolock(runqueue, curr);
             }
@@ -394,6 +444,11 @@ static void sched_irq_handler(unsigned number, const hart_context_t* restrict ct
 
     if(curr != hart->idle_thread) {
         raw_spinlock_release(&curr->sched_lock);
+    }
+
+    // Its hart_lock holds the new hart off until this one is done with the stack
+    if(rehome) {
+        sched_enqueue(curr);
     }
 
     // Only a hart that would otherwise idle steals
@@ -465,6 +520,7 @@ static thread_t* alloc_thread_user(process_t* restrict process)
     thread->need_resched = false;
     thread->last_hart = nullptr;
     thread->bound_hart = nullptr;
+    thread->affinity = nullptr;
     thread->wake_next = nullptr;
     thread->sched_lock = SPINLOCK_INIT;
     thread->hart_lock = SPINLOCK_INIT;
@@ -473,6 +529,37 @@ static thread_t* alloc_thread_user(process_t* restrict process)
     thread->io_page = nullptr;
 
     return thread;
+}
+
+static void discard_thread_user(thread_t* restrict thread)
+{
+    cred_decref(thread->credentials);
+    kstack_free(thread->kstack_top);
+    slab_free(thread->affinity);
+    slab_free(thread);
+}
+
+static int inherit_affinity(thread_t* restrict thread, const thread_t* restrict creator)
+{
+    const uint64_t* source = atomic_load_n(&creator->affinity, ATOMIC_ACQUIRE);
+
+    if(source == nullptr) {
+        return 0;
+    }
+
+    uint64_t* mask = slab_alloc(SCHED_AFFINITY_WORDS * sizeof(uint64_t));
+
+    if(mask == nullptr) {
+        return -ENOMEM;
+    }
+
+    for(size_t i = 0; i < SCHED_AFFINITY_WORDS; ++i) {
+        mask[i] = atomic_load_n(&source[i], ATOMIC_RELAXED);
+    }
+
+    thread->affinity = mask;
+
+    return 0;
 }
 
 static void attach_thread_user(process_t* restrict process, thread_t* restrict thread)
@@ -526,6 +613,84 @@ static hart_local_t* wake_locked(thread_t* restrict thread)
     return target;
 }
 
+// A thread that waits in the queue of a hart the mask leaves out moves to one that it may use. One that is running on such a
+// hart is moved by the tick that the interrupt causes
+static void affinity_changed(thread_t* restrict thread)
+{
+    bool intr_state = spinlock_acquire_intr(&thread->sched_lock);
+
+    hart_local_t* last = atomic_load(&thread->last_hart, ATOMIC_RELAXED);
+    hart_local_t* target = nullptr;
+    bool interrupt = false;
+
+    if(thread->state == THREAD_RUNNING && last && !thread_may_run_on(thread, last)) {
+        interrupt = true;
+    }
+    else if(thread->state == THREAD_RUNNABLE && thread->runqueue) {
+        hart_local_t* queued_on = &harts[thread->runqueue - runqueues];
+
+        if(!thread_may_run_on(thread, queued_on)) {
+            rq_unlink(thread);
+            thread->state = THREAD_BLOCKED;
+            target = wake_locked(thread);
+        }
+    }
+
+    spinlock_release_intr(&thread->sched_lock, intr_state);
+
+    if(interrupt) {
+        hart_ipi(last, sched_irq_number);
+    }
+
+    if(target) {
+        kick_hart(target, thread);
+    }
+}
+
+int thread_set_affinity(thread_t* restrict thread, const uint64_t* restrict mask)
+{
+    uint64_t* current = atomic_load_n(&thread->affinity, ATOMIC_ACQUIRE);
+
+    if(current == nullptr) {
+        uint64_t* fresh = slab_alloc(SCHED_AFFINITY_WORDS * sizeof(uint64_t));
+
+        if(fresh == nullptr) {
+            return -ENOMEM;
+        }
+
+        // Every hart, until the words below say otherwise
+        memset(fresh, 0xFF, SCHED_AFFINITY_WORDS * sizeof(uint64_t));
+
+        if(atomic_cmpxchg(&thread->affinity, &current, fresh, ATOMIC_ACQ_REL, ATOMIC_ACQUIRE)) {
+            current = fresh;
+        }
+        else {
+            slab_free(fresh);
+        }
+    }
+
+    for(size_t i = 0; i < SCHED_AFFINITY_WORDS; ++i) {
+        atomic_store_n(&current[i], mask[i], ATOMIC_RELAXED);
+    }
+
+    affinity_changed(thread);
+
+    return 0;
+}
+
+void thread_get_affinity(const thread_t* restrict thread, uint64_t* restrict mask)
+{
+    const uint64_t* current = atomic_load_n(&thread->affinity, ATOMIC_ACQUIRE);
+
+    for(size_t i = 0; i < SCHED_AFFINITY_WORDS; ++i) {
+        mask[i] = UINT64_MAX;
+
+        if(current) {
+            mask[i] = atomic_load_n(&current[i], ATOMIC_RELAXED);
+        }
+    }
+}
+
 uint64_t sched_timeslice_for_nice(int nice)
 {
     if(nice < NICE_MIN) {
@@ -565,6 +730,7 @@ thread_t* thread_create_kernel(kernel_thread_entry_t entry, void* restrict arg)
     thread->need_resched = false;
     thread->last_hart = nullptr;
     thread->bound_hart = nullptr;
+    thread->affinity = nullptr;
     thread->wake_next = nullptr;
     thread->sched_lock = SPINLOCK_INIT;
     thread->hart_lock = SPINLOCK_INIT;
@@ -609,6 +775,11 @@ thread_t* thread_create_sibling(const thread_t* restrict creator, uintptr_t entr
     process_t* process = creator->process;
     thread_t* thread = alloc_thread_user(process);
 
+    if(thread && inherit_affinity(thread, creator) < 0) {
+        discard_thread_user(thread);
+        return nullptr;
+    }
+
     if(thread) {
         // Before the thread is attached, or a process-wide signal
         // could pick it for one that its mask is going to block
@@ -621,9 +792,14 @@ thread_t* thread_create_sibling(const thread_t* restrict creator, uintptr_t entr
     return thread;
 }
 
-thread_t* thread_create_fork(process_t* restrict process, const hart_context_t* restrict ctx)
+thread_t* thread_create_fork(process_t* restrict process, const thread_t* restrict creator, const hart_context_t* restrict ctx)
 {
     thread_t* thread = alloc_thread_user(process);
+
+    if(thread && inherit_affinity(thread, creator) < 0) {
+        discard_thread_user(thread);
+        return nullptr;
+    }
 
     if(thread) {
         arch_thread_setup_fork(thread, ctx, process->vmspace);
