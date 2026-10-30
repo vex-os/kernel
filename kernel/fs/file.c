@@ -1,6 +1,7 @@
 #include <vex/atomic.h>
 #include <vex/fcntl.h>
 #include <vex/file.h>
+#include <vex/file_lock.h>
 #include <vex/mount.h>
 #include <vex/path.h>
 #include <vex/slab.h>
@@ -192,6 +193,7 @@ void file_close(file_t* restrict file)
     }
 
     if(1 == atomic_fetch_sub(&file->refcount, 1, ATOMIC_ACQ_REL)) {
+        file_lock_release(file->node, file); // The locks of the open file, from F_OFD_SETLK and flock
         vnode_close(file->node, file);
         vnode_decref(file->node);
         slab_free(file);

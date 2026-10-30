@@ -613,25 +613,37 @@ static int lock_range(file_t* restrict file, const flock_t* restrict lock, file_
     return 0;
 }
 
-static int lock_request_of(file_t* restrict file, const flock_t* restrict lock, file_lock_request_t* restrict out)
+// A POSIX lock belongs to the process, and a lock of an
+// open file to the file, which F_GETLK reports as pid -1
+// The F_OFD_* calls take l_pid zero, so that a later meaning of it breaks no caller
+static int lock_request_of(file_t* restrict file, const flock_t* restrict lock, bool of_file, file_lock_request_t* restrict out)
 {
-    thread_t* thread = this_thread();
-    process_t* process = thread->process;
-
     bool known = lock->l_type == F_RDLCK || lock->l_type == F_WRLCK || lock->l_type == F_UNLCK;
 
     if(!known) {
         return -EINVAL;
     }
 
+    if(of_file && lock->l_pid) {
+        return -EINVAL;
+    }
+
+    thread_t* thread = this_thread();
+    process_t* process = thread->process;
+
     out->owner = process;
     out->pid = process->pid;
     out->type = lock->l_type;
 
+    if(of_file) {
+        out->owner = file;
+        out->pid = -1;
+    }
+
     return lock_range(file, lock, out);
 }
 
-static intptr_t fcntl_getlk(file_t* restrict file, user_addr_t address)
+static intptr_t fcntl_getlk(file_t* restrict file, user_addr_t address, bool of_file)
 {
     flock_t lock;
     ssize_t copied = user_copyin(&lock, address, sizeof(lock));
@@ -641,7 +653,7 @@ static intptr_t fcntl_getlk(file_t* restrict file, user_addr_t address)
     }
 
     file_lock_request_t request = {};
-    int retval = lock_request_of(file, &lock, &request);
+    int retval = lock_request_of(file, &lock, of_file, &request);
 
     if(retval < 0) {
         return retval;
@@ -675,7 +687,7 @@ static intptr_t fcntl_getlk(file_t* restrict file, user_addr_t address)
 }
 
 // A read lock takes a file open for reading, and a write lock one open for writing
-static intptr_t fcntl_setlk(file_t* restrict file, user_addr_t address, bool wait)
+static intptr_t fcntl_setlk(file_t* restrict file, user_addr_t address, bool of_file, bool wait)
 {
     flock_t lock;
     ssize_t copied = user_copyin(&lock, address, sizeof(lock));
@@ -685,7 +697,7 @@ static intptr_t fcntl_setlk(file_t* restrict file, user_addr_t address, bool wai
     }
 
     file_lock_request_t request = {};
-    int retval = lock_request_of(file, &lock, &request);
+    int retval = lock_request_of(file, &lock, of_file, &request);
 
     if(retval < 0) {
         return retval;
@@ -724,11 +736,17 @@ static intptr_t fcntl_command(file_t* restrict file, int fd, unsigned command, u
         case F_SETFL:
             return fcntl_setfl(file, argument);
         case F_GETLK:
-            return fcntl_getlk(file, user_addr(argument));
+            return fcntl_getlk(file, user_addr(argument), false);
         case F_SETLK:
-            return fcntl_setlk(file, user_addr(argument), false);
+            return fcntl_setlk(file, user_addr(argument), false, false);
         case F_SETLKW:
-            return fcntl_setlk(file, user_addr(argument), true);
+            return fcntl_setlk(file, user_addr(argument), false, true);
+        case F_OFD_GETLK:
+            return fcntl_getlk(file, user_addr(argument), true);
+        case F_OFD_SETLK:
+            return fcntl_setlk(file, user_addr(argument), true, false);
+        case F_OFD_SETLKW:
+            return fcntl_setlk(file, user_addr(argument), true, true);
         default:
             return -EINVAL;
     }
@@ -750,6 +768,40 @@ static intptr_t sys_fcntl(int fd, unsigned command, uintptr_t argument)
 }
 
 define_syscall(sys_fcntl, SYS_FCNTL, 3);
+
+// A lock of the open file over the whole file, so
+// it meets the locks of fcntl like any other range.
+// A change between shared and exclusive drops the old lock first,
+// as in Linux and BSD, so another owner may get the file in between
+static intptr_t sys_flock(file_t* restrict file, uintptr_t operation)
+{
+    file_lock_request_t request = {};
+    request.owner = file;
+    request.pid = -1;
+    request.start = 0;
+    request.end = FILE_LOCK_END;
+
+    switch(operation & ~(uintptr_t)(LOCK_NB)) {
+        case LOCK_SH:
+            request.type = F_RDLCK;
+            break;
+
+        case LOCK_EX:
+            request.type = F_WRLCK;
+            break;
+
+        case LOCK_UN:
+            request.type = F_UNLCK;
+            break;
+
+        default:
+            return -EINVAL;
+    }
+
+    return file_lock_replace(file->node, &request, 0 == (operation & LOCK_NB));
+}
+
+define_syscall_fd(sys_flock, SYS_FLOCK, 2);
 
 static intptr_t sys_openat(int dirfd, const char* restrict path, uintptr_t flags, mode_t mode)
 {

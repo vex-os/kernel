@@ -24,12 +24,20 @@
 #define F_GETLK         __k_F_GETLK
 #define F_SETLK         __k_F_SETLK
 #define F_SETLKW        __k_F_SETLKW
+#define F_OFD_GETLK     __k_F_OFD_GETLK
+#define F_OFD_SETLK     __k_F_OFD_SETLK
+#define F_OFD_SETLKW    __k_F_OFD_SETLKW
 
 #define FD_CLOEXEC __k_FD_CLOEXEC
 
 #define F_RDLCK __k_F_RDLCK
 #define F_WRLCK __k_F_WRLCK
 #define F_UNLCK __k_F_UNLCK
+
+#define LOCK_SH __k_LOCK_SH
+#define LOCK_EX __k_LOCK_EX
+#define LOCK_NB __k_LOCK_NB
+#define LOCK_UN __k_LOCK_UN
 
 #define F_OK __k_F_OK
 #define X_OK __k_X_OK

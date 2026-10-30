@@ -25,12 +25,22 @@
 #define __k_F_GETLK         6
 #define __k_F_SETLK         7
 #define __k_F_SETLKW        8
+#define __k_F_OFD_GETLK     9
+#define __k_F_OFD_SETLK     10
+#define __k_F_OFD_SETLKW    11
 
 #define __k_FD_CLOEXEC 0x0001
 
 #define __k_F_RDLCK 0
 #define __k_F_WRLCK 1
 #define __k_F_UNLCK 2
+
+/* Operations of flock: one of LOCK_SH, LOCK_EX
+ * and LOCK_UN, with LOCK_NB if it may not wait */
+#define __k_LOCK_SH 0x0001
+#define __k_LOCK_EX 0x0002
+#define __k_LOCK_NB 0x0004
+#define __k_LOCK_UN 0x0008
 
 #define __k_SEEK_SET 0
 #define __k_SEEK_CUR 1
@@ -57,7 +67,7 @@ struct __k_flock {
     __k_int16_t l_whence;
     __k_off_t l_start;
     __k_off_t l_len;
-    __k_pid_t l_pid; /* Of the process that holds the lock, for F_GETLK */
+    __k_pid_t l_pid; /* Of the process that holds the lock, for F_GETLK; -1 for a lock of an open file, and 0 into the F_OFD_* calls */
 };
 
 #endif /* USR_VEX_FCNTL_H */
