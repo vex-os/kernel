@@ -6,6 +6,7 @@
 #include <vex/limits.h>
 #include <vex/mount.h>
 #include <vex/path.h>
+#include <vex/pipe.h>
 #include <vex/process.h>
 #include <vex/pslab.h>
 #include <vex/stat.h>
@@ -132,11 +133,13 @@ static void io_cursor_advance(io_cursor_t* restrict cursor, size_t size)
     cursor->left -= size;
 }
 
-// A device such as a tty hands out what it has at once,
+// A device such as a tty or a pipe hands out what it has at once,
 // and asking it again would wait for more to come in
 static bool hands_out_at_once(const file_t* restrict file)
 {
-    return file->node->type == VNODE_CHAR_DEV;
+    unsigned type = file->node->type;
+
+    return type == VNODE_CHAR_DEV || type == VNODE_FIFO;
 }
 
 static intptr_t read_chunks(file_t* restrict file, io_cursor_t* restrict cursor, off_t* restrict position)
@@ -675,3 +678,64 @@ static intptr_t sys_dup(int old_fd, int new_fd, uintptr_t flags)
 }
 
 define_syscall(sys_dup, SYS_DUP, 3);
+
+static intptr_t sys_pipe(user_addr_t fds, uintptr_t flags)
+{
+    thread_t* thread = this_thread();
+    process_t* process = thread->process;
+
+    if(process == nullptr) {
+        return -ENOSYS;
+    }
+
+    if(flags & ~(uintptr_t)(O_CLOEXEC | O_NONBLOCK)) {
+        return -EINVAL;
+    }
+
+    uint32_t fd_flags = 0;
+
+    if(flags & O_CLOEXEC) {
+        fd_flags = FD_CLOEXEC;
+    }
+
+    file_t* read_end;
+    file_t* write_end;
+    int retval = pipe_create(flags & O_NONBLOCK, thread->credentials, &read_end, &write_end);
+
+    if(retval < 0) {
+        return retval;
+    }
+
+    int read_fd = process_fd_alloc(process, read_end, 0, fd_flags);
+
+    if(read_fd < 0) {
+        file_close(read_end);
+        file_close(write_end);
+        return read_fd;
+    }
+
+    int write_fd = process_fd_alloc(process, write_end, 0, fd_flags);
+
+    if(write_fd < 0) {
+        process_fd_release(process, read_fd);
+        file_close(write_end);
+        return write_fd;
+    }
+
+    int32_t pair[2];
+    pair[0] = read_fd;
+    pair[1] = write_fd;
+
+    ssize_t copied = user_copyout(fds, pair, sizeof(pair));
+
+    // Another thread may have closed or reused the descriptors by now. This is its own doing
+    if(copied < 0) {
+        process_fd_release(process, read_fd);
+        process_fd_release(process, write_fd);
+        return copied;
+    }
+
+    return 0;
+}
+
+define_syscall(sys_pipe, SYS_PIPE, 2);

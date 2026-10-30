@@ -84,6 +84,7 @@ typedef struct vnode_s vnode_t;
 #define SYS_WRITEV    __k_SYS_WRITEV
 #define SYS_PREADV    __k_SYS_PREADV
 #define SYS_PWRITEV   __k_SYS_PWRITEV
+#define SYS_PIPE      __k_SYS_PIPE
 
 #define SYS_FSTATAT    __k_SYS_FSTATAT
 #define SYS_FCHMODAT   __k_SYS_FCHMODAT

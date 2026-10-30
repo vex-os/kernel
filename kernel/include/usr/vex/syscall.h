@@ -81,6 +81,7 @@
 #define __k_SYS_WRITEV    0x0D0
 #define __k_SYS_PREADV    0x0D1
 #define __k_SYS_PWRITEV   0x0D2
+#define __k_SYS_PIPE      0x0D3
 
 #define __k_SYS_FSTATAT    0x0E0
 #define __k_SYS_FCHMODAT   0x0E1
