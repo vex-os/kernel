@@ -340,18 +340,26 @@ static int fault_locked(vmspace_t* restrict vmspace, virt_addr_t page, unsigned 
         return retval;
     }
 
+    // A private page of a file can take
+    // two passes, the read on the first
+    int kind = VMS_FAULT_MINOR;
+
     for(;;) {
         bool mapped = address_valid(pmap_resolve_address(vmspace->pmap, page));
 
         if(mapped && !exclusive) {
-            return 0;
+            return kind;
         }
 
         if(mapped && !region->shared) {
             int retval = unshare_locked(vmspace, region, page);
 
-            if(retval != -EAGAIN) {
+            if(retval < 0 && retval != -EAGAIN) {
                 return retval;
+            }
+
+            if(retval == 0) {
+                return kind;
             }
 
             continue;
@@ -372,8 +380,16 @@ static int fault_locked(vmspace_t* restrict vmspace, virt_addr_t page, unsigned 
 
         int retval = vnode_fault(region->file->node, offset, vmspace->pmap, page, vprot);
 
-        if(retval < 0 || region->shared) {
+        if(retval < 0) {
             return retval;
+        }
+
+        if(retval == VMS_FAULT_MAJOR) {
+            kind = VMS_FAULT_MAJOR;
+        }
+
+        if(region->shared) {
+            return kind;
         }
     }
 
@@ -393,7 +409,7 @@ static int fault_locked(vmspace_t* restrict vmspace, virt_addr_t page, unsigned 
         return retval;
     }
 
-    return 0;
+    return VMS_FAULT_MINOR;
 }
 
 static phys_addr_t pin_locked(vmspace_t* restrict vmspace, virt_addr_t virt, unsigned access, bool exclusive)

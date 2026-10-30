@@ -18,6 +18,7 @@
 #include <vex/string.h>
 #include <vex/thread.h>
 #include <vex/tlb.h>
+#include <vex/vms.h>
 #include <vex/vnode.h>
 #include <vex/vprot.h>
 
@@ -745,7 +746,10 @@ int fcache_fault(vnode_t* restrict node, fcache_bmap_t bmap, off_t offset, off_t
         return -ENOMEM;
     }
 
+    int kind = VMS_FAULT_MINOR;
+
     if(0 == (pframe->flags & PFRAME_UPTODATE)) {
+        kind = VMS_FAULT_MAJOR;
         int retval = fill_page(node, bmap, pframe, size);
 
         if(retval < 0) {
@@ -786,7 +790,11 @@ int fcache_fault(vnode_t* restrict node, fcache_bmap_t bmap, off_t offset, off_t
 
     mutex_release(&cache->lock);
 
-    return retval;
+    if(retval < 0) {
+        return retval;
+    }
+
+    return kind;
 }
 
 int fcache_writeback(vnode_t* restrict node, fcache_bmap_t bmap, off_t size)

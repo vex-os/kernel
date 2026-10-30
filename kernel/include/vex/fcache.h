@@ -43,8 +43,12 @@ void fcache_set_memory(fcache_t* restrict cache);
 
 ssize_t fcache_read(vnode_t* restrict node, fcache_bmap_t bmap, void* restrict buffer, size_t count, off_t offset, off_t file_size);
 ssize_t fcache_write(vnode_t* restrict node, fcache_bmap_t bmap, const void* restrict buffer, size_t count, off_t offset, off_t file_size);
+
+/// @retval VMS_FAULT_MINOR The page was in the cache
+/// @retval VMS_FAULT_MAJOR The page was read in first, also when the file has a hole there
 int fcache_fault(vnode_t* restrict node, fcache_bmap_t bmap, off_t offset, off_t size, pmap_t* restrict pmap, virt_addr_t virt,
     unsigned vprot);
+
 int fcache_writeback(vnode_t* restrict node, fcache_bmap_t bmap, off_t size);
 void fcache_truncate(vnode_t* restrict node, off_t size);
 void fcache_forget(vnode_t* restrict node, uint64_t offset, uint64_t length);

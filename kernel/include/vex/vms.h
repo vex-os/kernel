@@ -14,6 +14,9 @@ typedef struct vnode_s vnode_t;
 
 #define VMS_NORESERVE 0x1 // The region takes nothing from the commit limit
 
+#define VMS_FAULT_MINOR 0 // The page was in memory, or a fresh one did
+#define VMS_FAULT_MAJOR 1 // The page had to come from the backing store of a file
+
 typedef struct vm_backing_s vm_backing_t;
 typedef struct vm_region_s vm_region_t;
 typedef struct vmspace_s vmspace_t;
@@ -80,6 +83,8 @@ int vms_protect(vmspace_t* restrict vmspace, virt_addr_t start, virt_addr_t end,
 int vms_unmap_all(vmspace_t* restrict vmspace);
 int vms_clone(vmspace_t* restrict vmspace, vmspace_t* restrict source);
 
+/// @retval VMS_FAULT_MINOR The page is mapped, and nothing waited for a device
+/// @retval VMS_FAULT_MAJOR The page is mapped, and the contents of a file came from its backing store
 int vms_fault(vmspace_t* restrict vmspace, virt_addr_t virt, unsigned access);
 
 /// Faults in every page of the range that is mapped, and stops at the first one that fails
