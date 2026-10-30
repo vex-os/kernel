@@ -1344,5 +1344,6 @@ const vnode_ops_t fat_vnode_ops = {
     .stat = &fat_vnode_stat,
     .set_attr = &fat_vnode_set_attr,
     .fsync = &fat_vnode_fsync,
+    .fallocate = &vnode_fallocate_grow,
     .fault = &fat_vnode_fault,
 };

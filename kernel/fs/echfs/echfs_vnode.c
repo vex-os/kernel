@@ -1027,5 +1027,6 @@ const vnode_ops_t echfs_vnode_ops = {
     .stat = &echfs_vnode_stat,
     .set_attr = &echfs_vnode_set_attr,
     .fsync = &echfs_vnode_fsync,
+    .fallocate = &vnode_fallocate_grow,
     .fault = &echfs_vnode_fault,
 };
