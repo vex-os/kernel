@@ -1,6 +1,7 @@
 #include <vex/address.h>
 #include <vex/atomic.h>
 #include <vex/binfmt.h>
+#include <vex/cputime.h>
 #include <vex/errno.h>
 #include <vex/event.h>
 #include <vex/fcntl.h>
@@ -11,6 +12,7 @@
 #include <vex/pgrp.h>
 #include <vex/process.h>
 #include <vex/pslab.h>
+#include <vex/resource.h>
 #include <vex/rlimit.h>
 #include <vex/sched.h>
 #include <vex/signal.h>
@@ -31,6 +33,7 @@ struct wait_result_s {
     uid_t uid;
     int code;
     int status;
+    cputime_t cputime; // Of an exit only, with the children that the child collected
 };
 
 static int copyin_string_array(user_addr_t array, const char** restrict out, char** restrict cursor, const char* restrict limit)
@@ -278,6 +281,8 @@ static void fill_exited(wait_result_t* restrict out, const process_t* restrict c
     out->uid = child->credentials->uid;
     out->code = CLD_EXITED;
     out->status = child->exit_code;
+    out->cputime = child->cputime;
+    cputime_add(&out->cputime, &child->children_cputime);
 
     if(child->exit_signal) {
         out->code = CLD_KILLED;
@@ -575,7 +580,20 @@ static intptr_t sys_exec(user_addr_t path, user_addr_t argv, user_addr_t envp)
 
 define_syscall(sys_exec, SYS_EXEC, 3);
 
-static intptr_t sys_waitpid(pid_t pid, user_addr_t wstatus, uintptr_t options)
+// UNDONE: a stop or a continue reports zero times, where Linux reports the times of the child so far
+static ssize_t copyout_rusage(user_addr_t address, const wait_result_t* restrict result)
+{
+    if(address.value == 0) {
+        return 0;
+    }
+
+    rusage_t usage;
+    cputime_to_rusage(&result->cputime, &usage);
+
+    return user_copyout(address, &usage, sizeof(usage));
+}
+
+static intptr_t sys_waitpid(pid_t pid, user_addr_t wstatus, uintptr_t options, user_addr_t usage)
 {
     if(options & ~(uintptr_t)(WNOHANG | WUNTRACED | WCONTINUED)) {
         return -EINVAL;
@@ -591,12 +609,20 @@ static intptr_t sys_waitpid(pid_t pid, user_addr_t wstatus, uintptr_t options)
     wait_result_t result = {};
     intptr_t retval = wait_selected(caller, pid, options | WEXITED, &result);
 
-    if(retval <= 0 || wstatus.value == 0) {
+    if(retval <= 0) {
         return retval;
     }
 
-    int status = status_of(&result);
-    ssize_t copied = user_copyout(wstatus, &status, sizeof(status));
+    if(wstatus.value) {
+        int status = status_of(&result);
+        ssize_t copied = user_copyout(wstatus, &status, sizeof(status));
+
+        if(copied < 0) {
+            return copied;
+        }
+    }
+
+    ssize_t copied = copyout_rusage(usage, &result);
 
     if(copied < 0) {
         return copied;
@@ -605,7 +631,7 @@ static intptr_t sys_waitpid(pid_t pid, user_addr_t wstatus, uintptr_t options)
     return retval;
 }
 
-define_syscall(sys_waitpid, SYS_WAITPID, 3);
+define_syscall(sys_waitpid, SYS_WAITPID, 4);
 
 static pid_t wait_selector(unsigned idtype, pid_t id)
 {
@@ -625,7 +651,7 @@ static pid_t wait_selector(unsigned idtype, pid_t id)
 }
 
 // Zero in si_signo and si_pid says that WNOHANG found nothing, as POSIX has it
-static intptr_t sys_waitid(unsigned idtype, pid_t id, user_addr_t info, uintptr_t options)
+static intptr_t sys_waitid(unsigned idtype, pid_t id, user_addr_t info, uintptr_t options, user_addr_t usage)
 {
     uintptr_t known = WNOHANG | WNOWAIT | WEXITED | WSTOPPED | WCONTINUED;
 
@@ -658,6 +684,13 @@ static intptr_t sys_waitid(unsigned idtype, pid_t id, user_addr_t info, uintptr_
         return retval;
     }
 
+    // Zero times when WNOHANG found nothing, as the result is still empty
+    ssize_t copied = copyout_rusage(usage, &result);
+
+    if(copied < 0) {
+        return copied;
+    }
+
     if(info.value == 0) {
         return 0;
     }
@@ -672,7 +705,7 @@ static intptr_t sys_waitid(unsigned idtype, pid_t id, user_addr_t info, uintptr_
         reply.si_status = result.status;
     }
 
-    ssize_t copied = user_copyout(info, &reply, sizeof(reply));
+    copied = user_copyout(info, &reply, sizeof(reply));
 
     if(copied < 0) {
         return copied;
@@ -681,7 +714,7 @@ static intptr_t sys_waitid(unsigned idtype, pid_t id, user_addr_t info, uintptr_
     return 0;
 }
 
-define_syscall(sys_waitid, SYS_WAITID, 4);
+define_syscall(sys_waitid, SYS_WAITID, 5);
 
 static intptr_t sys_getpid(void)
 {
