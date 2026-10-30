@@ -465,7 +465,14 @@ static int read_affinity(process_t* restrict process, pid_t tid, const thread_t*
     return retval;
 }
 
-// tid 0 stands for every thread of the process, each of which gets a mask of its own
+static bool affinity_target(const thread_t* restrict thread, pid_t tid)
+{
+    return tid == 0 || thread->tid == tid;
+}
+
+// tid 0 stands for every thread of the process, each of
+// which gets a mask of its own. The masks are all made before
+// the first one changes, so that a failure leaves every thread as it was
 static int write_affinity(process_t* restrict process, pid_t tid, const uint64_t* restrict words)
 {
     bool found = false;
@@ -474,12 +481,16 @@ static int write_affinity(process_t* restrict process, pid_t tid, const uint64_t
     bool intr_state = spinlock_acquire_intr(&process->lock);
 
     for(thread_t* it = process->threads; it && retval == 0; it = it->process_next) {
-        if(tid && it->tid != tid) {
-            continue;
+        if(affinity_target(it, tid)) {
+            found = true;
+            retval = thread_reserve_affinity(it);
         }
+    }
 
-        found = true;
-        retval = thread_set_affinity(it, words);
+    for(thread_t* it = process->threads; it && retval == 0; it = it->process_next) {
+        if(affinity_target(it, tid)) {
+            thread_set_affinity(it, words);
+        }
     }
 
     spinlock_release_intr(&process->lock, intr_state);

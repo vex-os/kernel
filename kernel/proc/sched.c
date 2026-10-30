@@ -647,35 +647,41 @@ static void affinity_changed(thread_t* restrict thread)
     }
 }
 
-int thread_set_affinity(thread_t* restrict thread, const uint64_t* restrict mask)
+int thread_reserve_affinity(thread_t* restrict thread)
+{
+    if(atomic_load_n(&thread->affinity, ATOMIC_ACQUIRE)) {
+        return 0;
+    }
+
+    uint64_t* fresh = slab_alloc(SCHED_AFFINITY_WORDS * sizeof(uint64_t));
+
+    if(fresh == nullptr) {
+        return -ENOMEM;
+    }
+
+    // Every hart, as with no mask at all
+    memset(fresh, 0xFF, SCHED_AFFINITY_WORDS * sizeof(uint64_t));
+
+    uint64_t* expected = nullptr;
+
+    if(!atomic_cmpxchg(&thread->affinity, &expected, fresh, ATOMIC_ACQ_REL, ATOMIC_ACQUIRE)) {
+        slab_free(fresh);
+    }
+
+    return 0;
+}
+
+void thread_set_affinity(thread_t* restrict thread, const uint64_t* restrict mask)
 {
     uint64_t* current = atomic_load_n(&thread->affinity, ATOMIC_ACQUIRE);
 
-    if(current == nullptr) {
-        uint64_t* fresh = slab_alloc(SCHED_AFFINITY_WORDS * sizeof(uint64_t));
-
-        if(fresh == nullptr) {
-            return -ENOMEM;
-        }
-
-        // Every hart, until the words below say otherwise
-        memset(fresh, 0xFF, SCHED_AFFINITY_WORDS * sizeof(uint64_t));
-
-        if(atomic_cmpxchg(&thread->affinity, &current, fresh, ATOMIC_ACQ_REL, ATOMIC_ACQUIRE)) {
-            current = fresh;
-        }
-        else {
-            slab_free(fresh);
-        }
-    }
+    kassert(current);
 
     for(size_t i = 0; i < SCHED_AFFINITY_WORDS; ++i) {
         atomic_store_n(&current[i], mask[i], ATOMIC_RELAXED);
     }
 
     affinity_changed(thread);
-
-    return 0;
 }
 
 void thread_get_affinity(const thread_t* restrict thread, uint64_t* restrict mask)

@@ -55,11 +55,15 @@ thread_t* thread_create_fork(process_t* restrict process, const thread_t* restri
 /// The new thread stays blocked until sched_enqueue, and starts with the signal mask and the affinity of the creator
 thread_t* thread_create_sibling(const thread_t* restrict creator, uintptr_t entry, uintptr_t stack_top, uintptr_t arg, uintptr_t tcb);
 
+/// Gives the thread a mask of its own for every hart if it has none yet, so that thread_set_affinity cannot fail
+/// @pre The caller keeps the thread from being reaped, as the process lock held does
+/// @retval -ENOMEM There is no memory for the mask
+int thread_reserve_affinity(thread_t* restrict thread);
+
 /// Lets the thread run only on the harts of the mask, and moves it off a hart that the mask leaves out
 /// @param mask SCHED_AFFINITY_WORDS words, with a bit set for at least one hart that is online
-/// @pre The caller keeps the thread from being reaped, as the process lock held does
-/// @retval -ENOMEM The thread has no mask yet, and there is no memory for one
-int thread_set_affinity(thread_t* restrict thread, const uint64_t* restrict mask);
+/// @pre thread_reserve_affinity succeeded for the thread, and the caller keeps the thread from being reaped
+void thread_set_affinity(thread_t* restrict thread, const uint64_t* restrict mask);
 
 /// Fills SCHED_AFFINITY_WORDS words; a thread with no mask of its own gets every bit set
 /// @pre As for thread_set_affinity
