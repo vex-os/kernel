@@ -8,6 +8,7 @@ typedef struct thread_s thread_t;
 typedef struct event_listener_s event_listener_t;
 typedef struct event_s event_t;
 typedef struct event_deferral_s event_deferral_t;
+typedef struct event_watch_s event_watch_t;
 
 struct event_listener_s {
     thread_t* thread;
@@ -19,6 +20,7 @@ struct event_s {
     uint32_t num_pending;
     uint32_t num_listeners;
     uint32_t max_listeners;
+    uint32_t generation; // Counts the triggers and wraps around; read with event_generation
     event_listener_t* listeners;
 };
 
@@ -26,6 +28,12 @@ struct event_deferral_s {
     event_deferral_t* next;
     event_t* event;
     bool queued;
+};
+
+struct event_watch_s {
+    bool intr_state;
+    bool moved; // An event was triggered between event_generation and event_watch_add
+    int error;
 };
 
 void event_init(event_t* restrict event);
@@ -88,6 +96,34 @@ ssize_t event_sleep(uint64_t timeout_nsec);
 size_t event_trigger(event_t* restrict event, bool linger_pending);
 
 void event_reset(event_t* restrict event);
+
+/// Reads the count of triggers of the event, for event_watch_add
+/// @note Read it before the check of the condition that the event signals
+uint32_t event_generation(event_t* restrict event);
+
+/// Starts a wait on several events whose conditions the caller checked under different locks.
+/// The steps: event_generation for each event, the checks, event_watch_begin,
+/// event_watch_add for each event, then event_watch_wait
+/// @pre The caller holds no spinlock
+/// @param count The most events that event_watch_add gets
+/// @retval -ENOMEM No memory to register the thread as a listener
+/// @note Takes no lock on all events at once, so two waits that list the same events in another order can't deadlock
+int event_watch_begin(event_watch_t* restrict watch, size_t count);
+
+/// @pre event_watch_begin succeeded, and this is not one add more than its count
+/// @param generation What event_generation gave before the check of the condition
+/// @note A trigger since that generation makes event_watch_wait return at once
+void event_watch_add(event_watch_t* restrict watch, event_t* restrict event, uint32_t generation);
+
+/// Sleeps until an event from event_watch_add is triggered, or was triggered since its generation
+/// @pre event_watch_begin succeeded
+/// @param deadline Zero waits for as long as it takes
+/// @retval 0 An event was triggered; the caller checks its conditions again, as the trigger may be for another one
+/// @retval -ETIMEDOUT The deadline passed
+/// @retval -ENOMEM No memory to register the thread as a listener
+/// @retval -ERESTART Work is pending; a system call returns this
+/// as it is and runs again or fails with EINTR on the way out
+ssize_t event_watch_wait(event_watch_t* restrict watch, uint64_t deadline);
 
 /// Triggers the event from the next scheduler tick on any hart, keeping at most one wakeup for the next await
 /// @note Takes no lock, so it works where event_trigger cannot: in code that can run with scheduler locks held

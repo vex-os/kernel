@@ -1,3 +1,4 @@
+#include <vex/assert.h>
 #include <vex/atomic.h>
 #include <vex/clocksrc.h>
 #include <vex/errno.h>
@@ -23,6 +24,88 @@ static void release_locks(event_t** restrict events, size_t count, spinlock_t* r
     if(lock) {
         raw_spinlock_release(lock);
     }
+}
+
+static int listen_locked(event_t* restrict event, thread_t* restrict thread, size_t wakeup_index)
+{
+    if(event->num_listeners >= event->max_listeners) {
+        size_t new_max_listeners = 4;
+
+        if(event->max_listeners) {
+            new_max_listeners = event->max_listeners * 2;
+        }
+
+        event_listener_t* grown = krealloc(event->listeners, new_max_listeners * sizeof(event_listener_t));
+
+        if(grown == nullptr) {
+            return -ENOMEM;
+        }
+
+        event->listeners = grown;
+        event->max_listeners = new_max_listeners;
+    }
+
+    event_listener_t* dest = &event->listeners[event->num_listeners];
+    dest->wakeup_index = wakeup_index;
+    dest->thread = thread;
+
+    event->num_listeners += 1;
+
+    return 0;
+}
+
+static bool unlisten_locked(event_t* restrict event, thread_t* restrict thread)
+{
+    for(size_t i = 0; i < event->num_listeners; ++i) {
+        if(event->listeners[i].thread == thread) {
+            event->num_listeners -= 1;
+            event->listeners[i] = event->listeners[event->num_listeners];
+            return true;
+        }
+    }
+
+    return false;
+}
+
+// A trigger takes every listener off its event,
+// so a thread still listening everywhere was not triggered
+static bool unlisten_all(thread_t* restrict thread)
+{
+    bool triggered = false;
+
+    for(size_t i = 0; i < thread->num_events; ++i) {
+        event_t* event = thread->events[i];
+
+        spinlock_acquire(&event->lock);
+        bool listening = unlisten_locked(event, thread);
+        spinlock_release(&event->lock);
+
+        if(!listening) {
+            triggered = true;
+        }
+    }
+
+    thread->num_events = 0;
+
+    return triggered;
+}
+
+static int reserve_events(thread_t* restrict thread, size_t count)
+{
+    if(count <= thread->max_events) {
+        return 0;
+    }
+
+    event_t** grown = krealloc(thread->events, count * sizeof(event_t*));
+
+    if(grown == nullptr) {
+        return -ENOMEM;
+    }
+
+    thread->events = grown;
+    thread->max_events = count;
+
+    return 0;
 }
 
 // A deadline of zero waits forever. A lock, held by the caller as spinlock_acquire_intr
@@ -56,59 +139,24 @@ static ssize_t await_until(event_t** restrict events, size_t count, uint64_t dea
         }
     }
 
-    if(count > thread->max_events) {
-        event_t** grown = krealloc(thread->events, count * sizeof(event_t*));
+    if(reserve_events(thread, count) < 0) {
+        release_locks(events, count, lock);
+        restore_interrupts(intr_state);
+        return -ENOMEM;
+    }
 
-        if(grown == nullptr) {
+    for(size_t i = 0; i < count; ++i) {
+        if(listen_locked(events[i], thread, i) < 0) {
+            for(size_t j = 0; j < i; ++j) {
+                unlisten_locked(events[j], thread);
+            }
+
             release_locks(events, count, lock);
             restore_interrupts(intr_state);
             return -ENOMEM;
         }
 
-        thread->events = grown;
-        thread->max_events = count;
-    }
-
-    for(size_t i = 0; i < count; ++i) {
-        event_t* event = events[i];
-
-        if(event->num_listeners >= event->max_listeners) {
-            size_t new_max_listeners = 4;
-
-            if(event->max_listeners) {
-                new_max_listeners = event->max_listeners * 2;
-            }
-
-            event_listener_t* grown = krealloc(event->listeners, new_max_listeners * sizeof(event_listener_t));
-
-            if(grown == nullptr) {
-                for(size_t j = 0; j < i; ++j) {
-                    event_t* registered = events[j];
-
-                    registered->num_listeners -= 1;
-
-                    for(size_t k = 0; k < registered->num_listeners; ++k) {
-                        if(registered->listeners[k].thread == thread) {
-                            registered->listeners[k] = registered->listeners[registered->num_listeners];
-                            break;
-                        }
-                    }
-                }
-
-                release_locks(events, count, lock);
-                restore_interrupts(intr_state);
-                return -ENOMEM;
-            }
-
-            event->listeners = grown;
-            event->max_listeners = new_max_listeners;
-        }
-
-        event_listener_t* dest = &event->listeners[event->num_listeners++];
-        dest->wakeup_index = i;
-        dest->thread = thread;
-
-        thread->events[i] = event;
+        thread->events[i] = events[i];
     }
 
     thread->num_events = count;
@@ -130,35 +178,7 @@ static ssize_t await_until(event_t** restrict events, size_t count, uint64_t dea
         sched_wake_cancel(thread);
     }
 
-    // A trigger takes every listener off its event,
-    // so a thread still listening everywhere timed out
-    bool triggered = false;
-
-    for(size_t i = 0; i < thread->num_events; ++i) {
-        event_t* event = thread->events[i];
-        bool listening = false;
-
-        spinlock_acquire(&event->lock);
-
-        for(size_t j = 0; j < event->num_listeners; ++j) {
-            if(event->listeners[j].thread == thread) {
-                event->num_listeners -= 1;
-                event->listeners[j] = event->listeners[event->num_listeners];
-                listening = true;
-                break;
-            }
-        }
-
-        spinlock_release(&event->lock);
-
-        if(!listening) {
-            triggered = true;
-        }
-    }
-
-    thread->num_events = 0;
-
-    if(!triggered) {
+    if(!unlisten_all(thread)) {
         if(interruptible && atomic_load(&thread->pending_work, ATOMIC_ACQUIRE)) {
             return -ERESTART;
         }
@@ -174,6 +194,8 @@ static size_t trigger(event_t* restrict event, uint32_t max_pending)
     bool intr_state = disable_interrupts();
 
     spinlock_acquire(&event->lock);
+
+    atomic_store(&event->generation, event->generation + 1, ATOMIC_RELEASE);
 
     if(event->num_listeners == 0) {
         if(event->num_pending < max_pending) {
@@ -210,6 +232,7 @@ void event_init(event_t* restrict event)
     event->num_pending = 0;
     event->num_listeners = 0;
     event->max_listeners = 0;
+    event->generation = 0;
     event->listeners = nullptr;
 }
 
@@ -316,6 +339,103 @@ void event_reset(event_t* restrict event)
     bool intr_state = spinlock_acquire_intr(&event->lock);
     event->num_pending = 0;
     spinlock_release_intr(&event->lock, intr_state);
+}
+
+uint32_t event_generation(event_t* restrict event)
+{
+    return atomic_load(&event->generation, ATOMIC_ACQUIRE);
+}
+
+int event_watch_begin(event_watch_t* restrict watch, size_t count)
+{
+    thread_t* thread = this_thread();
+
+    watch->intr_state = disable_interrupts();
+
+    if(reserve_events(thread, count) < 0) {
+        restore_interrupts(watch->intr_state);
+        return -ENOMEM;
+    }
+
+    watch->moved = false;
+    watch->error = 0;
+    thread->num_events = 0;
+
+    // From here on a trigger of an event that the thread listens on makes it runnable
+    // again, so that one which comes between two adds or before the yield is not lost
+    sched_dequeue(thread, true);
+
+    return 0;
+}
+
+void event_watch_add(event_watch_t* restrict watch, event_t* restrict event, uint32_t generation)
+{
+    thread_t* thread = this_thread();
+
+    if(watch->moved || watch->error) {
+        return;
+    }
+
+    kassert(thread->num_events < thread->max_events);
+
+    spinlock_acquire(&event->lock);
+
+    if(event->generation != generation) {
+        watch->moved = true;
+        spinlock_release(&event->lock);
+        return;
+    }
+
+    watch->error = listen_locked(event, thread, thread->num_events);
+
+    if(watch->error == 0) {
+        thread->events[thread->num_events] = event;
+        thread->num_events += 1;
+    }
+
+    spinlock_release(&event->lock);
+}
+
+ssize_t event_watch_wait(event_watch_t* restrict watch, uint64_t deadline)
+{
+    thread_t* thread = this_thread();
+    bool waits = !watch->moved && watch->error == 0;
+
+    // A thread that runs is put back the same way a trigger puts it back
+    if(!waits) {
+        sched_enqueue(thread);
+    }
+    else if(deadline) {
+        sched_wake_at(thread, deadline);
+    }
+
+    restore_interrupts(watch->intr_state);
+
+    sched_yield();
+
+    if(waits && deadline) {
+        sched_wake_cancel(thread);
+    }
+
+    bool triggered = unlisten_all(thread);
+
+    if(watch->error) {
+        return watch->error;
+    }
+
+    if(triggered || watch->moved) {
+        return 0;
+    }
+
+    if(atomic_load(&thread->pending_work, ATOMIC_ACQUIRE)) {
+        return -ERESTART;
+    }
+
+    if(deadline) {
+        return -ETIMEDOUT;
+    }
+
+    return 0;
 }
 
 void event_trigger_deferred(event_deferral_t* restrict deferral)
