@@ -22,6 +22,7 @@ ktest_programs = [
     'signal_threads',
     'process',
     'sigsuspend',
+    'sigtimedwait',
     'process_group',
     'job',
     'exec_threads',
