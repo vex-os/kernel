@@ -3,6 +3,7 @@
 #include <vex/fcache.h>
 #include <vex/kprintf.h>
 #include <vex/mount.h>
+#include <vex/page.h>
 #include <vex/string.h>
 #include <vex/vnode.h>
 
@@ -150,8 +151,31 @@ static int zero_block(ext2_vfs_context_t* restrict context, uint32_t block)
     return retval;
 }
 
+// The data of a file goes to the disk through its own page cache and not through the device cache, which a read of
+// the file does not see. So the zeroes go straight to the disk
+static int zero_data_block(ext2_vfs_context_t* restrict context, uint32_t block)
+{
+    static const uint8_t zeros[PAGE_SIZE] = {};
+
+    size_t sectors_per_chunk = PAGE_SIZE / context->volume->sector_size;
+    uint64_t lba = ext2_block_lba(context, block);
+    int retval = 0;
+
+    for(size_t done = 0; retval == 0 && done < context->sectors_per_block; done += sectors_per_chunk) {
+        size_t chunk = context->sectors_per_block - done;
+
+        if(chunk > sectors_per_chunk) {
+            chunk = sectors_per_chunk;
+        }
+
+        retval = block_write(context->volume, lba + done, chunk, zeros);
+    }
+
+    return retval;
+}
+
 static int take_block(ext2_vfs_context_t* restrict context, ext2_inode_t* restrict inode, uint32_t ino, uint32_t table, uint64_t index,
-    bool indirect, uint32_t* restrict out)
+    bool indirect, bool zero, uint32_t* restrict out)
 {
     uint32_t block = ext2_block_alloc(context, block_goal(context, inode, ino, table, index));
 
@@ -163,6 +187,9 @@ static int take_block(ext2_vfs_context_t* restrict context, ext2_inode_t* restri
 
     if(indirect) {
         retval = zero_block(context, block);
+    }
+    else if(zero) {
+        retval = zero_data_block(context, block);
     }
 
     if(retval == 0) {
@@ -181,7 +208,8 @@ static int take_block(ext2_vfs_context_t* restrict context, ext2_inode_t* restri
     return 0;
 }
 
-static int block_map(ext2_vfs_context_t* restrict context, ext2_inode_t* restrict inode, uint32_t ino, uint64_t lbn, bool create,
+// With zero, a data block that this call takes is zeroed on the disk first, as nothing else would clear what the block held before
+static int block_map(ext2_vfs_context_t* restrict context, ext2_inode_t* restrict inode, uint32_t ino, uint64_t lbn, bool create, bool zero,
     uint32_t* restrict out)
 {
     uint64_t indices[4];
@@ -207,7 +235,7 @@ static int block_map(ext2_vfs_context_t* restrict context, ext2_inode_t* restric
         }
 
         if(block == 0) {
-            retval = take_block(context, inode, ino, table, indices[level], level + 1 < levels, &block);
+            retval = take_block(context, inode, ino, table, indices[level], level + 1 < levels, zero, &block);
 
             if(retval < 0) {
                 return retval;
@@ -601,7 +629,7 @@ int ext2_bmap(vnode_t* restrict node, uint64_t sector, bool create, fcache_exten
     uint64_t in_block = sector % fs_ctx->sectors_per_block;
     uint32_t blocks_before = ctx->inode.i_blocks;
     uint32_t block;
-    int retval = block_map(fs_ctx, &ctx->inode, ino, sector / fs_ctx->sectors_per_block, create, &block);
+    int retval = block_map(fs_ctx, &ctx->inode, ino, sector / fs_ctx->sectors_per_block, create, false, &block);
 
     // Even a failed mapping may have taken indirect blocks
     if(ctx->inode.i_blocks != blocks_before) {
@@ -633,4 +661,29 @@ int ext2_bmap(vnode_t* restrict node, uint64_t sector, bool create, fcache_exten
     out->mapped = true;
 
     return 0;
+}
+
+int ext2_preallocate(vnode_t* restrict node, uint64_t first, uint64_t count)
+{
+    ext2_vnode_context_t* ctx = node->ctxdata;
+    ext2_vfs_context_t* fs_ctx = ctx->fs_ctx;
+    uint32_t ino = (uint32_t)(node->ino);
+    uint32_t blocks_before = ctx->inode.i_blocks;
+    int retval = 0;
+
+    for(uint64_t lbn = first; retval == 0 && lbn < first + count; lbn += 1) {
+        uint32_t block;
+        retval = block_map(fs_ctx, &ctx->inode, ino, lbn, true, true, &block);
+    }
+
+    // Even a failed run may have taken blocks
+    if(ctx->inode.i_blocks != blocks_before) {
+        int write_retval = ext2_inode_write(fs_ctx, ino, &ctx->inode);
+
+        if(retval == 0) {
+            retval = write_retval;
+        }
+    }
+
+    return retval;
 }

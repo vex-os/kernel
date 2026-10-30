@@ -1,6 +1,7 @@
 #include <vex/block_interface.h>
 #include <vex/errno.h>
 #include <vex/fcache.h>
+#include <vex/fcntl.h>
 #include <vex/kprintf.h>
 #include <vex/limits.h>
 #include <vex/mount.h>
@@ -371,6 +372,33 @@ static int resize_locked(vnode_t* restrict node, uint64_t new_size)
     }
 
     return retval;
+}
+
+// Blocks past the end stay when the size does not follow, and truncate frees them
+static int fallocate_locked(vnode_t* restrict node, unsigned mode, off_t offset, off_t length)
+{
+    ext2_vnode_context_t* ctx = node->ctxdata;
+    uint64_t block_size = ctx->fs_ctx->block_size;
+    uint64_t size = ext2_inode_size(&ctx->inode);
+    uint64_t end = (uint64_t)(offset) + length;
+    uint64_t first = offset / block_size;
+    uint64_t last = (end - 1) / block_size;
+
+    int retval = ext2_preallocate(node, first, last - first + 1);
+
+    bool grows = end > size && 0 == (mode & FALLOC_FL_KEEP_SIZE);
+
+    if(retval == 0 && grows) {
+        retval = resize_locked(node, end);
+    }
+
+    if(retval < 0) {
+        return retval;
+    }
+
+    touch_locked(node, true);
+
+    return write_inode_locked(node);
 }
 
 static int set_attr_locked(vnode_t* restrict node, const vnode_attr_t* restrict attr)
@@ -1082,6 +1110,14 @@ static int ext2_vnode_set_attr(vnode_t* restrict node, const vnode_attr_t* restr
     return retval;
 }
 
+static int ext2_vnode_fallocate(vnode_t* restrict node, unsigned mode, off_t offset, off_t length)
+{
+    mutex_acquire(fs_lock(node));
+    int retval = fallocate_locked(node, mode, offset, length);
+    mutex_release(fs_lock(node));
+    return retval;
+}
+
 static int ext2_vnode_fsync(vnode_t* restrict node)
 {
     ext2_vnode_context_t* ctx = node->ctxdata;
@@ -1175,6 +1211,7 @@ const vnode_ops_t ext2_vnode_ops = {
     .stat = &ext2_vnode_stat,
     .set_attr = &ext2_vnode_set_attr,
     .fsync = &ext2_vnode_fsync,
+    .fallocate = &ext2_vnode_fallocate,
     .fault = &ext2_vnode_fault,
     .get_xattr = &ext2_vnode_get_xattr,
     .set_xattr = &ext2_vnode_set_xattr,

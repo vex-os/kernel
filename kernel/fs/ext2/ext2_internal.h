@@ -433,6 +433,11 @@ void ext2_inode_set_time(ext2_inode_t* restrict inode, unsigned which, const tim
 int ext2_bmap(vnode_t* restrict node, uint64_t sector, bool create, fcache_extent_t* restrict out);
 int ext2_truncate_blocks(vnode_t* restrict node, uint64_t size);
 
+/// Gives the blocks first to first + count - 1 of the file their storage, zeroed, where they have none
+/// @pre The caller holds the lock of the filesystem
+/// @note Does not touch the size. Writes the inode if blocks were taken, also when it fails midway
+int ext2_preallocate(vnode_t* restrict node, uint64_t first, uint64_t count);
+
 void ext2_xattr_release(ext2_vfs_context_t* restrict context, uint32_t block);
 ssize_t ext2_xattr_get(vnode_t* restrict node, unsigned space, const char* restrict name, void* restrict value, size_t size);
 int ext2_xattr_iterate(vnode_t* restrict node, xattr_entry_t* restrict out, size_t index);
