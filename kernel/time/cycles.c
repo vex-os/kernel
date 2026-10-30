@@ -132,6 +132,21 @@ uint64_t local_clock_ns(void)
     return clock_source_now_ns();
 }
 
+uint64_t local_clock_resolution_ns(void)
+{
+    if(cycles_mult == 0) {
+        return clock_source_resolution_ns();
+    }
+
+    uint64_t tick = (cycles_mult + (UINT64_C(1) << MULT_SHIFT) - 1) >> MULT_SHIFT;
+
+    if(tick == 0) {
+        return 1;
+    }
+
+    return tick;
+}
+
 // After the clock sources of the timer
 // stage, which the calibration reads
 static void init_cycles(void)
