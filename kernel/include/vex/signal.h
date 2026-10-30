@@ -153,7 +153,12 @@ bool signal_deliver_uncaught(hart_context_t* restrict ctx) __nodiscard;
 void signal_action(process_t* restrict process, int sig, const sigaction_t* restrict act, sigaction_t* restrict old_action);
 sigset_t signal_mask(thread_t* restrict thread, int how, sigset_t set);
 
-/// Puts back the mask that sigsuspend replaced
+/// Sets the mask for the time of a wait, as sigsuspend and ppoll do, and keeps the old one for signal_restore_mask
+/// @pre The caller is the thread
+/// @note Does nothing while a replaced mask is still kept
+void signal_replace_mask(thread_t* restrict thread, sigset_t mask);
+
+/// Puts back the mask that signal_replace_mask replaced
 /// @pre The caller is the thread
 /// @note A handler that runs puts the mask back through sigreturn
 void signal_restore_mask(thread_t* restrict thread);

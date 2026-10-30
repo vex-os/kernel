@@ -363,8 +363,7 @@ static intptr_t sys_sigsuspend(user_addr_t set)
         return copied;
     }
 
-    thread->sig_saved = signal_mask(thread, SIG_SETMASK, new_mask);
-    thread->sig_saved_valid = true;
+    signal_replace_mask(thread, new_mask);
 
     // The signal that ends the wait runs its handler on the
     // way out, and the handler's return restores the mask
@@ -372,10 +371,7 @@ static intptr_t sys_sigsuspend(user_addr_t set)
 
     while(result == -ERESTART && job_resume_wait(thread)) {
         // A signal that was ignored by now has put the old mask back
-        if(!thread->sig_saved_valid) {
-            thread->sig_saved = signal_mask(thread, SIG_SETMASK, new_mask);
-            thread->sig_saved_valid = true;
-        }
+        signal_replace_mask(thread, new_mask);
 
         result = event_sleep(0);
     }

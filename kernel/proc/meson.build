@@ -13,6 +13,7 @@ kernel_sources += files(
     'signal.c',
     'sys_cred.c',
     'sys_path.c',
+    'sys_poll.c',
     'sys_rlimit.c',
     'sys_sched.c',
     'sys_file.c',

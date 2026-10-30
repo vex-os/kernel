@@ -566,6 +566,14 @@ void signal_force(thread_t* restrict thread, const siginfo_t* restrict info)
     }
 }
 
+void signal_replace_mask(thread_t* restrict thread, sigset_t mask)
+{
+    if(!thread->sig_saved_valid) {
+        thread->sig_saved = signal_mask(thread, SIG_SETMASK, mask);
+        thread->sig_saved_valid = true;
+    }
+}
+
 void signal_restore_mask(thread_t* restrict thread)
 {
     if(thread->sig_saved_valid) {
