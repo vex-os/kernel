@@ -349,7 +349,8 @@ static intptr_t sys_utimensat(int dirfd, const char* restrict path, user_addr_t 
 
 define_syscall_dirfd(sys_utimensat, SYS_UTIMENSAT, 4);
 
-static intptr_t sys_mkdirat(int dirfd, const char* restrict path, mode_t mode)
+// Makes the node that the last part of the path names, in the directory before it
+static int make_node(int dirfd, const char* restrict path, unsigned type, mode_t mode, dev_t rdev)
 {
     thread_t* thread = this_thread();
     process_t* process = thread->process;
@@ -380,11 +381,15 @@ static intptr_t sys_mkdirat(int dirfd, const char* restrict path, mode_t mode)
         return retval;
     }
 
+    bool plain = type == VNODE_DIRECTORY || type == VNODE_FILE;
     vnode_t* created;
     retval = vnode_access(parent, credentials, W_OK | X_OK);
 
-    if(retval == 0) {
-        retval = vnode_create(parent, name, VNODE_DIRECTORY, mode & ~umask, credentials, &created);
+    if(retval == 0 && plain) {
+        retval = vnode_create(parent, name, type, mode & ~umask, credentials, &created);
+    }
+    else if(retval == 0) {
+        retval = vnode_mknod(parent, name, type, mode & ~umask, rdev, credentials, &created);
     }
 
     vnode_decref(parent);
@@ -398,7 +403,60 @@ static intptr_t sys_mkdirat(int dirfd, const char* restrict path, mode_t mode)
     return 0;
 }
 
+static intptr_t sys_mkdirat(int dirfd, const char* restrict path, mode_t mode)
+{
+    return make_node(dirfd, path, VNODE_DIRECTORY, mode, 0);
+}
+
 define_syscall_dirfd(sys_mkdirat, SYS_MKDIRAT, 3);
+
+static int node_type_of(mode_t mode, unsigned* restrict out)
+{
+    switch(mode & S_IFMT) {
+        case 0:
+        case S_IFREG:
+            *out = VNODE_FILE;
+            return 0;
+        case S_IFIFO:
+            *out = VNODE_FIFO;
+            return 0;
+        case S_IFCHR:
+            *out = VNODE_CHAR_DEV;
+            return 0;
+        case S_IFBLK:
+            *out = VNODE_BLOCK_DEV;
+            return 0;
+        default:
+            return -EINVAL; // Directories have mkdirat, and sockets do not exist yet
+    }
+}
+
+// A zero type makes a regular file, as in Linux; a device
+// node takes CAP_MKNOD, and the other kinds take nothing more
+static intptr_t sys_mknodat(int dirfd, const char* restrict path, mode_t mode, dev_t rdev)
+{
+    unsigned type;
+    int retval = node_type_of(mode, &type);
+
+    if(retval < 0) {
+        return retval;
+    }
+
+    thread_t* thread = this_thread();
+    bool device = type == VNODE_CHAR_DEV || type == VNODE_BLOCK_DEV;
+
+    if(device && !cred_capable(thread->credentials, CAP_MKNOD)) {
+        return -EPERM;
+    }
+
+    if(!device) {
+        rdev = 0;
+    }
+
+    return make_node(dirfd, path, type, mode & ~S_IFMT, rdev);
+}
+
+define_syscall_dirfd(sys_mknodat, SYS_MKNODAT, 4);
 
 static intptr_t sys_unlinkat(int dirfd, const char* restrict path, unsigned flags)
 {

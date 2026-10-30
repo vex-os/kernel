@@ -15,6 +15,7 @@
 #define CAP_SYS_RESOURCE   __k_CAP_SYS_RESOURCE
 #define CAP_SYS_TIME       __k_CAP_SYS_TIME
 #define CAP_SYS_TTY_CONFIG __k_CAP_SYS_TTY_CONFIG
+#define CAP_MKNOD          __k_CAP_MKNOD
 #define CAP_SETFCAP        __k_CAP_SETFCAP
 #define CAP_SYSLOG         __k_CAP_SYSLOG
 #define CAP_MOUNT          __k_CAP_MOUNT

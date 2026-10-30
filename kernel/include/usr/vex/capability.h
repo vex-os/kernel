@@ -20,6 +20,7 @@
 #define __k_CAP_SYS_RESOURCE   24 /* Raise a hard resource limit */
 #define __k_CAP_SYS_TIME       25 /* Step the realtime clock */
 #define __k_CAP_SYS_TTY_CONFIG 26 /* Configure serial ports and what they are bound to */
+#define __k_CAP_MKNOD          27 /* Make device nodes */
 #define __k_CAP_SETFCAP        31 /* Set file capabilities */
 #define __k_CAP_SYSLOG         34 /* Write to the kernel log */
 

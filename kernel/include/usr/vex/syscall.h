@@ -104,6 +104,7 @@
 #define __k_SYS_FCHDIR     0x0ED
 #define __k_SYS_FACCESSAT  0x0EE
 #define __k_SYS_CHROOT     0x0EF
+#define __k_SYS_MKNODAT    0x0F0
 
 #define __k_SYS_GETXATTRAT    0x100
 #define __k_SYS_SETXATTRAT    0x101

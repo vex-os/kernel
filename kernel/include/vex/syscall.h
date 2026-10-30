@@ -107,6 +107,7 @@ typedef struct vnode_s vnode_t;
 #define SYS_FCHDIR     __k_SYS_FCHDIR
 #define SYS_FACCESSAT  __k_SYS_FACCESSAT
 #define SYS_CHROOT     __k_SYS_CHROOT
+#define SYS_MKNODAT    __k_SYS_MKNODAT
 
 #define SYS_GETXATTRAT    __k_SYS_GETXATTRAT
 #define SYS_SETXATTRAT    __k_SYS_SETXATTRAT
