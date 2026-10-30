@@ -1,6 +1,7 @@
 #include <vex/assert.h>
 #include <vex/atomic.h>
 #include <vex/fcntl.h>
+#include <vex/file_lock.h>
 #include <vex/limits.h>
 #include <vex/mount.h>
 #include <vex/mutex.h>
@@ -670,6 +671,7 @@ void vnode_destroy(vnode_t* restrict node)
     }
 
     fcache_deinit(&node->pages);
+    file_locks_destroy(node);
 
     if(node->ops->release)
         node->ops->release(node);

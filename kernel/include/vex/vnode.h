@@ -12,6 +12,7 @@
 #include <vex/xattr.h>
 
 typedef struct file_s file_t;
+typedef struct file_locks_s file_locks_t;
 typedef struct pmap_s pmap_t;
 typedef struct poll_table_s poll_table_t;
 typedef struct vcache_entry_s vcache_entry_t;
@@ -183,6 +184,7 @@ struct vnode_s {
     vcache_entry_t* cache_entry;
     const block_interface_t* volume;
     fcache_t pages;
+    file_locks_t* locks; // Made on the first lock, and kept until the node goes
     void* ctxdata;
 };
 

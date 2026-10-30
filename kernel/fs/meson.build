@@ -1,6 +1,7 @@
 kernel_sources += files(
     'fcache.c',
     'file.c',
+    'file_lock.c',
     'mount.c',
     'path.c',
     'vcache.c',
