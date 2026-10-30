@@ -1,4 +1,5 @@
 #include <vex/capability.h>
+#include <vex/clocksrc.h>
 #include <vex/cred.h>
 #include <vex/errno.h>
 #include <vex/event.h>
@@ -7,6 +8,7 @@
 #include <vex/signal.h>
 #include <vex/syscall.h>
 #include <vex/thread.h>
+#include <vex/time.h>
 #include <vex/uaccess.h>
 
 #include "syscall_internal.h"
@@ -386,6 +388,126 @@ static intptr_t sys_sigsuspend(user_addr_t set)
 }
 
 define_syscall(sys_sigsuspend, SYS_SIGSUSPEND, 1);
+
+// The set is unblocked for the time of the wait, so that the arrival of a signal of the set wakes the thread.
+// A stop does not end the wait, and the time that passed while the thread was stopped counts
+static int wait_for_signal(thread_t* restrict thread, sigset_t wanted, bool forever, uint64_t timeout, siginfo_t* restrict info)
+{
+    uint64_t start = clock_source_now_ns();
+    int sig = signal_take(thread, wanted, info);
+
+    if(sig) {
+        return sig;
+    }
+
+    if(!forever && timeout == 0) {
+        return -EAGAIN;
+    }
+
+    signal_replace_mask(thread, thread->sig_blocked & ~wanted);
+
+    for(;;) {
+        sig = signal_take(thread, wanted, info);
+
+        if(sig) {
+            signal_restore_mask(thread);
+            return sig;
+        }
+
+        uint64_t left = 0;
+
+        if(!forever) {
+            uint64_t elapsed = clock_source_now_ns() - start;
+
+            if(elapsed >= timeout) {
+                signal_restore_mask(thread);
+                return -EAGAIN;
+            }
+
+            left = timeout - elapsed;
+        }
+
+        ssize_t result = event_sleep(left);
+
+        if(result == -ERESTART && job_resume_wait(thread)) {
+            continue;
+        }
+
+        if(result == -ERESTART) {
+            // A signal of the set that has a handler ends job_resume_wait too, but is not a reason to fail
+            sig = signal_take(thread, wanted, info);
+
+            if(sig == 0) {
+                return -EINTR; // The handler restores the mask
+            }
+
+            signal_restore_mask(thread);
+            return sig;
+        }
+
+        if(result < 0) {
+            signal_restore_mask(thread);
+            return result;
+        }
+    }
+}
+
+// Never returns -ERESTART, for the same reason as sigsuspend
+static intptr_t sys_sigtimedwait(user_addr_t set, user_addr_t info, user_addr_t timeout)
+{
+    thread_t* thread = this_thread();
+
+    if(thread->process == nullptr) {
+        return -ENOSYS;
+    }
+
+    sigset_t wanted;
+    ssize_t copied = user_copyin(&wanted, set, sizeof(wanted));
+
+    if(copied < 0) {
+        return copied;
+    }
+
+    wanted &= ~(sigbit(SIGKILL) | sigbit(SIGSTOP));
+
+    // No timeout at all waits for as long as it takes, a zero one only looks
+    bool forever = timeout.value == 0;
+    uint64_t timeout_nsec = 0;
+
+    if(!forever) {
+        timespec_t relative;
+        copied = user_copyin(&relative, timeout, sizeof(relative));
+
+        if(copied < 0) {
+            return copied;
+        }
+
+        if(!timespec_valid(&relative)) {
+            return -EINVAL;
+        }
+
+        timeout_nsec = timespec_to_nsec(&relative);
+    }
+
+    siginfo_t taken;
+    int sig = wait_for_signal(thread, wanted, forever, timeout_nsec, &taken);
+
+    if(sig < 0) {
+        return sig;
+    }
+
+    if(info.value) {
+        copied = user_copyout(info, &taken, sizeof(taken));
+
+        if(copied < 0) {
+            return copied;
+        }
+    }
+
+    return sig;
+}
+
+define_syscall(sys_sigtimedwait, SYS_SIGTIMEDWAIT, 3);
 
 static intptr_t sys_sigaltstack(user_addr_t ss, user_addr_t old)
 {

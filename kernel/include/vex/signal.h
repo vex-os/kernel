@@ -164,6 +164,12 @@ void signal_replace_mask(thread_t* restrict thread, sigset_t mask);
 void signal_restore_mask(thread_t* restrict thread);
 sigset_t signal_pending(thread_t* restrict thread);
 
+/// Takes a pending signal of the set, blocked or not, so that it runs no handler
+/// @pre The caller is the thread
+/// @param info Receives the siginfo of the signal
+/// @return The number of the signal, or zero when none of the set is pending
+int signal_take(thread_t* restrict thread, sigset_t set, siginfo_t* restrict info);
+
 /// Whether the thread blocks the signal or its process ignores it
 bool signal_refused(thread_t* restrict thread, int sig) __nodiscard;
 

@@ -664,6 +664,50 @@ sigset_t signal_pending(thread_t* restrict thread)
     return pending;
 }
 
+int signal_take(thread_t* restrict thread, sigset_t set, siginfo_t* restrict info)
+{
+    process_t* process = thread->process;
+    signal_actions_t* signal_actions = process->signal_actions;
+
+    bool intr_state = spinlock_acquire_intr(&signal_actions->lock);
+
+    sigset_t* pending = &thread->sig_pending;
+    pending_signal_t** queue = &thread->sig_queue;
+    sigset_t taken = *pending & set;
+
+    if(taken == 0) {
+        pending = &process->sig_pending;
+        queue = &process->sig_queue;
+        taken = *pending & set;
+    }
+
+    if(taken == 0) {
+        spinlock_release_intr(&signal_actions->lock, intr_state);
+        return 0;
+    }
+
+    int sig = __builtin_ctzll(taken) + 1;
+
+    *pending &= ~sigbit(sig);
+
+    pending_signal_t* node = queue_take(queue, sig);
+
+    recalc_locked(thread);
+
+    spinlock_release_intr(&signal_actions->lock, intr_state);
+
+    memset(info, 0, sizeof(*info));
+    info->si_signo = sig;
+    info->si_code = SI_KERNEL;
+
+    if(node) {
+        *info = node->info;
+        slab_free(node);
+    }
+
+    return sig;
+}
+
 bool signal_refused(thread_t* restrict thread, int sig)
 {
     process_t* process = thread->process;

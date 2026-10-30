@@ -34,14 +34,15 @@
 #define __k_SYS_FUTEX_WAIT    0x045
 #define __k_SYS_FUTEX_WAKE    0x046
 
-#define __k_SYS_KILL        0x060
-#define __k_SYS_TGKILL      0x061
-#define __k_SYS_SIGACTION   0x062
-#define __k_SYS_SIGPROCMASK 0x063
-#define __k_SYS_SIGPENDING  0x064
-#define __k_SYS_SIGRETURN   0x065
-#define __k_SYS_SIGALTSTACK 0x066
-#define __k_SYS_SIGSUSPEND  0x067
+#define __k_SYS_KILL         0x060
+#define __k_SYS_TGKILL       0x061
+#define __k_SYS_SIGACTION    0x062
+#define __k_SYS_SIGPROCMASK  0x063
+#define __k_SYS_SIGPENDING   0x064
+#define __k_SYS_SIGRETURN    0x065
+#define __k_SYS_SIGALTSTACK  0x066
+#define __k_SYS_SIGSUSPEND   0x067
+#define __k_SYS_SIGTIMEDWAIT 0x068
 
 #define __k_SYS_GETRESUID 0x080
 #define __k_SYS_SETRESUID 0x081
