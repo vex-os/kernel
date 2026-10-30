@@ -44,6 +44,7 @@ ktest_programs = [
     'mount',
     'tmpfs',
     'path',
+    'chroot',
     'kplog',
     'hwtree',
     'tty',
