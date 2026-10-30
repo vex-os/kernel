@@ -13,6 +13,8 @@
 #include <vex/strings.h>
 #include <vex/time.h>
 
+#include "random_internal.h"
+
 #define RANDOM_MIN_POOL_BYTES 32
 #define RANDOM_MIN_RESEED_MS  100
 #define RANDOM_CHUNK_SIZE     256
@@ -129,7 +131,7 @@ static void generate_unseeded(uint8_t* out, size_t size)
     memzero_explicit(temporary, sizeof(temporary));
 }
 
-static bool needs_noise(void)
+bool random_needs_noise(void)
 {
     bool intr_state = spinlock_acquire_intr(&lock);
     bool needs = credit_bits < MIN_CREDIT_BITS;
@@ -175,7 +177,8 @@ static bool fill(void* out, size_t size, bool insecure)
 {
     uint8_t* dest = out;
 
-    if(needs_noise()) {
+    if(random_needs_noise()) {
+        random_source_wake();
         random_source_poll_all();
     }
 

@@ -7,6 +7,7 @@
 #include <vex/kmalloc.h>
 #include <vex/kprintf.h>
 #include <vex/limits.h>
+#include <vex/random_source.h>
 #include <vex/spinlock.h>
 #include <vex/string.h>
 
@@ -24,6 +25,10 @@ static spinlock_t irq_table_lock = SPINLOCK_INIT;
 static irq_entry_t irq_table[IRQ_TABLE_SIZE] = {}; // Numbers that are the same on all harts
 static unsigned hart_users[IRQ_TABLE_SIZE] = {};   // The number of harts that use the number for their own handler
 static irq_entry_t* hart_tables[MAX_HARTS] = {};   // Allocated with the first handler of the hart. Never freed
+
+// The timing of interrupts under a hypervisor
+// can be close to regular, so it earns little
+define_random_source_event(irq, true, 64);
 
 static void claim_nolock(irq_entry_t* restrict entry, irq_handler_t handler, void* restrict ctxdata)
 {
@@ -182,6 +187,8 @@ void irq_handler_remove_hart(hart_local_t* restrict hart, unsigned number)
 
 void irq_dispatch(unsigned number, const hart_context_t* restrict ctx)
 {
+    random_add_event(irq, number);
+
     if(number >= IRQ_TABLE_SIZE) {
         pr_verbose("irq: spurious IRQ 0x%02X out of range", number);
         return;
