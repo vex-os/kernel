@@ -3,6 +3,7 @@ kernel_sources += files(
     'calendar.c',
     'clockevt.c',
     'clocksrc.c',
+    'cycles.c',
     'delay.c',
     'rtc.c',
     'wallclock.c',

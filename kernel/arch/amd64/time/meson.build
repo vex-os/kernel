@@ -3,4 +3,5 @@ kernel_sources += files(
     'hpet.c',
     'lapic_timer.c',
     'pit.c',
+    'tsc.c',
 )
