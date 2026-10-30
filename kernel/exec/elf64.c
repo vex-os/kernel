@@ -17,6 +17,8 @@
 
 #define ELF64_STACK_TOP UINT64_C(0x0000700000000000)
 
+#define ELF64_STACK_INITIAL (UINT64_C(128) << UINT64_C(10)) // Mapped at exec; the rest of RLIMIT_STACK comes as the stack grows
+
 static bool ehdr_valid(const elf64_ehdr_t* restrict ehdr)
 {
     bool result = true;
@@ -425,7 +427,14 @@ static int elf64_setup(vmspace_t* restrict vmspace, file_t* restrict file, const
         }
     }
 
-    retval = vms_map(vmspace, virt_addr(ELF64_STACK_TOP - stack_size), virt_addr(ELF64_STACK_TOP), VPROT_RW, 0, nullptr);
+    size_t initial = stack_size;
+
+    if(initial > ELF64_STACK_INITIAL) {
+        initial = ELF64_STACK_INITIAL;
+    }
+
+    virt_addr_t floor = virt_addr(ELF64_STACK_TOP - stack_size);
+    retval = vms_map_stack(vmspace, floor, virt_addr(ELF64_STACK_TOP - initial), virt_addr(ELF64_STACK_TOP), VPROT_RW);
 
     if(retval < 0) {
         goto error;

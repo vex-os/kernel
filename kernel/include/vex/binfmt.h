@@ -41,7 +41,7 @@ int binfmt_add(binfmt_t* restrict binfmt);
 int binfmt_remove(binfmt_t* restrict binfmt);
 
 /// @param credentials The ones the program will run with, which setuid and setgid bits may have made differ from the caller's
-/// @param stack_limit The soft RLIMIT_STACK of the process; the stack is made that big, within bounds that load_binary sets,
-/// and the default one when the limit is RLIM_INFINITY. The stack does not grow
+/// @param stack_limit The soft RLIMIT_STACK of the process; the stack may grow that big, within bounds that load_binary sets,
+/// and the default one when the limit is RLIM_INFINITY
 int load_binary(vmspace_t* restrict vmspace, file_t* restrict file, const char** restrict argv, const char** restrict envp,
     const credentials_t* restrict credentials, uint64_t stack_limit, binfmt_entry_t* restrict out);
