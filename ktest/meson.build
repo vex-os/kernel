@@ -45,6 +45,7 @@ ktest_programs = [
     'mount',
     'tmpfs',
     'fallocate',
+    'mremap',
     'path',
     'chroot',
     'flock',
