@@ -642,39 +642,7 @@ static intptr_t sys_close(int fd)
 
 define_syscall(sys_close, SYS_CLOSE, 1);
 
-static intptr_t sys_dup(int fd)
-{
-    thread_t* thread = this_thread();
-    process_t* process = thread->process;
-
-    if(process == nullptr) {
-        return -ENOSYS;
-    }
-
-    return process_fd_dup(process, fd, -1, 0);
-}
-
-define_syscall(sys_dup, SYS_DUP, 1);
-
-static intptr_t sys_dup2(int old_fd, int new_fd)
-{
-    thread_t* thread = this_thread();
-    process_t* process = thread->process;
-
-    if(process == nullptr) {
-        return -ENOSYS;
-    }
-
-    if(new_fd < 0) {
-        return -EBADF;
-    }
-
-    return process_fd_dup(process, old_fd, new_fd, 0);
-}
-
-define_syscall(sys_dup2, SYS_DUP2, 2);
-
-static intptr_t sys_dup3(int old_fd, int new_fd, uintptr_t flags)
+static intptr_t sys_dup(int old_fd, int new_fd, uintptr_t flags)
 {
     thread_t* thread = this_thread();
     process_t* process = thread->process;
@@ -687,8 +655,8 @@ static intptr_t sys_dup3(int old_fd, int new_fd, uintptr_t flags)
         return -EINVAL;
     }
 
-    // Unlike dup2, naming the same
-    // descriptor twice is an error
+    // The same descriptor twice is an error. dup2 allows it, and
+    // the C library checks that the descriptor is open
     if(old_fd == new_fd) {
         return -EINVAL;
     }
@@ -706,4 +674,4 @@ static intptr_t sys_dup3(int old_fd, int new_fd, uintptr_t flags)
     return process_fd_dup(process, old_fd, new_fd, fd_flags);
 }
 
-define_syscall(sys_dup3, SYS_DUP3, 3);
+define_syscall(sys_dup, SYS_DUP, 3);

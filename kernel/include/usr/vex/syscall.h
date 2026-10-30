@@ -71,8 +71,6 @@
 #define __k_SYS_SEEK      0x0C4
 #define __k_SYS_IOCTL     0x0C5
 #define __k_SYS_DUP       0x0C6
-#define __k_SYS_DUP2      0x0C7
-#define __k_SYS_DUP3      0x0C8
 #define __k_SYS_FSTAT     0x0C9
 #define __k_SYS_FTRUNCATE 0x0CA
 #define __k_SYS_FSYNC     0x0CB

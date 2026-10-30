@@ -171,11 +171,11 @@ static void test_nofile(void)
             code += 1;
         }
 
-        if(ktest_syscall2(__k_SYS_DUP2, first, LOW_DESCRIPTOR) == -__k_EBADF) {
+        if(ktest_syscall3(__k_SYS_DUP, first, LOW_DESCRIPTOR, 0) == -__k_EBADF) {
             code += 2;
         }
 
-        if(ktest_syscall2(__k_SYS_DUP2, first, LOW_DESCRIPTOR - 1) == LOW_DESCRIPTOR - 1) {
+        if(ktest_syscall3(__k_SYS_DUP, first, LOW_DESCRIPTOR - 1, 0) == LOW_DESCRIPTOR - 1) {
             code += 4;
         }
 

@@ -90,7 +90,7 @@ static long open_terminal(void)
 
     for(long fd = KTEST_STDIN; fd <= KTEST_STDERR; ++fd) {
         if(fd != terminal) {
-            ktest_syscall2(__k_SYS_DUP2, terminal, fd);
+            ktest_syscall3(__k_SYS_DUP, terminal, fd, 0);
         }
     }
 

@@ -92,10 +92,10 @@ int main(void)
     ktest_close(duplicate);
     ktest_expect(ktest_syscall3(__k_SYS_FCNTL, fd, __k_F_DUPFD, -1), -__k_EINVAL);
 
-    // dup3 refuses the same descriptor and flags other than O_CLOEXEC
-    ktest_expect(ktest_syscall3(__k_SYS_DUP3, fd, fd, 0), -__k_EINVAL);
-    ktest_expect(ktest_syscall3(__k_SYS_DUP3, fd, 21, __k_O_APPEND), -__k_EINVAL);
-    ktest_expect(ktest_syscall3(__k_SYS_DUP3, fd, 21, __k_O_CLOEXEC), 21);
+    // dup refuses the same descriptor and flags other than O_CLOEXEC
+    ktest_expect(ktest_syscall3(__k_SYS_DUP, fd, fd, 0), -__k_EINVAL);
+    ktest_expect(ktest_syscall3(__k_SYS_DUP, fd, 21, __k_O_APPEND), -__k_EINVAL);
+    ktest_expect(ktest_syscall3(__k_SYS_DUP, fd, 21, __k_O_CLOEXEC), 21);
     ktest_expect(ktest_syscall3(__k_SYS_FCNTL, 21, __k_F_GETFD, 0), __k_FD_CLOEXEC);
     ktest_close(21);
     ktest_close(fd);
