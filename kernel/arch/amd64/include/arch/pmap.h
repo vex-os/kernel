@@ -54,6 +54,8 @@ typedef uint64_t pmentry_t;
 struct pmap_s {
     spinlock_t lock;
     unsigned num_levels;
+    size_t resident_pages; // Mapped through rmap, kept by rmap
+    size_t peak_pages;     // The most resident_pages ever had, kept by rmap
     pmentry_t* virt;
     phys_addr_t phys;
 };

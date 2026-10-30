@@ -49,3 +49,6 @@ size_t rmap_unmap_all(pframe_t* restrict pframe) __nodiscard;
 /// @post The caller runs tlb_shootdown, which this leaves out
 /// @return The number of writable mappings made read-only
 size_t rmap_protect_all(pframe_t* restrict pframe) __nodiscard;
+
+/// The most pages that rmap had mapped in the page table at one time
+size_t rmap_peak_pages(const pmap_t* restrict pmap) __nodiscard;

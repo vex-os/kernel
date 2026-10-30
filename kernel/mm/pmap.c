@@ -232,6 +232,8 @@ pmap_t* pmap_create(void)
     if(pmap) {
         pmap->lock = SPINLOCK_INIT;
         pmap->num_levels = sys_pmap.num_levels;
+        pmap->resident_pages = 0;
+        pmap->peak_pages = 0;
 
         if(arch_pmap_alloc(pmap) == 0) {
             arch_pmap_kcopy(pmap, &sys_pmap);

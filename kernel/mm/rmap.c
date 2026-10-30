@@ -33,6 +33,23 @@ static bool sole_mapping_locked(const pframe_t* restrict pframe)
     return 0 == (atomic_load(&pframe->flags, ATOMIC_ACQUIRE) & PFRAME_CACHE);
 }
 
+static void count_mapped(pmap_t* restrict pmap)
+{
+    size_t resident = 1 + atomic_fetch_add(&pmap->resident_pages, 1, ATOMIC_RELAXED);
+    size_t peak = atomic_load(&pmap->peak_pages, ATOMIC_RELAXED);
+
+    while(resident > peak) {
+        if(atomic_cmpxchg_weak(&pmap->peak_pages, &peak, resident, ATOMIC_RELAXED, ATOMIC_RELAXED)) {
+            break;
+        }
+    }
+}
+
+static void count_unmapped(pmap_t* restrict pmap)
+{
+    atomic_fetch_sub(&pmap->resident_pages, 1, ATOMIC_RELAXED);
+}
+
 static rmap_entry_t* unlink_entry(pframe_t* restrict pframe, pmap_t* restrict pmap, virt_addr_t virt)
 {
     for(rmap_entry_t** prev = &pframe->mappings; *prev; prev = &(*prev)->next) {
@@ -68,6 +85,7 @@ int rmap_map(pmap_t* restrict pmap, virt_addr_t virt, phys_addr_t phys, unsigned
     if(retval == 0) {
         entry->next = pframe->mappings;
         pframe->mappings = entry;
+        count_mapped(pmap);
     }
 
     spinlock_release_intr(lock, intr_state);
@@ -97,6 +115,7 @@ phys_addr_t rmap_unmap(pmap_t* restrict pmap, virt_addr_t virt)
     if(entry) {
         int retval = pmap_unmap_noflush(pmap, virt);
         kassert(retval == 0);
+        count_unmapped(pmap);
     }
 
     spinlock_release_intr(lock, intr_state);
@@ -206,6 +225,7 @@ size_t rmap_unmap_all(pframe_t* restrict pframe)
     for(rmap_entry_t* it = entries; it; it = it->next) {
         int retval = pmap_unmap_noflush(it->pmap, it->virt);
         kassert(retval == 0);
+        count_unmapped(it->pmap);
         count += 1;
     }
 
@@ -240,4 +260,9 @@ size_t rmap_protect_all(pframe_t* restrict pframe)
     spinlock_release_intr(lock, intr_state);
 
     return count;
+}
+
+size_t rmap_peak_pages(const pmap_t* restrict pmap)
+{
+    return atomic_load(&pmap->peak_pages, ATOMIC_RELAXED);
 }
