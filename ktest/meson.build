@@ -13,6 +13,7 @@ ktest_log_device = 'acpi:PCI0/pci:0000:00:1f.0/isa:2f8'
 ktest_programs = [
     'hello',
     'uname',
+    'random',
     'rlimit',
     'thread',
     'futex',
