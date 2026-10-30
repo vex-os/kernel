@@ -69,6 +69,7 @@ typedef struct vnode_s vnode_t;
 #define SYS_MUNLOCK    __k_SYS_MUNLOCK
 #define SYS_MLOCKALL   __k_SYS_MLOCKALL
 #define SYS_MUNLOCKALL __k_SYS_MUNLOCKALL
+#define SYS_MREMAP     __k_SYS_MREMAP
 #define SYS_MSYNC      __k_SYS_MSYNC
 
 #define SYS_OPENAT    __k_SYS_OPENAT

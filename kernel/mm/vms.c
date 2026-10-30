@@ -905,6 +905,180 @@ int vms_unmap(vmspace_t* restrict vmspace, virt_addr_t start, virt_addr_t end)
     return retval;
 }
 
+// The frame goes to the new address with its reference and
+// no page is copied. If that fails, it stays where it was
+static int transfer_page(pmap_t* restrict pmap, virt_addr_t source, virt_addr_t target)
+{
+    phys_addr_t present = pmap_resolve_address(pmap, source);
+
+    if(address_null(present)) {
+        return 0;
+    }
+
+    unsigned vprot = pmap_resolve_vprot(pmap, source);
+    phys_addr_t phys = rmap_unmap(pmap, source);
+
+    if(address_null(phys)) {
+        return 0;
+    }
+
+    int retval = rmap_map(pmap, target, phys, vprot);
+
+    if(retval == 0) {
+        return 0;
+    }
+
+    // If even this fails, the page is gone, and the next access faults a fresh one in
+    if(rmap_map(pmap, source, phys, vprot) < 0) {
+        put_frame(phys);
+    }
+
+    return retval;
+}
+
+static int transfer_pages(pmap_t* restrict pmap, virt_addr_t source, virt_addr_t target, size_t size)
+{
+    for(size_t offset = 0; offset < size; offset += PAGE_SIZE) {
+        virt_addr_t from = address_add(source, offset);
+        virt_addr_t to = address_add(target, offset);
+        int retval = transfer_page(pmap, from, to);
+
+        if(retval == 0) {
+            continue;
+        }
+
+        // Back to where they came from
+        for(size_t done = 0; done < offset; done += PAGE_SIZE) {
+            virt_addr_t moved = address_add(target, done);
+            virt_addr_t origin = address_add(source, done);
+
+            transfer_page(pmap, moved, origin);
+        }
+
+        return retval;
+    }
+
+    return 0;
+}
+
+// The pages are paid for twice until the old mapping goes, which the credit in alloc_region allows
+static int move_locked(vmspace_t* restrict vmspace, virt_addr_t start, size_t old_size, size_t new_size, virt_addr_t* restrict out)
+{
+    virt_addr_t old_end = address_add(start, old_size);
+    int retval = split_region(vmspace, start);
+
+    if(retval == 0) {
+        retval = split_region(vmspace, old_end);
+    }
+
+    if(retval < 0) {
+        return retval;
+    }
+
+    const vm_region_t* source = find_region(vmspace, start);
+    vm_backing_t backing = {};
+    backing.file = source->file;
+    backing.file_offset = source->file_offset;
+    backing.shared = source->shared;
+    backing.may_write = source->may_write;
+
+    unsigned flags = 0;
+
+    if(source->noreserve) {
+        flags = VMS_NORESERVE;
+    }
+
+    size_t credit = 0;
+
+    if(region_counted(source)) {
+        credit = region_pages(source);
+    }
+
+    vm_region_t* region = alloc_region(virt_addr(0), virt_addr(new_size), source->vprot, flags, &backing, credit);
+
+    if(region == nullptr) {
+        return -ENOMEM;
+    }
+
+    if(!find_highest_gap(vmspace, new_size, &region->start)) {
+        free_region(region, false);
+        return -ENOMEM;
+    }
+
+    virt_addr_t target = region->start;
+    region->end = address_add(target, new_size);
+    insert_region(vmspace, region);
+
+    retval = transfer_pages(vmspace->pmap, start, target, old_size);
+
+    // The TLBs of the other harts still hold the old addresses, and nothing freed a page to flush them
+    tlb_shootdown();
+
+    if(retval < 0) {
+        unmap_locked(vmspace, target, region->end);
+        return retval;
+    }
+
+    unmap_locked(vmspace, start, old_end);
+
+    *out = target;
+
+    return 0;
+}
+
+int vms_remap(vmspace_t* restrict vmspace, virt_addr_t start, size_t old_size, size_t new_size, bool may_move, virt_addr_t* restrict out)
+{
+    if(!user_range_ok(vmspace, start, old_size)) {
+        return -EINVAL;
+    }
+
+    virt_addr_t old_end = address_add(start, old_size);
+
+    mutex_acquire(&vmspace->lock);
+
+    vm_region_t* region = find_region(vmspace, start);
+    int retval = 0;
+
+    *out = start;
+
+    if(region == nullptr || address_greater(old_end, region->end)) {
+        retval = -EFAULT;
+    }
+    else if(region->device || region->grows_down) {
+        retval = -EINVAL;
+    }
+    else if(new_size < old_size) {
+        retval = unmap_locked(vmspace, address_add(start, new_size), old_end);
+    }
+    else if(new_size > old_size) {
+        bool at_end = address_equal(old_end, region->end);
+        bool in_place = at_end && user_range_ok(vmspace, start, new_size);
+
+        if(in_place) {
+            in_place = range_free(vmspace, old_end, address_add(start, new_size));
+        }
+
+        size_t extra = page_count(new_size - old_size);
+
+        if(in_place && region_counted(region) && commit_charge(extra) < 0) {
+            retval = -ENOMEM;
+        }
+        else if(in_place) {
+            region->end = address_add(start, new_size);
+        }
+        else if(may_move) {
+            retval = move_locked(vmspace, start, old_size, new_size, out);
+        }
+        else {
+            retval = -ENOMEM;
+        }
+    }
+
+    mutex_release(&vmspace->lock);
+
+    return retval;
+}
+
 int vms_protect(vmspace_t* restrict vmspace, virt_addr_t start, virt_addr_t end, unsigned vprot)
 {
     if(!range_valid(vmspace, start, end)) {

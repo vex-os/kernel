@@ -384,6 +384,47 @@ static intptr_t sys_munlock(user_addr_t addr, uintptr_t length)
 define_syscall(sys_munlock, SYS_MUNLOCK, 2);
 
 // UNDONE: As for mlock, and MCL_FUTURE has to reach the mappings made later
+static intptr_t sys_mremap(user_addr_t addr, uintptr_t old_size, uintptr_t new_size, uintptr_t flags)
+{
+    thread_t* thread = this_thread();
+    process_t* process = thread->process;
+
+    if(process == nullptr) {
+        return -ENOSYS;
+    }
+
+    if(flags & ~(uintptr_t)(MREMAP_MAYMOVE)) {
+        return -EINVAL;
+    }
+
+    virt_addr_t start = user_addr_to_virt(addr);
+    virt_addr_t old_end;
+
+    if(new_size == 0 || !user_range_end(process->vmspace, start, old_size, &old_end)) {
+        return -EINVAL;
+    }
+
+    // Nothing that long fits in user space, and the rounding below would overflow
+    if(new_size > VMS_MMAP_TOP) {
+        return -ENOMEM;
+    }
+
+    size_t old_length = address_diff(old_end, start);
+    size_t new_length = page_align_up(new_size);
+    bool may_move = flags & MREMAP_MAYMOVE;
+    virt_addr_t result;
+
+    int retval = vms_remap(process->vmspace, start, old_length, new_length, may_move, &result);
+
+    if(retval < 0) {
+        return retval;
+    }
+
+    return result.value;
+}
+
+define_syscall(sys_mremap, SYS_MREMAP, 4);
+
 static intptr_t sys_mlockall(uintptr_t flags)
 {
     thread_t* thread = this_thread();

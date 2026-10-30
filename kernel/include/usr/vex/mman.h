@@ -25,6 +25,8 @@
 #define __k_MADV_WILLNEED   3
 #define __k_MADV_DONTNEED   4
 
+#define __k_MREMAP_MAYMOVE 0x0001 /* Without MAYMOVE a mapping grows only in place */
+
 #define __k_MCL_CURRENT 0x0001
 #define __k_MCL_FUTURE  0x0002
 #define __k_MCL_ONFAULT 0x0004

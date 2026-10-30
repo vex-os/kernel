@@ -85,6 +85,15 @@ int vms_discard(vmspace_t* restrict vmspace, virt_addr_t start, virt_addr_t end)
 /// @retval -ENOMEM Part of the range is not mapped
 int vms_check_mapped(vmspace_t* restrict vmspace, virt_addr_t start, virt_addr_t end);
 
+/// Changes the size of the mapping that begins at start, as mremap does. Growing takes the space after it, or with may_move
+/// a new place, to which the pages go with their contents and the mapping goes from the old one
+/// @pre start, old_size and new_size are page aligned, and old_size and new_size are not zero
+/// @param out Receives the address of the mapping afterwards
+/// @retval -EFAULT The old range is not inside one mapping
+/// @retval -EINVAL The mapping is device memory or a stack, or the old range is not in user space
+/// @retval -ENOMEM There is no room to grow, or the commit limit is over
+int vms_remap(vmspace_t* restrict vmspace, virt_addr_t start, size_t old_size, size_t new_size, bool may_move, virt_addr_t* restrict out);
+
 int vms_sync(vmspace_t* restrict vmspace, virt_addr_t start, virt_addr_t end, bool wait);
 int vms_protect(vmspace_t* restrict vmspace, virt_addr_t start, virt_addr_t end, unsigned vprot);
 int vms_unmap_all(vmspace_t* restrict vmspace);

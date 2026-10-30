@@ -67,6 +67,7 @@
 #define __k_SYS_MUNLOCK    0x0A6
 #define __k_SYS_MLOCKALL   0x0A7
 #define __k_SYS_MUNLOCKALL 0x0A8
+#define __k_SYS_MREMAP     0x0A9
 
 #define __k_SYS_OPENAT    0x0C0
 #define __k_SYS_CLOSE     0x0C1
