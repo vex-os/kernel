@@ -75,6 +75,7 @@ kernel_subsystems = {
     'firmware': 'KP_FIRMWARE',
     'fs': 'KP_FS',
     'init': 'KP_CORE',
+    'ipc': 'KP_IPC',
     'irq': 'KP_IRQ',
     'libk': 'KP_CORE',
     'mm': 'KP_MM',

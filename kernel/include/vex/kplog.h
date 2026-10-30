@@ -26,6 +26,7 @@
 #define KP_FS       __k_KP_FS
 #define KP_EXEC     __k_KP_EXEC
 #define KP_CRYPTO   __k_KP_CRYPTO
+#define KP_IPC      __k_KP_IPC
 #define KP_USER     __k_KP_USER
 
 #define FEED_TYPE_KPLOG __k_FEED_TYPE_KPLOG
