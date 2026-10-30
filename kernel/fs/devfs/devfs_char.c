@@ -69,6 +69,13 @@ static int devfs_char_ioctl(vnode_t* restrict node, file_t* restrict file, unsig
     return char_interface_ioctl(context->interface, file->ctxdata, request, argument);
 }
 
+static unsigned devfs_char_poll(vnode_t* restrict node, file_t* restrict file, poll_table_t* restrict table)
+{
+    const devfs_char_context_t* context = node->ctxdata;
+
+    return char_interface_poll(context->interface, file->ctxdata, table);
+}
+
 static int devfs_char_mmap(vnode_t* restrict node, off_t offset, size_t length)
 {
     const devfs_char_context_t* context = node->ctxdata;
@@ -102,6 +109,7 @@ static const vnode_ops_t devfs_char_ops = {
     .write = &devfs_char_write,
     .seek = &devfs_char_seek,
     .ioctl = &devfs_char_ioctl,
+    .poll = &devfs_char_poll,
     .stat = &devfs_char_stat,
     .open = &devfs_char_open,
     .close = &devfs_char_close,

@@ -5,6 +5,7 @@
 #include <vex/dev_name.h>
 #include <vex/errno.h>
 #include <vex/mutex.h>
+#include <vex/poll.h>
 #include <vex/types.h>
 
 typedef struct console_s console_t;
@@ -44,6 +45,11 @@ struct char_interface_ops_s {
     off_t (*seek)(const char_interface_t* restrict interface, void* restrict file_ctxdata, off_t position, off_t offset, int origin);
 
     int (*ioctl)(const char_interface_t* restrict interface, void* restrict file_ctxdata, uint32_t request, uintptr_t argument);
+
+    /// Reports the state of the open file as POLL bits, without a wait
+    /// @param table Gets, through poll_table_add, each event whose trigger can change the result
+    /// @note nullptr makes the device always ready to read and write
+    unsigned (*poll)(const char_interface_t* restrict interface, void* restrict file_ctxdata, poll_table_t* restrict table);
 
     /// Checks a mapping of the device's memory before it is made
     /// @pre offset and length are page aligned
@@ -161,6 +167,17 @@ static __always_inline int char_interface_ioctl(const char_interface_t* restrict
     if(interface->ops->ioctl == nullptr)
         return -ENOTTY;
     return interface->ops->ioctl(interface, file_ctxdata, request, argument);
+}
+
+/// @note A removed device reports a hangup
+static __always_inline unsigned char_interface_poll(const char_interface_t* restrict interface, void* restrict file_ctxdata,
+    poll_table_t* restrict table)
+{
+    if(atomic_load(&interface->priv.removed, ATOMIC_ACQUIRE))
+        return POLLERR | POLLHUP;
+    if(interface->ops->poll == nullptr)
+        return POLL_READABLE | POLL_WRITABLE;
+    return interface->ops->poll(interface, file_ctxdata, table);
 }
 
 static __always_inline int char_interface_mmap(const char_interface_t* restrict interface, off_t offset, size_t length)

@@ -11,6 +11,7 @@
 #include <vex/ioctl.h>
 #include <vex/panic.h>
 #include <vex/pgrp.h>
+#include <vex/poll.h>
 #include <vex/process.h>
 #include <vex/pslab.h>
 #include <vex/sched.h>
@@ -1250,6 +1251,52 @@ static int tty_char_ioctl(const char_interface_t* restrict chr, void* restrict f
     return retval;
 }
 
+// A non-canonical read with VMIN and no VTIME waits for VMIN bytes,
+// so poll waits for them too, as Linux does
+static size_t poll_threshold(const termios_t* restrict termios)
+{
+    bool raw = 0 == (termios->c_lflag & ICANON);
+
+    if(raw && termios->c_cc[VTIME] == 0 && termios->c_cc[VMIN]) {
+        return termios->c_cc[VMIN];
+    }
+
+    return 1;
+}
+
+static unsigned tty_char_poll(const char_interface_t* restrict chr, void* restrict file_ctxdata, poll_table_t* restrict table)
+{
+    tty_interface_t* interface = tty_of(chr);
+
+    poll_table_add(table, &interface->priv.readable);
+    poll_table_add(table, &interface->priv.writable);
+
+    // A hung up terminal reads as end of file and fails writes
+    if(!enter(interface)) {
+        return POLL_READABLE | POLL_WRITABLE | POLLERR | POLLHUP;
+    }
+
+    unsigned revents = 0;
+
+    bool intr_state = spinlock_acquire_intr(&interface->priv.lock);
+
+    size_t threshold = poll_threshold(&interface->priv.termios);
+
+    if(tty_discipline_readable(interface) >= threshold) {
+        revents |= POLL_READABLE;
+    }
+
+    if(tty_ring_room(&interface->priv.output) >= TTY_EXPANSION_MAX) {
+        revents |= POLL_WRITABLE;
+    }
+
+    spinlock_release_intr(&interface->priv.lock, intr_state);
+
+    leave(interface);
+
+    return revents;
+}
+
 static void tty_char_release(const char_interface_t* restrict chr)
 {
     tty_interface_t* interface = tty_of(chr);
@@ -1274,6 +1321,7 @@ static const char_interface_ops_t tty_char_ops = {
     .read = &tty_char_read,
     .write = &tty_char_write,
     .ioctl = &tty_char_ioctl,
+    .poll = &tty_char_poll,
     .release = &tty_char_release,
 };
 
