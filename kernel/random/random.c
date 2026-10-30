@@ -140,6 +140,11 @@ bool random_needs_noise(void)
     return needs;
 }
 
+event_t* random_ready_event(void)
+{
+    return &ready_event;
+}
+
 bool random_ready(void)
 {
     bool intr_state = spinlock_acquire_intr(&lock);

@@ -67,6 +67,14 @@ dev_prefix_t dev_prefix_hwtree = {
     .string = "hwtree",
 };
 
+dev_prefix_t dev_prefix_random = {
+    .string = "random",
+};
+
+dev_prefix_t dev_prefix_urandom = {
+    .string = "urandom",
+};
+
 static dev_prefix_t* const dev_prefixes[] = {
     &dev_prefix_anon,
     &dev_prefix_ata,
@@ -80,6 +88,8 @@ static dev_prefix_t* const dev_prefixes[] = {
     &dev_prefix_fbd,
     &dev_prefix_kplog,
     &dev_prefix_hwtree,
+    &dev_prefix_random,
+    &dev_prefix_urandom,
 };
 
 static void link_unit_locked(dev_prefix_t* restrict prefix, dev_unit_t* restrict unit, dev_unit_t* restrict prev, unsigned number)
