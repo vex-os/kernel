@@ -3,10 +3,10 @@
 #include <arch/hart.h>
 #include <arch/thread.h>
 #include <vex/compiler.h>
-#include <vex/cputime.h>
 #include <vex/signal.h>
 #include <vex/spinlock.h>
 #include <vex/types.h>
+#include <vex/usage.h>
 
 typedef struct credentials_s credentials_t;
 typedef struct event_s event_t;
@@ -79,7 +79,7 @@ struct thread_s {
     uint32_t sig_altstack_size;
     bool sig_saved_valid;
 
-    cputime_t cputime; // Changed only on the hart that runs the thread
+    usage_t usage; // Changed only on the hart that runs the thread
 
     uintptr_t clear_tid; // Zeroed and woken as a futex when the thread exits
 

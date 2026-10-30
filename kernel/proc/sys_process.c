@@ -1,7 +1,6 @@
 #include <vex/address.h>
 #include <vex/atomic.h>
 #include <vex/binfmt.h>
-#include <vex/cputime.h>
 #include <vex/errno.h>
 #include <vex/event.h>
 #include <vex/fcntl.h>
@@ -19,6 +18,7 @@
 #include <vex/syscall.h>
 #include <vex/thread.h>
 #include <vex/uaccess.h>
+#include <vex/usage.h>
 #include <vex/vms.h>
 #include <vex/wait.h>
 
@@ -33,7 +33,7 @@ struct wait_result_s {
     uid_t uid;
     int code;
     int status;
-    cputime_t cputime; // With the children that the child collected
+    usage_t usage; // With the children that the child collected
 };
 
 static int copyin_string_array(user_addr_t array, const char** restrict out, char** restrict cursor, const char* restrict limit)
@@ -281,8 +281,8 @@ static void fill_exited(wait_result_t* restrict out, const process_t* restrict c
     out->uid = child->credentials->uid;
     out->code = CLD_EXITED;
     out->status = child->exit_code;
-    out->cputime = child->cputime;
-    cputime_add(&out->cputime, &child->children_cputime);
+    out->usage = child->usage;
+    usage_add(&out->usage, &child->children_usage);
 
     if(child->exit_signal) {
         out->code = CLD_KILLED;
@@ -291,11 +291,11 @@ static void fill_exited(wait_result_t* restrict out, const process_t* restrict c
 }
 
 // The times of a zombie no longer change, so they are read without its lock
-static void collect_cputime(process_t* restrict caller, const process_t* restrict target)
+static void collect_usage(process_t* restrict caller, const process_t* restrict target)
 {
     bool intr_state = spinlock_acquire_intr(&caller->lock);
-    cputime_add(&caller->children_cputime, &target->cputime);
-    cputime_add(&caller->children_cputime, &target->children_cputime);
+    usage_add(&caller->children_usage, &target->usage);
+    usage_add(&caller->children_usage, &target->children_usage);
     spinlock_release_intr(&caller->lock, intr_state);
 }
 
@@ -306,7 +306,7 @@ static intptr_t collect_child(process_t* restrict caller, process_t* restrict ta
     intptr_t retval = target->pid;
 
     if(0 == (options & WNOWAIT)) {
-        collect_cputime(caller, target);
+        collect_usage(caller, target);
         process_destroy(target);
     }
 
@@ -326,12 +326,12 @@ static bool take_report(process_t* restrict child, unsigned bit, uintptr_t optio
 }
 
 // A child that stops or continues still runs threads, so its time is a snapshot
-static void read_live_cputime(process_t* restrict child, cputime_t* restrict out)
+static void read_live_usage(process_t* restrict child, usage_t* restrict out)
 {
-    cputime_of_process(child, out);
+    usage_of_process(child, out);
 
     bool intr_state = spinlock_acquire_intr(&child->lock);
-    cputime_add(out, &child->children_cputime);
+    usage_add(out, &child->children_usage);
     spinlock_release_intr(&child->lock, intr_state);
 
     process_decref(child);
@@ -429,7 +429,7 @@ static intptr_t wait_child(process_t* restrict caller, pid_t pid, const process_
         if(reporter) {
             // The child is read after the lock of the caller goes, so the two locks are never held together
             spinlock_release_intr(&caller->lock, intr_state);
-            read_live_cputime(reporter, &result->cputime);
+            read_live_usage(reporter, &result->usage);
             return result->pid;
         }
 
@@ -601,7 +601,7 @@ static ssize_t copyout_rusage(user_addr_t address, const wait_result_t* restrict
     }
 
     rusage_t usage;
-    cputime_to_rusage(&result->cputime, &usage);
+    usage_to_rusage(&result->usage, &usage);
 
     return user_copyout(address, &usage, sizeof(usage));
 }

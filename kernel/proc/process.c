@@ -628,7 +628,7 @@ void process_thread_reaped(process_t* process, thread_t* thread)
     }
 
     process->num_threads -= 1;
-    cputime_add(&process->cputime, &thread->cputime);
+    usage_add(&process->usage, &thread->usage);
 
     bool last = (process->num_threads == 0);
     thread_t* exec_thread = nullptr;

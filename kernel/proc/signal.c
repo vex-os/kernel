@@ -406,6 +406,8 @@ static bool deliver(hart_context_t* restrict ctx, bool handlers)
         return true;
     }
 
+    usage_increase(&thread->usage.signals, 1);
+
     sigset_t blocked = action.sa_mask;
 
     if(0 == (action.sa_flags & SA_NODEFER)) {

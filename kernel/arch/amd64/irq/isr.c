@@ -1,7 +1,6 @@
 #include <arch/amd64.fpu.h>
 #include <arch/amd64.idt.h>
 #include <vex/compiler.h>
-#include <vex/cputime.h>
 #include <vex/errno.h>
 #include <vex/hart.h>
 #include <vex/initcall.h>
@@ -15,6 +14,7 @@
 #include <vex/signal.h>
 #include <vex/string.h>
 #include <vex/thread.h>
+#include <vex/usage.h>
 #include <vex/vms.h>
 
 extern void amd64_isr_00(void);
@@ -86,6 +86,11 @@ static void page_fault_handler(hart_local_t* restrict hart, hart_context_t* rest
     enable_interrupts();
 
     int retval = vms_fault(process->vmspace, virt_addr(fault), access);
+
+    // UNDONE: a fault that reads the disk is a major one
+    if(retval == 0) {
+        usage_increase(&thread->usage.minor_faults, 1);
+    }
 
     if(retval < 0) {
         siginfo_t info = {};
@@ -224,7 +229,7 @@ void __used amd64_isr_handler(hart_context_t* restrict ctx, uint64_t intvec)
     }
 
     if(3 == (ctx->amd64_cs & 3)) {
-        cputime_enter_kernel();
+        usage_enter_kernel();
     }
 
     if(intvec == 0x0E) {

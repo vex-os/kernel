@@ -1,10 +1,10 @@
 #include <arch/amd64.idt.h>
 #include <arch/amd64.lapic.h>
 #include <arch/irq.h>
-#include <vex/cputime.h>
 #include <vex/hart.h>
 #include <vex/initcall.h>
 #include <vex/irq.h>
+#include <vex/usage.h>
 
 extern void amd64_irq_30(void);
 extern void amd64_irq_31(void);
@@ -218,7 +218,7 @@ extern void amd64_irq_FF(void);
 void __used amd64_irq_handler(hart_context_t* restrict ctx, uint64_t idt_vector)
 {
     if(3 == (ctx->amd64_cs & 3)) {
-        cputime_enter_kernel();
+        usage_enter_kernel();
     }
 
     // Intel SDM 3A, 11.9: a spurious interrupt

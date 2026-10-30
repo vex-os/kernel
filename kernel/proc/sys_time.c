@@ -1,6 +1,5 @@
 #include <vex/capability.h>
 #include <vex/clocksrc.h>
-#include <vex/cputime.h>
 #include <vex/cred.h>
 #include <vex/cycles.h>
 #include <vex/errno.h>
@@ -12,6 +11,7 @@
 #include <vex/thread.h>
 #include <vex/time.h>
 #include <vex/uaccess.h>
+#include <vex/usage.h>
 #include <vex/wallclock.h>
 
 #include "syscall_internal.h"
@@ -44,13 +44,13 @@ static bool is_cputime_clock(uintptr_t clock)
 static int read_cputime_clock(uintptr_t clock, timespec_t* restrict now)
 {
     thread_t* thread = this_thread();
-    cputime_t time = {};
+    usage_t time = {};
 
     if(clock == CLOCK_THREAD_CPUTIME_ID) {
-        cputime_of_thread(thread, &time);
+        usage_of_thread(thread, &time);
     }
     else if(thread->process) {
-        cputime_of_process(thread->process, &time);
+        usage_of_process(thread->process, &time);
     }
     else {
         return -EINVAL;

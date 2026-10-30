@@ -319,7 +319,7 @@ static void sched_irq_handler(unsigned number, const hart_context_t* restrict ct
 
     thread_t* curr = hart->curr_thread;
 
-    cputime_switch(hart, curr);
+    usage_switch(hart, curr);
 
     // preempt_enable switches away once the last spinlock is
     // released; a blocking or dying thread has none to hold
@@ -368,6 +368,15 @@ static void sched_irq_handler(unsigned number, const hart_context_t* restrict ct
             hart_context_t* saved = thread_context(curr);
             memcpy(saved, ctx, sizeof(hart_context_t));
             arch_thread_ctx_save(curr);
+
+            // A thread that is runnable here was woken while it
+            // blocked, so it gave up the hart itself, as in Linux
+            if(curr->state == THREAD_RUNNING) {
+                usage_increase(&curr->usage.involuntary_switches, 1);
+            }
+            else {
+                usage_increase(&curr->usage.voluntary_switches, 1);
+            }
 
             if(curr->state == THREAD_RUNNING) {
                 curr->state = THREAD_RUNNABLE;
