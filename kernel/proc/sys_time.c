@@ -1,6 +1,8 @@
 #include <vex/capability.h>
 #include <vex/clocksrc.h>
+#include <vex/cputime.h>
 #include <vex/cred.h>
+#include <vex/cycles.h>
 #include <vex/errno.h>
 #include <vex/event.h>
 #include <vex/itimer.h>
@@ -16,7 +18,7 @@
 
 // The kernel steps the realtime clock and never slews, so the raw and coarse clocks read as the fine ones
 // TODO: CLOCK_BOOTTIME is not an alias once suspend exists, as it counts the time spent suspended
-// UNDONE: CLOCK_PROCESS_CPUTIME_ID and CLOCK_THREAD_CPUTIME_ID need the CPU time counters (RDTSC?)
+// The CPU time clocks are not here: they only read, and no wait goes by them
 static int canonical_clock(uintptr_t clock)
 {
     switch(clock) {
@@ -34,9 +36,49 @@ static int canonical_clock(uintptr_t clock)
     }
 }
 
+static bool is_cputime_clock(uintptr_t clock)
+{
+    return clock == CLOCK_THREAD_CPUTIME_ID || clock == CLOCK_PROCESS_CPUTIME_ID;
+}
+
+static int read_cputime_clock(uintptr_t clock, timespec_t* restrict now)
+{
+    thread_t* thread = this_thread();
+    cputime_t time = {};
+
+    if(clock == CLOCK_THREAD_CPUTIME_ID) {
+        cputime_of_thread(thread, &time);
+    }
+    else if(thread->process) {
+        cputime_of_process(thread->process, &time);
+    }
+    else {
+        return -EINVAL;
+    }
+
+    timespec_from_nsec(now, time.user_ns + time.system_ns);
+    return 0;
+}
+
 static intptr_t sys_gettime(uintptr_t clock, user_addr_t time)
 {
     timespec_t now;
+
+    if(is_cputime_clock(clock)) {
+        int retval = read_cputime_clock(clock, &now);
+
+        if(retval < 0) {
+            return retval;
+        }
+
+        ssize_t copied = user_copyout(time, &now, sizeof(now));
+
+        if(copied < 0) {
+            return copied;
+        }
+
+        return 0;
+    }
 
     switch(canonical_clock(clock)) {
         case CLOCK_REALTIME:
@@ -90,11 +132,14 @@ static intptr_t sys_settime(uintptr_t clock, user_addr_t time)
 
 define_syscall(sys_settime, SYS_SETTIME, 2);
 
-// Both clocks tick from the active clock source
-// A null pointer only asks whether the clock exists, as in Linux
+// The wall clocks tick from the active clock source, and
+// the CPU time clocks from the clock of the hart. A null
+// pointer only asks whether the clock exists, as in Linux
 static intptr_t sys_gettimeres(uintptr_t clock, user_addr_t resolution)
 {
-    if(canonical_clock(clock) < 0) {
+    bool cputime = is_cputime_clock(clock);
+
+    if(!cputime && canonical_clock(clock) < 0) {
         return -EINVAL;
     }
 
@@ -102,8 +147,14 @@ static intptr_t sys_gettimeres(uintptr_t clock, user_addr_t resolution)
         return 0;
     }
 
+    uint64_t step_ns = clock_source_resolution_ns();
+
+    if(cputime) {
+        step_ns = local_clock_resolution_ns();
+    }
+
     timespec_t step;
-    timespec_from_nsec(&step, clock_source_resolution_ns());
+    timespec_from_nsec(&step, step_ns);
 
     ssize_t copied = user_copyout(resolution, &step, sizeof(step));
 
