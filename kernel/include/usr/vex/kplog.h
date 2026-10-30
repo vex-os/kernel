@@ -28,6 +28,7 @@
 #define __k_KP_EXEC     0x000C /* Subsystem: binary format registry */
 #define __k_KP_CRYPTO   0x000D /* Subsystem: cryptographic nonsense */
 #define __k_KP_IPC      0x000E /* Subsystem: interprocess communications */
+#define __k_KP_RANDOM   0x000F /* Subsystem: entropy pool and random number generators */
 #define __k_KP_USER     0x00FF /* Subsystem: userspace writes to /dev/kplog */
 
 #define __k_FEED_TYPE_KPLOG __k_FEED_TYPE_DEF(0) /* struct __k_kplog_record */
