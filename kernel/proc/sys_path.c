@@ -1,4 +1,5 @@
 #include <vex/atomic.h>
+#include <vex/capability.h>
 #include <vex/cred.h>
 #include <vex/dirent.h>
 #include <vex/errno.h>
@@ -744,6 +745,66 @@ static intptr_t sys_chdir(user_addr_t path)
 }
 
 define_syscall(sys_chdir, SYS_CHDIR, 1);
+
+// Leaves the working directory where it is, so a process that keeps one outside the new root can still leave through it
+static intptr_t sys_chroot(user_addr_t path)
+{
+    thread_t* thread = this_thread();
+    process_t* process = thread->process;
+
+    if(process == nullptr) {
+        return -ENOSYS;
+    }
+
+    const credentials_t* credentials = thread->credentials;
+
+    if(!cred_capable(credentials, CAP_SYS_CHROOT)) {
+        return -EPERM;
+    }
+
+    char directory[PATH_MAX];
+    ssize_t copied = user_copyin_str(directory, path, sizeof(directory));
+
+    if(copied < 0) {
+        return copied;
+    }
+
+    vnode_t* base_dir;
+    int retval = syscall_dirfd(AT_FDCWD, directory, &base_dir);
+
+    if(retval < 0) {
+        return retval;
+    }
+
+    vnode_t* node;
+    retval = path_resolve_at(base_dir, directory, 0, credentials, &node);
+
+    if(base_dir) {
+        vnode_decref(base_dir);
+    }
+
+    if(retval < 0) {
+        return retval;
+    }
+
+    if(node->type != VNODE_DIRECTORY) {
+        vnode_decref(node);
+        return -ENOTDIR;
+    }
+
+    retval = vnode_access(node, credentials, X_OK);
+
+    if(retval < 0) {
+        vnode_decref(node);
+        return retval;
+    }
+
+    process_set_root(process, node);
+
+    return 0;
+}
+
+define_syscall(sys_chroot, SYS_CHROOT, 1);
 
 static intptr_t sys_fchdir(int fd)
 {

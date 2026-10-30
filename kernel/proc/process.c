@@ -4,10 +4,12 @@
 #include <vex/event.h>
 #include <vex/fcntl.h>
 #include <vex/file.h>
+#include <vex/initcall.h>
 #include <vex/itimer.h>
 #include <vex/kmalloc.h>
 #include <vex/kprintf.h>
 #include <vex/mount.h>
+#include <vex/path.h>
 #include <vex/pgrp.h>
 #include <vex/process.h>
 #include <vex/rlimit.h>
@@ -201,6 +203,7 @@ static void reparent_children(process_t* restrict process)
 static void release_files(process_t* restrict process)
 {
     process_set_cwd(process, nullptr);
+    process_set_root(process, nullptr);
 
     spinlock_acquire(&process->fd_lock);
 
@@ -331,6 +334,7 @@ process_t* process_create(process_t* restrict parent)
         process->umask = atomic_load_n(&parent->umask, ATOMIC_RELAXED);
         process->nice = atomic_load_n(&parent->nice, ATOMIC_RELAXED);
         process->cwd = process_get_cwd(parent);
+        process->root = process_get_root(parent);
     }
     else {
         process->credentials = &kernel_credentials;
@@ -357,6 +361,7 @@ process_t* process_create(process_t* restrict parent)
 
     if(process_group_attach(process, parent) < 0) {
         vnode_decref(process->cwd);
+        process_set_root(process, nullptr);
         process_decref(process);
         return nullptr;
     }
@@ -762,6 +767,53 @@ void process_set_cwd(process_t* process, vnode_t* node)
         vnode_decref(old_cwd);
     }
 }
+
+vnode_t* process_get_root(process_t* process)
+{
+    bool intr_state = spinlock_acquire_intr(&process->lock);
+
+    vnode_t* root = process->root;
+
+    if(root) {
+        vnode_incref(root);
+    }
+
+    spinlock_release_intr(&process->lock, intr_state);
+
+    return root;
+}
+
+void process_set_root(process_t* process, vnode_t* node)
+{
+    bool intr_state = spinlock_acquire_intr(&process->lock);
+
+    vnode_t* old_root = process->root;
+    process->root = node;
+
+    spinlock_release_intr(&process->lock, intr_state);
+
+    if(old_root) {
+        vnode_decref(old_root);
+    }
+}
+
+static vnode_t* current_process_root(void)
+{
+    thread_t* thread = this_thread();
+
+    if(thread == nullptr || thread->process == nullptr) {
+        return nullptr;
+    }
+
+    return process_get_root(thread->process);
+}
+
+static void init_process_root(void)
+{
+    path_set_root_source(&current_process_root);
+}
+
+initcall_bsp_vfs(init_process_root, INIT_FIRST);
 
 file_t* process_fd_get(process_t* process, int fd)
 {

@@ -93,6 +93,7 @@ struct process_s {
     itimer_t itimer; // Not inherited by a fork, and kept over an exec
 
     vnode_t* cwd;
+    vnode_t* root; // Where chroot put it; nullptr stands for the root of the VFS
     mode_t umask;
 
     spinlock_t fd_lock;
@@ -179,6 +180,12 @@ void process_set_cred(process_t* process, credentials_t* credentials);
 
 vnode_t* process_get_cwd(process_t* process) __nodiscard;
 void process_set_cwd(process_t* process, vnode_t* node);
+
+/// @return The new reference to the root of the process, or nullptr when it is the root of the VFS
+vnode_t* process_get_root(process_t* process) __nodiscard;
+
+/// Takes over the reference of the node
+void process_set_root(process_t* process, vnode_t* node);
 
 file_t* process_fd_get(process_t* process, int fd) __nodiscard;
 int process_fd_alloc(process_t* process, file_t* file, int min_fd, uint32_t fd_flags) __nodiscard;

@@ -9,6 +9,7 @@
 #define CAP_KILL           __k_CAP_KILL
 #define CAP_SETGID         __k_CAP_SETGID
 #define CAP_SETUID         __k_CAP_SETUID
+#define CAP_SYS_CHROOT     __k_CAP_SYS_CHROOT
 #define CAP_SYS_ADMIN      __k_CAP_SYS_ADMIN
 #define CAP_SYS_NICE       __k_CAP_SYS_NICE
 #define CAP_SYS_RESOURCE   __k_CAP_SYS_RESOURCE
