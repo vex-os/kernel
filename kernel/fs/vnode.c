@@ -212,6 +212,17 @@ static const vnode_ops_t* io_ops(const vnode_t* restrict node)
     return node->ops;
 }
 
+// UNDONE: a device node outside devfs finds its interface by rdev, which needs nodev mounts with it.
+// Until then such a node only shows its type and rdev, and devfs has the devices
+static int device_node_open(vnode_t* restrict node, file_t* restrict file)
+{
+    return -ENXIO;
+}
+
+static const vnode_ops_t device_node_ops = {
+    .open = &device_node_open,
+};
+
 static int mknod_crossed(vnode_t* restrict node, const char* restrict name, unsigned type, mode_t mode, dev_t rdev,
     const credentials_t* restrict credentials, vnode_t** restrict out)
 {
@@ -829,9 +840,11 @@ void vnode_init_special(vnode_t* restrict node, dev_t rdev)
 {
     node->rdev = rdev;
 
-    // UNDONE: device nodes, which find their interface by rdev
     if(node->type == VNODE_FIFO) {
         node->special_ops = &pipe_fifo_ops;
+    }
+    else {
+        node->special_ops = &device_node_ops;
     }
 }
 
