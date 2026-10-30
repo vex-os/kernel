@@ -21,6 +21,7 @@ ktest_programs = [
     'clock',
     'signal_threads',
     'process',
+    'waitid',
     'sigsuspend',
     'sigtimedwait',
     'itimer',
