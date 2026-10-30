@@ -45,6 +45,7 @@ ktest_programs = [
     'tmpfs',
     'path',
     'chroot',
+    'cputime',
     'kplog',
     'hwtree',
     'tty',

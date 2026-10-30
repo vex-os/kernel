@@ -41,8 +41,6 @@ int main(void)
     struct __k_timespec resolution = {};
 
     ktest_expect(get_resolution(__k_CLOCK_BOOTTIME, &resolution), -__k_EINVAL);
-    ktest_expect(get_resolution(__k_CLOCK_PROCESS_CPUTIME_ID, &resolution), -__k_EINVAL);
-    ktest_expect(get_resolution(__k_CLOCK_THREAD_CPUTIME_ID, &resolution), -__k_EINVAL);
     ktest_expect(get_resolution(99, &resolution), -__k_EINVAL);
     ktest_expect(get_time(__k_CLOCK_BOOTTIME, &resolution), -__k_EINVAL);
     ktest_expect(get_resolution(__k_CLOCK_MONOTONIC, (struct __k_timespec*)(1)), -__k_EFAULT);
