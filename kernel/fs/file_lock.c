@@ -247,6 +247,46 @@ static void insert_locked(file_locks_t* restrict locks, const file_lock_request_
     locks->head = fresh;
 }
 
+static bool holds_locked(const file_locks_t* restrict locks, const file_lock_request_t* restrict request)
+{
+    for(file_lock_t* lock = locks->head; lock; lock = lock->next) {
+        bool same = lock->owner == request->owner && lock->type == request->type;
+        bool covers = lock->start <= request->start && lock->end >= request->end;
+
+        if(same && covers) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+int file_lock_replace(vnode_t* restrict node, const file_lock_request_t* restrict request, bool wait)
+{
+    file_locks_t* locks = get_locks(node, false);
+
+    if(locks) {
+        bool intr_state = spinlock_acquire_intr(&locks->lock);
+        bool held = holds_locked(locks, request);
+        spinlock_release_intr(&locks->lock, intr_state);
+
+        if(held) {
+            return 0;
+        }
+    }
+
+    file_lock_request_t unlock = *request;
+    unlock.type = F_UNLCK;
+
+    int retval = file_lock_set(node, &unlock, false);
+
+    if(retval < 0 || request->type == F_UNLCK) {
+        return retval;
+    }
+
+    return file_lock_set(node, request, wait);
+}
+
 int file_lock_set(vnode_t* restrict node, const file_lock_request_t* restrict request, bool wait)
 {
     bool unlock = request->type == F_UNLCK;

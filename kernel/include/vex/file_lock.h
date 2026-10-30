@@ -26,6 +26,14 @@ struct file_lock_request_s {
 /// @retval -ENOMEM No memory for the ranges
 int file_lock_set(vnode_t* restrict node, const file_lock_request_t* restrict request, bool wait);
 
+/// file_lock_set that drops the locks of the owner in the range before it waits, as flock does
+/// @retval -EAGAIN A lock of another owner is in the way, and wait is false; the old locks are gone all the same
+/// @retval -ERESTART A signal came while the thread waited; the old locks are gone all the same
+/// @retval -ENOMEM No memory for the ranges
+/// @note Two owners that hold a range shared and want it exclusive would wait on each other forever otherwise.
+/// A lock of the same type over the whole range stays as it is
+int file_lock_replace(vnode_t* restrict node, const file_lock_request_t* restrict request, bool wait);
+
 /// Finds a lock of another owner that the request conflicts with
 /// @param request Replaced with that lock when there is one
 /// @return Whether there is one
