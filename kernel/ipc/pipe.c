@@ -6,6 +6,7 @@
 #include <vex/fcntl.h>
 #include <vex/file.h>
 #include <vex/initcall.h>
+#include <vex/ioctl.h>
 #include <vex/kprintf.h>
 #include <vex/limits.h>
 #include <vex/mount.h>
@@ -18,6 +19,7 @@
 #include <vex/stat.h>
 #include <vex/string.h>
 #include <vex/thread.h>
+#include <vex/uaccess.h>
 #include <vex/vnode.h>
 
 #define PIPEFS_TYPE     "pipefs"
@@ -353,6 +355,27 @@ static int pipe_vnode_close(vnode_t* restrict node, file_t* restrict file)
     return 0;
 }
 
+static int pipe_vnode_ioctl(vnode_t* restrict node, file_t* restrict file, uint32_t request, uintptr_t argument)
+{
+    pipe_t* pipe = node->ctxdata;
+
+    if(request != FIONREAD) {
+        return -ENOTTY;
+    }
+
+    bool intr_state = spinlock_acquire_intr(&pipe->lock);
+    size_t used = pipe->used;
+    spinlock_release_intr(&pipe->lock, intr_state);
+
+    int32_t value = used;
+
+    if(user_copyout(argument, &value, sizeof(value)) < 0) {
+        return -EFAULT;
+    }
+
+    return 0;
+}
+
 static int pipe_vnode_stat(vnode_t* restrict node, stat_t* restrict out)
 {
     const pipe_t* pipe = node->ctxdata;
@@ -392,6 +415,7 @@ static const vnode_ops_t pipe_vnode_ops = {
     .read = &pipe_vnode_read,
     .write = &pipe_vnode_write,
     .seek = &pipe_vnode_seek,
+    .ioctl = &pipe_vnode_ioctl,
     .stat = &pipe_vnode_stat,
 };
 
