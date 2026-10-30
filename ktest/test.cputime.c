@@ -1,4 +1,6 @@
 #include <vex/errno.h>
+#include <vex/fcntl.h>
+#include <vex/limits.h>
 #include <vex/mman.h>
 #include <vex/resource.h>
 #include <vex/signal.h>
@@ -8,15 +10,18 @@
 
 #include "ktest.h"
 
-#define NSEC_PER_MSEC 1000000L
-#define NSEC_PER_SEC  1000000000L
-#define BUSY_NSEC     (200 * NSEC_PER_MSEC)
-#define SLEEP_NSEC    (100 * NSEC_PER_MSEC)
-#define CHILD_NSEC    (50 * NSEC_PER_MSEC)
-#define PAGE_SIZE     4096
-#define TOUCH_PAGES   16
-#define PEAK_PAGES    1024
-#define SLACK_NSEC    (5 * NSEC_PER_MSEC) // The cycle counter and the clock source can disagree a little
+#define NSEC_PER_MSEC   1000000L
+#define NSEC_PER_SEC    1000000000L
+#define BUSY_NSEC       (200 * NSEC_PER_MSEC)
+#define SLEEP_NSEC      (100 * NSEC_PER_MSEC)
+#define CHILD_NSEC      (50 * NSEC_PER_MSEC)
+#define PAGE_SIZE       4096
+#define TOUCH_PAGES     16
+#define PEAK_PAGES      1024
+#define DISK_PAGES      4 // Read once with read and once through a mapping
+#define FAT_DEVICE      "/dev/ada0n1p3"
+#define BLOCKS_PER_PAGE (PAGE_SIZE / __k_S_BLKSIZE)
+#define SLACK_NSEC      (5 * NSEC_PER_MSEC) // The cycle counter and the clock source can disagree a little
 
 static long read_clock(long clock)
 {
@@ -160,7 +165,6 @@ static void test_usage(void)
     ktest_assert(usec_of(&self.ru_utime) >= usec_of(&thread.ru_utime));
     ktest_assert(usec_of(&self.ru_stime) >= usec_of(&thread.ru_stime));
     ktest_assert(self.ru_maxrss > 0);
-    ktest_expect(self.ru_inblock, 0);
     ktest_expect(ktest_syscall2(__k_SYS_GETRUSAGE, 7, (long)(&self)), -__k_EINVAL);
     ktest_expect(ktest_syscall2(__k_SYS_GETRUSAGE, __k_RUSAGE_SELF, 1), -__k_EFAULT);
 }
@@ -277,7 +281,7 @@ static void test_faults(void)
     get_usage(__k_RUSAGE_THREAD, &after);
 
     ktest_assert(after.ru_minflt - before.ru_minflt >= TOUCH_PAGES);
-    ktest_expect(after.ru_majflt, 0);
+    ktest_expect(after.ru_majflt - before.ru_majflt, 0); // The image itself came in through major faults
 }
 
 static void test_switches(void)
@@ -374,6 +378,130 @@ static void test_peak(void)
     ktest_assert(children.ru_maxrss >= usage.ru_maxrss);
 }
 
+static long mount_on(const char* device, const char* target, const char* type)
+{
+    return ktest_syscall6(__k_SYS_MOUNT, (long)(device), (long)(target), (long)(type), 0, 0, 0);
+}
+
+static void write_pages(const char* path, long count)
+{
+    static char page[PAGE_SIZE];
+    long fd = ktest_open(path, __k_O_CREAT | __k_O_WRONLY | __k_O_TRUNC, 0644);
+
+    ktest_assert(fd >= 0);
+
+    for(long i = 0; i < count; ++i) {
+        page[0] = (char)(i);
+        ktest_expect(ktest_write(fd, page, sizeof(page)), sizeof(page));
+    }
+
+    ktest_close(fd);
+}
+
+// Dirtying the pages of a file counts, and the writeback that follows counts for nobody
+static void test_blocks_out(const char* disk_file, const char* memory_file)
+{
+    struct __k_rusage before = {};
+    struct __k_rusage after = {};
+
+    get_usage(__k_RUSAGE_THREAD, &before);
+    write_pages(disk_file, 2 * DISK_PAGES);
+    get_usage(__k_RUSAGE_THREAD, &after);
+
+    ktest_assert(after.ru_oublock - before.ru_oublock >= 2 * DISK_PAGES * BLOCKS_PER_PAGE);
+
+    // Memory is not a block device
+    get_usage(__k_RUSAGE_THREAD, &before);
+    write_pages(memory_file, DISK_PAGES);
+    get_usage(__k_RUSAGE_THREAD, &after);
+
+    ktest_expect(after.ru_oublock - before.ru_oublock, 0);
+}
+
+// A fresh mount has nothing of the file cached, so the first half
+// comes in through read and the second half through faults
+static void test_blocks_in_and_major_faults(const char* disk_file)
+{
+    struct __k_rusage before = {};
+    struct __k_rusage after = {};
+    static char page[PAGE_SIZE];
+
+    long fd = ktest_open(disk_file, __k_O_RDONLY, 0);
+    ktest_assert(fd >= 0);
+
+    get_usage(__k_RUSAGE_THREAD, &before);
+
+    for(long i = 0; i < DISK_PAGES; ++i) {
+        ktest_expect(ktest_read(fd, page, sizeof(page)), sizeof(page));
+    }
+
+    get_usage(__k_RUSAGE_THREAD, &after);
+
+    ktest_assert(after.ru_inblock - before.ru_inblock >= DISK_PAGES * BLOCKS_PER_PAGE);
+    ktest_expect(after.ru_majflt - before.ru_majflt, 0);
+
+    long length = DISK_PAGES * PAGE_SIZE;
+    long address = ktest_syscall6(__k_SYS_MMAP, 0, length, __k_PROT_READ, __k_MAP_PRIVATE, fd, length);
+    ktest_assert(address > 0);
+
+    get_usage(__k_RUSAGE_THREAD, &before);
+
+    for(long i = 0; i < DISK_PAGES; ++i) {
+        ktest_expect(*(volatile char*)(address + i * PAGE_SIZE), (char)(DISK_PAGES + i));
+    }
+
+    get_usage(__k_RUSAGE_THREAD, &after);
+
+    ktest_expect(after.ru_majflt - before.ru_majflt, DISK_PAGES);
+    ktest_expect(after.ru_minflt - before.ru_minflt, 0);
+
+    // The pages are in the cache now
+    ktest_expect(ktest_syscall2(__k_SYS_MUNMAP, address, length), 0);
+    address = ktest_syscall6(__k_SYS_MMAP, 0, length, __k_PROT_READ, __k_MAP_PRIVATE, fd, length);
+    ktest_assert(address > 0);
+
+    get_usage(__k_RUSAGE_THREAD, &before);
+    ktest_expect(*(volatile char*)(address), (char)(DISK_PAGES));
+    get_usage(__k_RUSAGE_THREAD, &after);
+
+    ktest_expect(after.ru_majflt - before.ru_majflt, 0);
+    ktest_expect(after.ru_minflt - before.ru_minflt, 1);
+
+    ktest_expect(ktest_syscall2(__k_SYS_MUNMAP, address, length), 0);
+    ktest_close(fd);
+}
+
+static void test_disk(void)
+{
+    const char* work_directory = ktest_enter_work_directory("cputime");
+
+    char fat[__k_PATH_MAX];
+    char memory[__k_PATH_MAX];
+    char disk_file[__k_PATH_MAX];
+    char memory_file[__k_PATH_MAX];
+
+    ktest_snprintf(fat, sizeof(fat), "%s/fat", work_directory);
+    ktest_snprintf(memory, sizeof(memory), "%s/memory", work_directory);
+    ktest_snprintf(disk_file, sizeof(disk_file), "%s/rusage", fat);
+    ktest_snprintf(memory_file, sizeof(memory_file), "%s/rusage", memory);
+
+    ktest_expect(ktest_syscall3(__k_SYS_MKDIRAT, __k_AT_FDCWD, (long)(fat), 0755), 0);
+    ktest_expect(ktest_syscall3(__k_SYS_MKDIRAT, __k_AT_FDCWD, (long)(memory), 0755), 0);
+    ktest_expect(mount_on(FAT_DEVICE, fat, "fat"), 0);
+    ktest_expect(mount_on(nullptr, memory, "tmpfs"), 0);
+
+    test_blocks_out(disk_file, memory_file);
+
+    ktest_expect(ktest_syscall1(__k_SYS_UMOUNT, (long)(fat)), 0);
+    ktest_expect(mount_on(FAT_DEVICE, fat, "fat"), 0);
+
+    test_blocks_in_and_major_faults(disk_file);
+
+    ktest_expect(ktest_syscall3(__k_SYS_UNLINKAT, __k_AT_FDCWD, (long)(disk_file), 0), 0);
+    ktest_expect(ktest_syscall1(__k_SYS_UMOUNT, (long)(fat)), 0);
+    ktest_expect(ktest_syscall1(__k_SYS_UMOUNT, (long)(memory)), 0);
+}
+
 int main(void)
 {
     test_resolution(__k_CLOCK_THREAD_CPUTIME_ID);
@@ -391,6 +519,7 @@ int main(void)
     test_signals();
     test_child_counters();
     test_peak();
+    test_disk();
 
     // No wait goes by a CPU time clock
     struct __k_timespec request = {};
