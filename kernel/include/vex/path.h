@@ -11,6 +11,10 @@ typedef struct vnode_s vnode_t;
 
 #define PATH_NOFOLLOW 0x0001U // A symlink in the last component is returned, not followed
 
+/// Sets the function that gives the root directory that the paths of the calling thread start from and cannot leave
+/// @note The function returns a new reference, or nullptr for the root of the VFS. A path with no source set starts at the root of the VFS
+void path_set_root_source(vnode_t* (*source)(void));
+
 int path_resolve(const char* restrict path, const credentials_t* restrict credentials, vnode_t** restrict out);
 int path_resolve_at(vnode_t* restrict base_dir, const char* restrict path, unsigned flags, const credentials_t* restrict credentials,
     vnode_t** restrict out);

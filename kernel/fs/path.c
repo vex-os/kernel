@@ -18,10 +18,26 @@ struct name_search_s {
     char name[NAME_SIZE];
 };
 
-static int resolve_internal(vnode_t* restrict base_dir, const char* restrict path, unsigned flags,
+static vnode_t* (*root_source)(void);
+
+static int resolve_internal(vnode_t* restrict base_dir, vnode_t* root, const char* restrict path, unsigned flags,
     const credentials_t* restrict credentials, vnode_t** restrict out, unsigned depth);
 
-static int follow_symlink(vnode_t* restrict node, vnode_t* restrict link, const char* restrict rest, unsigned flags,
+// The root of the process, or of the VFS when the caller has none or no source is set
+static vnode_t* current_root(void)
+{
+    if(root_source) {
+        vnode_t* root = root_source();
+
+        if(root) {
+            return root;
+        }
+    }
+
+    return vfs_get_root();
+}
+
+static int follow_symlink(vnode_t* restrict node, vnode_t* root, vnode_t* restrict link, const char* restrict rest, unsigned flags,
     const credentials_t* restrict credentials, vnode_t** restrict out, unsigned depth)
 {
     if(depth > MAX_SYMLINK_DEPTH) {
@@ -52,18 +68,13 @@ static int follow_symlink(vnode_t* restrict node, vnode_t* restrict link, const 
     int retval;
 
     if(target[0] == PATH_SEPARATOR) {
-        base = vfs_get_root();
-
-        if(base == nullptr) {
-            pslab_free_virt(target);
-            return -ENOENT;
-        }
+        base = root;
     }
     else {
         base = node;
-
-        vnode_incref(base);
     }
+
+    vnode_incref(base);
 
     vnode_t* resolved = nullptr;
     bool has_rest = rest && *rest;
@@ -74,10 +85,10 @@ static int follow_symlink(vnode_t* restrict node, vnode_t* restrict link, const 
     }
 
     if(target[0] == PATH_SEPARATOR) {
-        retval = resolve_internal(base, &target[1], target_flags, credentials, &resolved, depth + 1);
+        retval = resolve_internal(base, root, &target[1], target_flags, credentials, &resolved, depth + 1);
     }
     else {
-        retval = resolve_internal(base, target, target_flags, credentials, &resolved, depth + 1);
+        retval = resolve_internal(base, root, target, target_flags, credentials, &resolved, depth + 1);
     }
 
     vnode_decref(base);
@@ -89,7 +100,7 @@ static int follow_symlink(vnode_t* restrict node, vnode_t* restrict link, const 
     }
 
     if(has_rest) {
-        retval = resolve_internal(resolved, rest, flags, credentials, out, depth + 1);
+        retval = resolve_internal(resolved, root, rest, flags, credentials, out, depth + 1);
         vnode_decref(resolved);
         return retval;
     }
@@ -156,7 +167,7 @@ static bool name_search_emit(dir_context_t* restrict dir_context, const dirent_t
     return false;
 }
 
-static int resolve_internal(vnode_t* restrict base_dir, const char* restrict path, unsigned flags,
+static int resolve_internal(vnode_t* restrict base_dir, vnode_t* root, const char* restrict path, unsigned flags,
     const credentials_t* restrict credentials, vnode_t** restrict out, unsigned depth)
 {
     char component[NAME_SIZE];
@@ -216,6 +227,11 @@ static int resolve_internal(vnode_t* restrict base_dir, const char* restrict pat
         }
 
         if(component[0] == '.' && component[1] == '.' && component[2] == 0) {
+            // The root of the process is the top of its tree, whatever lies above it
+            if(current == root) {
+                continue;
+            }
+
             vnode_t* upper = parent_of(current);
 
             vnode_decref(current);
@@ -236,7 +252,7 @@ static int resolve_internal(vnode_t* restrict base_dir, const char* restrict pat
         bool is_last = *chrptr == 0;
 
         if(next->type == VNODE_SYM_LINK && (!is_last || 0 == (flags & PATH_NOFOLLOW))) {
-            retval = follow_symlink(current, next, chrptr, flags, credentials, out, depth);
+            retval = follow_symlink(current, root, next, chrptr, flags, credentials, out, depth);
             vnode_decref(current);
             vnode_decref(next);
             return retval;
@@ -275,21 +291,24 @@ int path_resolve_at(vnode_t* restrict base_dir, const char* restrict path, unsig
         return -ENOENT;
     }
 
-    if(base_dir && path[0] != PATH_SEPARATOR) {
-        return resolve_internal(base_dir, path, flags, credentials, out, 0);
-    }
-
-    vnode_t* root = vfs_get_root();
+    vnode_t* root = current_root();
 
     if(root == nullptr) {
         return -ENOENT;
     }
 
-    while(path[0] == PATH_SEPARATOR) {
-        path += 1;
-    }
+    int retval;
 
-    int retval = resolve_internal(root, path, flags, credentials, out, 0);
+    if(base_dir && path[0] != PATH_SEPARATOR) {
+        retval = resolve_internal(base_dir, root, path, flags, credentials, out, 0);
+    }
+    else {
+        while(path[0] == PATH_SEPARATOR) {
+            path += 1;
+        }
+
+        retval = resolve_internal(root, root, path, flags, credentials, out, 0);
+    }
 
     vnode_decref(root);
 
@@ -363,7 +382,7 @@ ssize_t path_build(vnode_t* restrict node, char* restrict buffer, size_t size)
         return -ERANGE;
     }
 
-    vnode_t* root = vfs_get_root();
+    vnode_t* root = current_root();
 
     if(root == nullptr) {
         return -ENOENT;
@@ -440,4 +459,9 @@ ssize_t path_build(vnode_t* restrict node, char* restrict buffer, size_t size)
     memmove(buffer, &buffer[end], length);
 
     return length;
+}
+
+void path_set_root_source(vnode_t* (*source)(void))
+{
+    root_source = source;
 }
