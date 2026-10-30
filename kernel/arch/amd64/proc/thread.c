@@ -72,6 +72,9 @@ void arch_thread_setup_fork(thread_t* restrict thread, const hart_context_t* res
     hart_context_t* child_ctx = thread_context(thread);
     void* fpu_state = fpu_state_of(thread);
 
+    // XSAVE writes only XSTATE_BV of the header, and XRSTOR faults
+    // on whatever an earlier owner of the stack left in the rest
+    fpu_init_state(fpu_state);
     fpu_save(fpu_state);
 
     memcpy(child_ctx, ctx, sizeof(hart_context_t));
