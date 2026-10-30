@@ -73,6 +73,9 @@ static void test_make(void)
     ktest_expect(st.st_mode & __k_S_IFMT, __k_S_IFCHR);
     ktest_expect(st.st_rdev, 0x1234);
 
+    // Devices come from devfs; a node of one elsewhere only shows what it is
+    ktest_expect(ktest_open("memory/device", __k_O_RDONLY, 0), -__k_ENXIO);
+
     ktest_expect(make_node("memory/directory", __k_S_IFDIR | 0755, 0), -__k_EINVAL);
     ktest_expect(make_node("memory/socket", __k_S_IFSOCK | 0755, 0), -__k_EINVAL);
 }
@@ -224,6 +227,27 @@ static void test_interrupt(void)
     ktest_expect(ktest_open(FIFO, __k_O_WRONLY | __k_O_NONBLOCK, 0), -__k_ENXIO);
 }
 
+// ext2 keeps FIFOs, but no device nodes yet
+static void test_disk(void)
+{
+    ktest_expect(make_node("disk-fifo", __k_S_IFIFO | 0600, 0), 0);
+
+    struct __k_stat st = stat_path("disk-fifo");
+    ktest_expect(st.st_mode & __k_S_IFMT, __k_S_IFIFO);
+
+    long both = ktest_open("disk-fifo", __k_O_RDWR, 0);
+    ktest_assert(both >= 0);
+
+    char buffer[8] = {};
+    ktest_expect(ktest_write(both, "disk", 4), 4);
+    ktest_expect(ktest_read(both, buffer, sizeof(buffer)), 4);
+    ktest_expect(buffer[0], 'd');
+    ktest_close(both);
+
+    ktest_expect(ktest_syscall3(__k_SYS_UNLINKAT, __k_AT_FDCWD, (long)("disk-fifo"), 0), 0);
+    ktest_expect(make_node("disk-device", __k_S_IFCHR | 0600, 1), -__k_EPERM);
+}
+
 int main(void)
 {
     ktest_enter_work_directory("fifo");
@@ -237,8 +261,7 @@ int main(void)
     test_waits();
     test_interrupt();
 
-    // A filesystem without nodes of these kinds says so
-    ktest_expect(make_node("fifo-on-disk", __k_S_IFIFO | 0600, 0), -__k_EPERM);
+    test_disk();
 
     ktest_expect(ktest_syscall1(__k_SYS_UMOUNT, (long)("memory")), 0);
 
