@@ -58,3 +58,10 @@ int strncasecmp(const char* restrict sa, const char* restrict sb, size_t size)
 
     return tolower(*sa) - tolower(*sb);
 }
+
+void memzero_explicit(void* restrict dst, size_t size)
+{
+    memset(dst, 0, size);
+
+    asm volatile("" ::"r"(dst) : "memory");
+}
