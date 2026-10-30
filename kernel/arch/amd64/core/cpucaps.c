@@ -14,8 +14,8 @@ const cpu_feature_desc_t arch_cpu_features[] = {
     [CPU_FEATURE_AVX512] = { .name = "avx512" },
     [CPU_FEATURE_SMEP] = { .name = "smep", .scope = CPU_SCOPE_LOCAL },
     [CPU_FEATURE_SMAP] = { .name = "smap", .scope = CPU_SCOPE_LOCAL },
-    [CPU_FEATURE_RDRAND] = { .name = "rdrand", .scope = CPU_SCOPE_LOCAL },
-    [CPU_FEATURE_RDSEED] = { .name = "rdseed", .scope = CPU_SCOPE_LOCAL },
+    [CPU_FEATURE_RDRAND] = { .name = "rdrand" },
+    [CPU_FEATURE_RDSEED] = { .name = "rdseed" },
 };
 
 static_assert(NUM_CPU_FEATURES == sizeof(arch_cpu_features) / sizeof(arch_cpu_features[0]));
