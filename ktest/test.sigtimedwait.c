@@ -92,7 +92,7 @@ static void reap(long child)
 {
     int wstatus = -1;
 
-    ktest_syscall3(__k_SYS_WAITPID, child, (long)&wstatus, 0);
+    ktest_syscall4(__k_SYS_WAITPID, child, (long)&wstatus, 0, 0);
 }
 
 int main(void)

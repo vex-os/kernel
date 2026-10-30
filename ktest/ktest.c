@@ -494,7 +494,7 @@ int ktest_in_new_session(int (*body)(void))
     }
 
     int status = -1;
-    long waited = ktest_syscall3(__k_SYS_WAITPID, child, (long)(&status), 0);
+    long waited = ktest_syscall4(__k_SYS_WAITPID, child, (long)(&status), 0, 0);
 
     if(waited != child) {
         ktest_fail("waitpid failed: %ld", waited);

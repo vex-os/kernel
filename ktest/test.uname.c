@@ -62,7 +62,7 @@ static void test_sethostname(void)
 
     int wstatus = -1;
 
-    ktest_syscall3(__k_SYS_WAITPID, child, (long)(&wstatus), 0);
+    ktest_syscall4(__k_SYS_WAITPID, child, (long)(&wstatus), 0, 0);
     ktest_expect(wstatus >> 8, __k_EPERM & 0xFF);
     ktest_expect(nodename_is("abc"), 1);
 

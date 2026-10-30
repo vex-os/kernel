@@ -40,7 +40,7 @@ static void sleep_for(long nanoseconds)
 
 static long wait_for(long child, long options, int* restrict status)
 {
-    return ktest_syscall3(__k_SYS_WAITPID, child, (long)status, options);
+    return ktest_syscall4(__k_SYS_WAITPID, child, (long)status, options, 0);
 }
 
 static void spin_other(long arg)

@@ -102,7 +102,7 @@ static void test_faccessat(void)
 
     int wstatus = -1;
 
-    ktest_expect(ktest_syscall3(__k_SYS_WAITPID, child, (long)(&wstatus), 0), child);
+    ktest_expect(ktest_syscall4(__k_SYS_WAITPID, child, (long)(&wstatus), 0, 0), child);
     ktest_expect(wstatus, 0);
 
     ktest_expect(ktest_syscall3(__k_SYS_UNLINKAT, __k_AT_FDCWD, (long)("secret"), 0), 0);

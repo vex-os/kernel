@@ -335,7 +335,7 @@ static void set_foreground_in_background(void)
 
 static long wait_for(long child, long options, int* restrict wstatus)
 {
-    return ktest_syscall3(__k_SYS_WAITPID, child, (long)wstatus, options);
+    return ktest_syscall4(__k_SYS_WAITPID, child, (long)wstatus, options, 0);
 }
 
 static void expect_stop(void (*job)(void), int sig)
@@ -615,7 +615,7 @@ static void test_tty(void)
     ktest_expect(set_foreground(pgid), 0);
     line_send("\x03");
     wstatus = -1;
-    ktest_syscall3(__k_SYS_WAITPID, child, (long)&wstatus, 0);
+    ktest_syscall4(__k_SYS_WAITPID, child, (long)&wstatus, 0, 0);
     ktest_expect(wstatus, 2);
     ktest_expect(expect_line("^C"), 1);
 

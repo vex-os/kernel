@@ -153,7 +153,7 @@ int main(void)
 
     int wstatus = -1;
 
-    ktest_syscall3(__k_SYS_WAITPID, child, (long)&wstatus, 0);
+    ktest_syscall4(__k_SYS_WAITPID, child, (long)&wstatus, 0, 0);
     ktest_expect((wstatus >> 8) & 0xFF, 0);
     ktest_expect(arm(0, 0, nullptr), 0);
 
@@ -174,7 +174,7 @@ int main(void)
     }
 
     wstatus = -1;
-    ktest_syscall3(__k_SYS_WAITPID, child, (long)&wstatus, 0);
+    ktest_syscall4(__k_SYS_WAITPID, child, (long)&wstatus, 0, 0);
     ktest_expect(wstatus & 0x7F, __k_SIGALRM);
 
     // Bad arguments

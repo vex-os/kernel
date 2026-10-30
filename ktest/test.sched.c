@@ -47,7 +47,7 @@ static void wait_ok(long child)
 {
     int wstatus = -1;
 
-    ktest_expect(ktest_syscall3(__k_SYS_WAITPID, child, (long)(&wstatus), 0), child);
+    ktest_expect(ktest_syscall4(__k_SYS_WAITPID, child, (long)(&wstatus), 0, 0), child);
     ktest_expect(wstatus, 0);
 }
 

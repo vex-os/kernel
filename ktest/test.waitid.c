@@ -7,7 +7,7 @@
 
 static long wait_id(long idtype, long id, struct __k_siginfo* info, long options)
 {
-    return ktest_syscall4(__k_SYS_WAITID, idtype, id, (long)info, options);
+    return ktest_syscall5(__k_SYS_WAITID, idtype, id, (long)info, options, 0);
 }
 
 static void clear(struct __k_siginfo* info)
@@ -70,7 +70,7 @@ int main(void)
 
     int wstatus = -1;
 
-    ktest_expect(ktest_syscall3(__k_SYS_WAITPID, child, (long)&wstatus, 0), child);
+    ktest_expect(ktest_syscall4(__k_SYS_WAITPID, child, (long)&wstatus, 0, 0), child);
     ktest_expect(__k_WEXITSTATUS(wstatus), 3);
 
     // WNOHANG finds nothing yet, and says so with a zero signal number and pid

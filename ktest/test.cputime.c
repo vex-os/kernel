@@ -1,6 +1,9 @@
 #include <vex/errno.h>
+#include <vex/resource.h>
+#include <vex/signal.h>
 #include <vex/syscall.h>
 #include <vex/time.h>
+#include <vex/wait.h>
 
 #include "ktest.h"
 
@@ -8,6 +11,7 @@
 #define NSEC_PER_SEC  1000000000L
 #define BUSY_NSEC     (200 * NSEC_PER_MSEC)
 #define SLEEP_NSEC    (100 * NSEC_PER_MSEC)
+#define CHILD_NSEC    (50 * NSEC_PER_MSEC)
 #define SLACK_NSEC    (5 * NSEC_PER_MSEC) // The cycle counter and the clock source can disagree a little
 
 static long read_clock(long clock)
@@ -85,6 +89,126 @@ static void test_process(void)
     ktest_assert(process_time >= thread_time);
 }
 
+static long usec_of(const struct __k_timeval* time)
+{
+    return time->tv_sec * 1000000L + time->tv_usec;
+}
+
+static void get_usage(long who, struct __k_rusage* usage)
+{
+    ktest_expect(ktest_syscall2(__k_SYS_GETRUSAGE, who, (long)(usage)), 0);
+}
+
+// Reads the clock only every so often, so that nearly all of the time is in user mode
+static void spin_in_user(long nsec)
+{
+    long start = read_clock(__k_CLOCK_MONOTONIC);
+
+    do {
+        for(volatile long i = 0; i < 100000; ++i) {
+            // empty
+        }
+    } while(read_clock(__k_CLOCK_MONOTONIC) - start < nsec);
+}
+
+static void spin_in_kernel(long nsec)
+{
+    long start = read_clock(__k_CLOCK_MONOTONIC);
+
+    while(read_clock(__k_CLOCK_MONOTONIC) - start < nsec) {
+        for(int i = 0; i < 100; ++i) {
+            ktest_syscall1(__k_SYS_GETPID, 0);
+        }
+    }
+}
+
+static void test_user_and_system(void)
+{
+    struct __k_rusage before = {};
+    struct __k_rusage after = {};
+
+    get_usage(__k_RUSAGE_THREAD, &before);
+    spin_in_user(BUSY_NSEC / 2);
+    get_usage(__k_RUSAGE_THREAD, &after);
+
+    long user = usec_of(&after.ru_utime) - usec_of(&before.ru_utime);
+    long system = usec_of(&after.ru_stime) - usec_of(&before.ru_stime);
+
+    ktest_assert(user > system);
+
+    get_usage(__k_RUSAGE_THREAD, &before);
+    spin_in_kernel(BUSY_NSEC / 2);
+    get_usage(__k_RUSAGE_THREAD, &after);
+
+    system = usec_of(&after.ru_stime) - usec_of(&before.ru_stime);
+
+    ktest_assert(system > 0);
+}
+
+static void test_usage(void)
+{
+    struct __k_rusage thread = {};
+    struct __k_rusage self = {};
+
+    get_usage(__k_RUSAGE_THREAD, &thread);
+    get_usage(__k_RUSAGE_SELF, &self);
+
+    ktest_assert(usec_of(&self.ru_utime) >= usec_of(&thread.ru_utime));
+    ktest_assert(usec_of(&self.ru_stime) >= usec_of(&thread.ru_stime));
+    ktest_expect(self.ru_maxrss, 0);
+    ktest_expect(ktest_syscall2(__k_SYS_GETRUSAGE, 7, (long)(&self)), -__k_EINVAL);
+    ktest_expect(ktest_syscall2(__k_SYS_GETRUSAGE, __k_RUSAGE_SELF, 1), -__k_EFAULT);
+}
+
+static long total_usec(const struct __k_rusage* usage)
+{
+    return usec_of(&usage->ru_utime) + usec_of(&usage->ru_stime);
+}
+
+static long fork_busy_child(void)
+{
+    long child = ktest_syscall1(__k_SYS_FORK, 0);
+
+    if(child == 0) {
+        spin_in_user(CHILD_NSEC);
+        ktest_syscall1(__k_SYS_EXIT, 0);
+    }
+
+    ktest_assert(child > 0);
+    return child;
+}
+
+// The parent gets the times of a child once it collects it, from either call
+static void test_children(void)
+{
+    struct __k_rusage children_before = {};
+    get_usage(__k_RUSAGE_CHILDREN, &children_before);
+
+    long child = fork_busy_child();
+    struct __k_rusage usage = {};
+    int wstatus = -1;
+
+    ktest_expect(ktest_syscall4(__k_SYS_WAITPID, child, (long)(&wstatus), 0, (long)(&usage)), child);
+    ktest_expect(wstatus, 0);
+    ktest_assert(total_usec(&usage) >= CHILD_NSEC / 1000 / 4);
+
+    struct __k_rusage children_after = {};
+    get_usage(__k_RUSAGE_CHILDREN, &children_after);
+
+    long collected = total_usec(&children_after) - total_usec(&children_before);
+    // Each field is cut to microseconds on its own, so the sums can differ by a few
+    long difference = collected - total_usec(&usage);
+    ktest_assert(difference >= -4 && difference <= 4);
+
+    child = fork_busy_child();
+    usage = (struct __k_rusage) {};
+
+    struct __k_siginfo info = {};
+    ktest_expect(ktest_syscall5(__k_SYS_WAITID, __k_P_PID, child, (long)(&info), __k_WEXITED, (long)(&usage)), 0);
+    ktest_expect(info.si_pid, child);
+    ktest_assert(total_usec(&usage) >= CHILD_NSEC / 1000 / 4);
+}
+
 int main(void)
 {
     test_resolution(__k_CLOCK_THREAD_CPUTIME_ID);
@@ -93,6 +217,9 @@ int main(void)
     test_busy();
     test_sleep();
     test_process();
+    test_user_and_system();
+    test_usage();
+    test_children();
 
     // No wait goes by a CPU time clock
     struct __k_timespec request = {};

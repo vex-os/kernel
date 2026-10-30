@@ -11,7 +11,7 @@ static volatile long waited_result;
 static void child_waiter(long arg)
 {
     int wstatus = -1;
-    waited_result = ktest_syscall3(__k_SYS_WAITPID, waited_child, (long)&wstatus, 0);
+    waited_result = ktest_syscall4(__k_SYS_WAITPID, waited_child, (long)&wstatus, 0, 0);
     waited_status = wstatus;
     ktest_syscall1(__k_SYS_THREAD_EXIT, 0);
 }
@@ -41,7 +41,7 @@ int main(void)
     }
 
     wstatus = -1;
-    ktest_expect(ktest_syscall3(__k_SYS_WAITPID, child, (long)&wstatus, 0) == child, 1);
+    ktest_expect(ktest_syscall4(__k_SYS_WAITPID, child, (long)&wstatus, 0, 0) == child, 1);
     ktest_expect(wstatus, 1792);
 
     child = ktest_syscall1(__k_SYS_FORK, 0);
@@ -51,7 +51,7 @@ int main(void)
     }
 
     wstatus = -1;
-    ktest_syscall3(__k_SYS_WAITPID, child, (long)&wstatus, 0);
+    ktest_syscall4(__k_SYS_WAITPID, child, (long)&wstatus, 0, 0);
     ktest_expect(wstatus, 0); // a lone thread leaving is an exit with 0
 
     // Two threads wait for different children; the first child to die must not use up the other's wakeup
@@ -75,15 +75,15 @@ int main(void)
     ktest_spawn_joinable(&child_waiter, 0);
 
     wstatus = -1;
-    ktest_expect(ktest_syscall3(__k_SYS_WAITPID, slow_child, (long)&wstatus, 0) == slow_child, 1);
+    ktest_expect(ktest_syscall4(__k_SYS_WAITPID, slow_child, (long)&wstatus, 0, 0) == slow_child, 1);
     ktest_expect(wstatus, 1280);
 
     ktest_join();
     ktest_expect(waited_result == fast_child, 1);
     ktest_expect(waited_status, 768);
 
-    ktest_expect(ktest_syscall3(__k_SYS_WAITPID, slow_child, (long)&wstatus, 0), -__k_ECHILD); // collected already
-    ktest_expect(ktest_syscall3(__k_SYS_WAITPID, 1, (long)&wstatus, 0), -__k_ECHILD);          // not a child
+    ktest_expect(ktest_syscall4(__k_SYS_WAITPID, slow_child, (long)&wstatus, 0, 0), -__k_ECHILD); // collected already
+    ktest_expect(ktest_syscall4(__k_SYS_WAITPID, 1, (long)&wstatus, 0, 0), -__k_ECHILD);          // not a child
 
     long lingering_child = ktest_syscall1(__k_SYS_FORK, 0);
 
@@ -96,13 +96,13 @@ int main(void)
     }
 
     // The child runs, so there is nothing to collect yet
-    ktest_expect(ktest_syscall3(__k_SYS_WAITPID, lingering_child, (long)&wstatus, __k_WNOHANG), 0);
-    ktest_expect(ktest_syscall3(__k_SYS_WAITPID, lingering_child, (long)&wstatus, 0x4000), -__k_EINVAL);
-    ktest_expect(ktest_syscall3(__k_SYS_WAITPID, lingering_child, (long)&wstatus, 0) == lingering_child, 1);
+    ktest_expect(ktest_syscall4(__k_SYS_WAITPID, lingering_child, (long)&wstatus, __k_WNOHANG, 0), 0);
+    ktest_expect(ktest_syscall4(__k_SYS_WAITPID, lingering_child, (long)&wstatus, 0x4000, 0), -__k_EINVAL);
+    ktest_expect(ktest_syscall4(__k_SYS_WAITPID, lingering_child, (long)&wstatus, 0, 0) == lingering_child, 1);
     ktest_expect(wstatus, 1792);
 
     // With no child at all, the call still says so
-    ktest_expect(ktest_syscall3(__k_SYS_WAITPID, lingering_child, (long)&wstatus, __k_WNOHANG), -__k_ECHILD);
+    ktest_expect(ktest_syscall4(__k_SYS_WAITPID, lingering_child, (long)&wstatus, __k_WNOHANG, 0), -__k_ECHILD);
 
     return ktest_result();
 }
