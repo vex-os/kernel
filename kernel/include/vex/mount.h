@@ -64,6 +64,7 @@ struct vfs_driver_s {
     vfs_driver_private_t priv;
     const vfs_ops_t* restrict ops;
     const char* name;
+    bool internal; // Only vfs_create makes it; vfs_mount turns it away
 };
 
 int vfs_driver_add(vfs_driver_t* restrict driver);
@@ -77,6 +78,7 @@ int vfs_driver_remove(vfs_driver_t* restrict driver);
 int vfs_create(const char* restrict type, const char* restrict params, vfs_t** restrict out);
 
 /// @param params Options for the filesystem, or nullptr. The VFS itself takes "ro" and "readonly" from them, as MNT_RDONLY
+/// @retval -ENODEV The driver is internal
 int vfs_mount(const char* restrict type, const char* restrict path, const block_interface_t* restrict volume, unsigned flags,
     const char* restrict params);
 int vfs_unmount(const char* restrict path);

@@ -207,6 +207,10 @@ static int mount_locked(const char* restrict type, const char* restrict path, co
         return -ENOENT;
     }
 
+    if(driver->internal) {
+        return -ENODEV;
+    }
+
     cmdline_t cmdl;
     params_parse(&cmdl, params);
 
