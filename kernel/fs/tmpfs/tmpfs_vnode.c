@@ -43,15 +43,25 @@ static size_t target_pages(size_t length)
 
 static mode_t type_bits(unsigned type)
 {
-    if(type == VNODE_DIRECTORY) {
-        return S_IFDIR;
+    switch(type) {
+        case VNODE_DIRECTORY:
+            return S_IFDIR;
+        case VNODE_SYM_LINK:
+            return S_IFLNK;
+        case VNODE_FIFO:
+            return S_IFIFO;
+        case VNODE_CHAR_DEV:
+            return S_IFCHR;
+        case VNODE_BLOCK_DEV:
+            return S_IFBLK;
+        default:
+            return S_IFREG;
     }
+}
 
-    if(type == VNODE_SYM_LINK) {
-        return S_IFLNK;
-    }
-
-    return S_IFREG;
+static bool is_special(unsigned type)
+{
+    return type == VNODE_FIFO || type == VNODE_CHAR_DEV || type == VNODE_BLOCK_DEV;
 }
 
 static void touch(tmpfs_inode_t* restrict inode, bool modified)
@@ -189,8 +199,9 @@ static int create_locked(vnode_t* restrict dir, const char* restrict name, unsig
     tmpfs_inode_t* parent = dir->ctxdata;
     bool directory = type == VNODE_DIRECTORY;
     bool symlink = type == VNODE_SYM_LINK;
+    bool known = type == VNODE_FILE || directory || symlink;
 
-    if(type != VNODE_FILE && !directory && !symlink) {
+    if(!known && !is_special(type)) {
         return -EINVAL;
     }
 
@@ -385,6 +396,40 @@ static int tmpfs_vnode_create(vnode_t* restrict node, const char* restrict name,
 
     mutex_acquire(&tmpfs->lock);
     int retval = create_locked(node, name, type, mode, credentials, nullptr, 0, &created);
+    mutex_release(&tmpfs->lock);
+
+    if(retval < 0) {
+        if(created) {
+            vnode_decref(created);
+        }
+
+        return retval;
+    }
+
+    *out = created;
+
+    return 0;
+}
+
+static int tmpfs_vnode_mknod(vnode_t* restrict node, const char* restrict name, unsigned type, mode_t mode, dev_t rdev,
+    const credentials_t* restrict credentials, vnode_t** restrict out)
+{
+    if(!is_special(type)) {
+        return -EINVAL;
+    }
+
+    tmpfs_t* tmpfs = tmpfs_of(node);
+    vnode_t* created = nullptr;
+
+    mutex_acquire(&tmpfs->lock);
+    int retval = create_locked(node, name, type, mode, credentials, nullptr, 0, &created);
+
+    if(retval == 0) {
+        tmpfs_inode_t* inode = created->ctxdata;
+        inode->rdev = rdev;
+        vnode_init_special(created, rdev);
+    }
+
     mutex_release(&tmpfs->lock);
 
     if(retval < 0) {
@@ -774,6 +819,7 @@ static int tmpfs_vnode_stat(vnode_t* restrict node, stat_t* restrict out)
     out->st_atim = inode->atime;
     out->st_mtim = inode->mtime;
     out->st_ctim = inode->ctime;
+    out->st_rdev = inode->rdev;
     out->st_blksize = PAGE_SIZE;
 
     if(node->type == VNODE_FILE) {
@@ -850,6 +896,7 @@ const vnode_ops_t tmpfs_vnode_ops = {
     .lookup = &tmpfs_vnode_lookup,
     .iterate = &tmpfs_vnode_iterate,
     .create = &tmpfs_vnode_create,
+    .mknod = &tmpfs_vnode_mknod,
     .unlink = &tmpfs_vnode_unlink,
     .rename = &tmpfs_vnode_rename,
     .link = &tmpfs_vnode_link,
