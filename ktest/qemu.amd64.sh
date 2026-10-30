@@ -23,6 +23,7 @@ else
 fi
 
 logfile="qemu.log"
+cpu="max"
 
 # The first serial port is the shell of the test runner on this terminal,
 # the second one gets the kernel log. Ctrl-A X quits QEMU, Ctrl-A C opens its monitor
@@ -32,7 +33,6 @@ qargs="${qargs} -drive format=raw,file=${IMAGE_PATH}"
 qargs="${qargs} -serial mon:stdio"
 qargs="${qargs} -serial file:$(${PATH_CONVERT} kernel.log)"
 qargs="${qargs} -machine type=q35"
-qargs="${qargs} -cpu max"
 qargs="${qargs} -vga std"
 qargs="${qargs} -m 512M"
 qargs="${qargs} -smp 4"
@@ -42,9 +42,12 @@ for arg in "$@"; do
         slow)    qargs="${qargs} -icount shift=0,sleep=on" ;;
         slow=*)  qargs="${qargs} -icount shift=${arg#slow=},sleep=on" ;;
         verbose) qargs="${qargs} -d cpu_reset,int -no-reboot -no-shutdown" ;;
+        nocpurng) cpu="max,-rdrand,-rdseed" ;;
         [0-9]*) logfile="qemu_${arg}.log" ;;
     esac
 done
+
+qargs="${qargs} -cpu ${cpu}"
 
 rm -f "${logfile}" kernel.log
 
