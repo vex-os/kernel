@@ -426,8 +426,73 @@ static uint64_t online_word(size_t word)
     return bits;
 }
 
+// The mask of the thread of the call, or of the thread
+// that tid names. tid 0 stands for the calling thread inside
+// its own process, and for the main thread of another one
+static int read_affinity(process_t* restrict process, pid_t tid, const thread_t* restrict caller, uint64_t* restrict words)
+{
+    if(tid == 0 && caller->process == process) {
+        thread_get_affinity(caller, words);
+        return 0;
+    }
+
+    int retval = -ESRCH;
+
+    bool intr_state = spinlock_acquire_intr(&process->lock);
+
+    pid_t wanted = tid;
+
+    if(wanted == 0) {
+        wanted = process->pid;
+    }
+
+    for(const thread_t* it = process->threads; it; it = it->process_next) {
+        if(it->tid == wanted) {
+            thread_get_affinity(it, words);
+            retval = 0;
+            break;
+        }
+    }
+
+    // The main thread may be gone while the others run on
+    if(retval < 0 && tid == 0 && process->threads) {
+        thread_get_affinity(process->threads, words);
+        retval = 0;
+    }
+
+    spinlock_release_intr(&process->lock, intr_state);
+
+    return retval;
+}
+
+// tid 0 stands for every thread of the process, each of which gets a mask of its own
+static int write_affinity(process_t* restrict process, pid_t tid, const uint64_t* restrict words)
+{
+    bool found = false;
+    int retval = 0;
+
+    bool intr_state = spinlock_acquire_intr(&process->lock);
+
+    for(thread_t* it = process->threads; it && retval == 0; it = it->process_next) {
+        if(tid && it->tid != tid) {
+            continue;
+        }
+
+        found = true;
+        retval = thread_set_affinity(it, words);
+    }
+
+    spinlock_release_intr(&process->lock, intr_state);
+
+    if(retval == 0 && !found) {
+        retval = -ESRCH;
+    }
+
+    return retval;
+}
+
 // The mask is in whole words, as Linux has it. The call returns the size of the mask, not zero
-static intptr_t sys_getaffinity(pid_t pid, size_t size, user_addr_t mask)
+static intptr_t sys_getaffinity(pid_t pid, pid_t tid, size_t size, user_addr_t mask)
 {
     thread_t* thread = this_thread();
 
@@ -435,7 +500,7 @@ static intptr_t sys_getaffinity(pid_t pid, size_t size, user_addr_t mask)
         return -ENOSYS;
     }
 
-    if(pid < 0 || size < AFFINITY_BYTES || size % sizeof(uint64_t)) {
+    if(pid < 0 || tid < 0 || size < AFFINITY_BYTES || size % sizeof(uint64_t)) {
         return -EINVAL;
     }
 
@@ -445,10 +510,17 @@ static intptr_t sys_getaffinity(pid_t pid, size_t size, user_addr_t mask)
         return -ESRCH;
     }
 
+    uint64_t words[SCHED_AFFINITY_WORDS];
+    int retval = read_affinity(process, tid, thread, words);
+
     process_decref(process);
 
+    if(retval < 0) {
+        return retval;
+    }
+
     for(size_t word = 0; word < AFFINITY_WORDS; word += 1) {
-        uint64_t bits = online_word(word);
+        uint64_t bits = words[word] & online_word(word);
         user_addr_t target = user_addr_add(mask, word * sizeof(bits));
         ssize_t copied = user_copyout(target, &bits, sizeof(bits));
 
@@ -460,10 +532,11 @@ static intptr_t sys_getaffinity(pid_t pid, size_t size, user_addr_t mask)
     return AFFINITY_BYTES;
 }
 
-define_syscall(sys_getaffinity, SYS_GETAFFINITY, 3);
+define_syscall(sys_getaffinity, SYS_GETAFFINITY, 4);
 
-// UNDONE: The scheduler keeps the thread off the harts that the mask leaves out
-static intptr_t sys_setaffinity(pid_t pid, size_t size, user_addr_t mask)
+// The threads of the process are the ones that the mask holds: a thread that is already running on a hart
+// that the mask leaves out goes at its next tick, and waits for one of the harts that it may run on to be free
+static intptr_t sys_setaffinity(pid_t pid, pid_t tid, size_t size, user_addr_t mask)
 {
     thread_t* thread = this_thread();
 
@@ -471,11 +544,12 @@ static intptr_t sys_setaffinity(pid_t pid, size_t size, user_addr_t mask)
         return -ENOSYS;
     }
 
-    if(pid < 0) {
+    if(pid < 0 || tid < 0) {
         return -EINVAL;
     }
 
     // A mask that is shorter than ours leaves the rest clear, and the bytes past ours do not matter
+    uint64_t words[SCHED_AFFINITY_WORDS] = {};
     bool allowed = false;
 
     for(size_t word = 0; word < AFFINITY_WORDS; word += 1) {
@@ -497,7 +571,9 @@ static intptr_t sys_setaffinity(pid_t pid, size_t size, user_addr_t mask)
             }
         }
 
-        if(bits & online_word(word)) {
+        words[word] = bits & online_word(word);
+
+        if(words[word]) {
             allowed = true;
         }
     }
@@ -509,18 +585,32 @@ static intptr_t sys_setaffinity(pid_t pid, size_t size, user_addr_t mask)
     }
 
     bool permitted = may_change(thread, process);
+    int retval = 0;
+
+    if(!permitted) {
+        retval = -EPERM;
+    }
+    else if(!allowed) {
+        retval = -EINVAL;
+    }
+    else {
+        retval = write_affinity(process, tid, words);
+    }
 
     process_decref(process);
 
-    if(!permitted) {
-        return -EPERM;
-    }
-
-    if(!allowed) {
-        return -EINVAL;
-    }
-
-    return 0;
+    return retval;
 }
 
-define_syscall(sys_setaffinity, SYS_SETAFFINITY, 3);
+define_syscall(sys_setaffinity, SYS_SETAFFINITY, 4);
+
+static intptr_t sys_getcpu(void)
+{
+    hart_local_t* hart = this_hart();
+
+    // The hart may change right after, so
+    // this is only where the caller was
+    return hart->index;
+}
+
+define_syscall(sys_getcpu, SYS_GETCPU, 0);

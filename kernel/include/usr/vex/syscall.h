@@ -26,6 +26,7 @@
 #define __k_SYS_GETAFFINITY      0x033
 #define __k_SYS_SETAFFINITY      0x034
 #define __k_SYS_WAITID           0x035
+#define __k_SYS_GETCPU           0x036
 
 #define __k_SYS_THREAD_CREATE 0x040
 #define __k_SYS_THREAD_EXIT   0x041

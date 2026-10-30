@@ -177,7 +177,7 @@ static void test_unprivileged(void)
 
         ktest_expect(ktest_syscall3(__k_SYS_SETSCHEDULER, 0, __k_SCHED_OTHER, (long)(&param)), 0);
         ktest_expect(ktest_syscall3(__k_SYS_SETSCHEDULER, ktest_syscall1(__k_SYS_GETPPID, 0), __k_SCHED_OTHER, (long)(&param)), -__k_EPERM);
-        ktest_expect(ktest_syscall3(__k_SYS_SETAFFINITY, ktest_syscall1(__k_SYS_GETPPID, 0), sizeof(mask), (long)(&mask)), -__k_EPERM);
+        ktest_expect(ktest_syscall4(__k_SYS_SETAFFINITY, ktest_syscall1(__k_SYS_GETPPID, 0), 0, sizeof(mask), (long)(&mask)), -__k_EPERM);
 
         ktest_syscall1(__k_SYS_EXIT, ktest_result());
     }
@@ -222,20 +222,20 @@ static void test_affinity(void)
     unsigned long missing = 1UL << 63;
 
     // The call gives back the size of the mask, which is whole words, and the first hart is always there
-    long size = ktest_syscall3(__k_SYS_GETAFFINITY, 0, sizeof(mask), (long)(&mask));
+    long size = ktest_syscall4(__k_SYS_GETAFFINITY, 0, 0, sizeof(mask), (long)(&mask));
 
     ktest_expect(size > 0 && size % sizeof(mask) == 0, 1);
     ktest_expect(mask & 1, 1);
 
-    ktest_expect(ktest_syscall3(__k_SYS_GETAFFINITY, 0, sizeof(mask) - 1, (long)(&mask)), -__k_EINVAL);
-    ktest_expect(ktest_syscall3(__k_SYS_GETAFFINITY, 0, 0, (long)(&mask)), -__k_EINVAL);
-    ktest_expect(ktest_syscall3(__k_SYS_GETAFFINITY, NO_SUCH_ID, sizeof(mask), (long)(&mask)), -__k_ESRCH);
+    ktest_expect(ktest_syscall4(__k_SYS_GETAFFINITY, 0, 0, sizeof(mask) - 1, (long)(&mask)), -__k_EINVAL);
+    ktest_expect(ktest_syscall4(__k_SYS_GETAFFINITY, 0, 0, 0, (long)(&mask)), -__k_EINVAL);
+    ktest_expect(ktest_syscall4(__k_SYS_GETAFFINITY, NO_SUCH_ID, 0, sizeof(mask), (long)(&mask)), -__k_ESRCH);
 
-    ktest_expect(ktest_syscall3(__k_SYS_SETAFFINITY, 0, sizeof(mask), (long)(&mask)), 0);
-    ktest_expect(ktest_syscall3(__k_SYS_SETAFFINITY, 0, sizeof(none), (long)(&none)), -__k_EINVAL);
-    ktest_expect(ktest_syscall3(__k_SYS_SETAFFINITY, 0, sizeof(missing), (long)(&missing)), -__k_EINVAL);
-    ktest_expect(ktest_syscall3(__k_SYS_SETAFFINITY, 0, sizeof(mask), 0), -__k_EFAULT);
-    ktest_expect(ktest_syscall3(__k_SYS_SETAFFINITY, NO_SUCH_ID, sizeof(mask), (long)(&mask)), -__k_ESRCH);
+    ktest_expect(ktest_syscall4(__k_SYS_SETAFFINITY, 0, 0, sizeof(mask), (long)(&mask)), 0);
+    ktest_expect(ktest_syscall4(__k_SYS_SETAFFINITY, 0, 0, sizeof(none), (long)(&none)), -__k_EINVAL);
+    ktest_expect(ktest_syscall4(__k_SYS_SETAFFINITY, 0, 0, sizeof(missing), (long)(&missing)), -__k_EINVAL);
+    ktest_expect(ktest_syscall4(__k_SYS_SETAFFINITY, 0, 0, sizeof(mask), 0), -__k_EFAULT);
+    ktest_expect(ktest_syscall4(__k_SYS_SETAFFINITY, NO_SUCH_ID, 0, sizeof(mask), (long)(&mask)), -__k_ESRCH);
 }
 
 int main(void)

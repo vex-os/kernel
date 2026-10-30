@@ -29,6 +29,7 @@ typedef struct vnode_s vnode_t;
 #define SYS_GETAFFINITY      __k_SYS_GETAFFINITY
 #define SYS_SETAFFINITY      __k_SYS_SETAFFINITY
 #define SYS_WAITID           __k_SYS_WAITID
+#define SYS_GETCPU           __k_SYS_GETCPU
 
 #define SYS_THREAD_CREATE __k_SYS_THREAD_CREATE
 #define SYS_THREAD_EXIT   __k_SYS_THREAD_EXIT
