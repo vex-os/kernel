@@ -11,6 +11,7 @@
 #include <vex/limits.h>
 #include <vex/mount.h>
 #include <vex/pipe.h>
+#include <vex/poll.h>
 #include <vex/process.h>
 #include <vex/pslab.h>
 #include <vex/signal.h>
@@ -376,6 +377,48 @@ static int pipe_vnode_ioctl(vnode_t* restrict node, file_t* restrict file, uint3
     return 0;
 }
 
+static unsigned pipe_vnode_poll(vnode_t* restrict node, file_t* restrict file, poll_table_t* restrict table)
+{
+    pipe_t* pipe = node->ctxdata;
+    unsigned flags = file_flags(file);
+    bool reads = file_flags_allow_read(flags);
+    bool writes = file_flags_allow_write(flags);
+
+    if(reads) {
+        poll_table_add(table, &pipe->readable);
+    }
+
+    if(writes) {
+        poll_table_add(table, &pipe->writable);
+    }
+
+    unsigned revents = 0;
+
+    bool intr_state = spinlock_acquire_intr(&pipe->lock);
+
+    if(reads && pipe->used) {
+        revents |= POLL_READABLE;
+    }
+
+    if(reads && pipe->writers == 0) {
+        revents |= POLLHUP;
+    }
+
+    // A write of up to PIPE_ATOMIC_SIZE goes in all
+    // or nothing, so less room would still make it wait
+    if(writes && pipe_room(pipe) >= PIPE_ATOMIC_SIZE) {
+        revents |= POLL_WRITABLE;
+    }
+
+    if(writes && pipe->readers == 0) {
+        revents |= POLLERR;
+    }
+
+    spinlock_release_intr(&pipe->lock, intr_state);
+
+    return revents;
+}
+
 static int pipe_vnode_stat(vnode_t* restrict node, stat_t* restrict out)
 {
     const pipe_t* pipe = node->ctxdata;
@@ -416,6 +459,7 @@ static const vnode_ops_t pipe_vnode_ops = {
     .write = &pipe_vnode_write,
     .seek = &pipe_vnode_seek,
     .ioctl = &pipe_vnode_ioctl,
+    .poll = &pipe_vnode_poll,
     .stat = &pipe_vnode_stat,
 };
 
