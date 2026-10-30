@@ -81,7 +81,18 @@ int vfs_create(const char* restrict type, const char* restrict params, vfs_t** r
 /// @retval -ENODEV The driver is internal
 int vfs_mount(const char* restrict type, const char* restrict path, const block_interface_t* restrict volume, unsigned flags,
     const char* restrict params);
-int vfs_unmount(const char* restrict path);
+
+/// vfs_mount on a directory that the caller found
+/// @param mountpoint Takes the reference of the caller, whatever the result; nullptr makes the filesystem the root of the VFS
+/// @retval -ENOTDIR The mount point is not a directory
+/// @retval -EBUSY Another mount got to the mount point first
+int vfs_mount_at(const char* restrict type, vnode_t* restrict mountpoint, const block_interface_t* restrict volume, unsigned flags,
+    const char* restrict params);
+
+/// @param node The directory mounted on, or the root of the filesystem on it; takes the reference of the caller
+/// @retval -EINVAL The node is not the root of a mounted filesystem
+/// @retval -EBUSY Files of the filesystem are in use
+int vfs_unmount_at(vnode_t* restrict node);
 
 int vfs_sync_fs(vfs_t* restrict fs);
 int vfs_sync_all(void);

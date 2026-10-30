@@ -184,24 +184,67 @@ static int build_fs(const vfs_driver_t* restrict driver, const block_interface_t
     return 0;
 }
 
-static int mount_locked(const char* restrict type, const char* restrict path, const block_interface_t* restrict volume, unsigned flags,
+// The path of the mount point from the root, for the log and the list of mounts; a mount
+// point outside the root of the caller has none, and gets a placeholder
+static char* mount_label(vnode_t* restrict mountpoint)
+{
+    if(mountpoint == nullptr) {
+        return kstrdup("/");
+    }
+
+    char* buffer = kmalloc(PATH_MAX);
+
+    if(buffer == nullptr) {
+        return nullptr;
+    }
+
+    ssize_t length = path_build(mountpoint, buffer, PATH_MAX);
+
+    if(length < 0) {
+        strcpy(buffer, "?");
+    }
+
+    char* label = kstrdup(buffer);
+    kfree(buffer);
+
+    return label;
+}
+
+static vfs_driver_t* driver_for(const char* restrict type, const block_interface_t* restrict volume)
+{
+    if(type == nullptr) {
+        return deduce_driver(volume);
+    }
+
+    spinlock_acquire(&drivers_lock);
+    vfs_driver_t* driver = find_driver(type);
+    spinlock_release(&drivers_lock);
+
+    return driver;
+}
+
+static void undo_build(const vfs_driver_t* restrict driver, vfs_t* restrict fs)
+{
+    vcache_evict(fs);
+    driver->ops->unmount(fs);
+    free_fs(fs);
+}
+
+// Takes the reference of the caller to the mount point
+static int mount_locked(const char* restrict type, vnode_t* restrict mountpoint, const block_interface_t* restrict volume, unsigned flags,
     const char* restrict params)
 {
     // Without a type the driver is found by probing the device
-    if(path == nullptr || (type == nullptr && volume == nullptr)) {
+    if(type == nullptr && volume == nullptr) {
         return -EINVAL;
     }
 
-    vfs_driver_t* driver;
+    // Only a directory is crossed into
+    if(mountpoint && mountpoint->type != VNODE_DIRECTORY) {
+        return -ENOTDIR;
+    }
 
-    if(type == nullptr) {
-        driver = deduce_driver(volume);
-    }
-    else {
-        spinlock_acquire(&drivers_lock);
-        driver = find_driver(type);
-        spinlock_release(&drivers_lock);
-    }
+    vfs_driver_t* driver = driver_for(type, volume);
 
     if(driver == nullptr) {
         return -ENOENT;
@@ -211,35 +254,39 @@ static int mount_locked(const char* restrict type, const char* restrict path, co
         return -ENODEV;
     }
 
+    mount_entry_t* entry = slab_alloc(sizeof(mount_entry_t));
+    char* label = mount_label(mountpoint);
+
+    if(entry == nullptr || label == nullptr) {
+        slab_free(entry);
+        kfree(label);
+        return -ENOMEM;
+    }
+
     cmdline_t cmdl;
     params_parse(&cmdl, params);
 
     vfs_t* fs;
-    int retval = build_fs(driver, volume, flags, &cmdl, path, &fs);
+    int retval = build_fs(driver, volume, flags, &cmdl, label, &fs);
 
     params_free(&cmdl);
 
     if(retval < 0) {
+        slab_free(entry);
+        kfree(label);
         return retval;
     }
 
-    vnode_t* mountpoint = nullptr;
-
-    if(path[0] != PATH_SEPARATOR || path[1]) {
-        retval = path_resolve(path, &kernel_credentials, &mountpoint);
-
-        if(retval < 0) {
-            vcache_evict(fs);
-
-            driver->ops->unmount(fs);
-
-            free_fs(fs);
-
-            return retval;
-        }
-    }
-
     spinlock_acquire(&mounts_lock);
+
+    // Another mount got there first
+    if(mountpoint && mountpoint->mounted_fs) {
+        spinlock_release(&mounts_lock);
+        undo_build(driver, fs);
+        slab_free(entry);
+        kfree(label);
+        return -EBUSY;
+    }
 
     if(mountpoint == nullptr) {
         vfs_root = fs->root;
@@ -248,37 +295,10 @@ static int mount_locked(const char* restrict type, const char* restrict path, co
     else {
         mountpoint->mounted_fs = fs;
         fs->mountpoint = mountpoint;
+        vnode_incref(mountpoint);
     }
 
-    mount_entry_t* entry = slab_alloc(sizeof(mount_entry_t));
-
-    if(entry == nullptr) {
-        spinlock_release(&mounts_lock);
-
-        vcache_evict(fs);
-
-        driver->ops->unmount(fs);
-
-        free_fs(fs);
-
-        return -ENOMEM;
-    }
-
-    entry->path = kstrdup(path);
-
-    if(entry->path == nullptr) {
-        spinlock_release(&mounts_lock);
-
-        vcache_evict(fs);
-
-        driver->ops->unmount(fs);
-
-        slab_free(entry);
-        free_fs(fs);
-
-        return -ENOMEM;
-    }
-
+    entry->path = label;
     entry->fs = fs;
     entry->next = mounts_head;
     mounts_head = entry;
@@ -290,6 +310,17 @@ static int mount_locked(const char* restrict type, const char* restrict path, co
     }
 
     return 0;
+}
+
+static mount_entry_t** find_entry_locked(const vnode_t* restrict root)
+{
+    mount_entry_t** prev = &mounts_head;
+
+    while(*prev && (*prev)->fs->root != root) {
+        prev = &(*prev)->next;
+    }
+
+    return prev;
 }
 
 int vfs_driver_add(vfs_driver_t* restrict driver)
@@ -371,32 +402,64 @@ int vfs_create(const char* restrict type, const char* restrict params, vfs_t** r
     return retval;
 }
 
-int vfs_mount(const char* restrict type, const char* restrict path, const block_interface_t* restrict volume, unsigned flags,
+int vfs_mount_at(const char* restrict type, vnode_t* restrict mountpoint, const block_interface_t* restrict volume, unsigned flags,
     const char* restrict params)
 {
     mutex_acquire(&mounts_mutex);
-    int retval = mount_locked(type, path, volume, flags, params);
+    int retval = mount_locked(type, mountpoint, volume, flags, params);
     mutex_release(&mounts_mutex);
+
+    if(mountpoint) {
+        vnode_decref(mountpoint);
+    }
+
     return retval;
 }
 
-int vfs_unmount(const char* restrict path)
+int vfs_mount(const char* restrict type, const char* restrict path, const block_interface_t* restrict volume, unsigned flags,
+    const char* restrict params)
 {
     kassert(path);
 
-    mutex_acquire(&mounts_mutex);
+    vnode_t* mountpoint = nullptr;
+    bool root = path[0] == PATH_SEPARATOR && path[1] == 0;
 
-    mount_entry_t** prev = &mounts_head;
+    if(!root) {
+        int retval = path_resolve(path, &kernel_credentials, &mountpoint);
 
-    while(*prev && (*prev)->path && strcmp((*prev)->path, path)) {
-        prev = &(*prev)->next;
+        if(retval < 0) {
+            return retval;
+        }
     }
 
+    return vfs_mount_at(type, mountpoint, volume, flags, params);
+}
+
+int vfs_unmount_at(vnode_t* restrict node)
+{
+    kassert(node);
+
+    // A path stops at the directory mounted on, and the filesystem is the one inside it
+    vnode_t* crossed;
+    int retval = vfs_cross_mount(node, &crossed);
+
+    vnode_decref(node);
+
+    if(retval < 0) {
+        return retval;
+    }
+
+    mutex_acquire(&mounts_mutex);
+
+    mount_entry_t** prev = find_entry_locked(crossed);
     mount_entry_t* entry = *prev;
+
+    // The reference of the caller would keep the filesystem busy
+    vnode_decref(crossed);
 
     if(entry == nullptr) {
         mutex_release(&mounts_mutex);
-        return -ENOENT;
+        return -EINVAL;
     }
 
     vfs_t* fs = entry->fs;
@@ -409,7 +472,7 @@ int vfs_unmount(const char* restrict path)
     spinlock_release(&mounts_lock);
 
     // Vnodes queued for writeback are referenced by the queue
-    int retval = fcache_sync(fs);
+    retval = fcache_sync(fs);
 
     if(retval == 0 && (atomic_load(&fs->orphans, ATOMIC_ACQUIRE) || vcache_in_use(fs, is_root ? 2 : 1))) {
         retval = -EBUSY;
@@ -450,7 +513,7 @@ int vfs_unmount(const char* restrict path)
 
     spinlock_release(&mounts_lock);
 
-    pr_verbose("vfs: unmounting %s", path);
+    pr_verbose("vfs: unmounting %s", entry->path);
 
     if(mountpoint) {
         vnode_decref(mountpoint);

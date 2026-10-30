@@ -12,6 +12,25 @@
 
 #include "syscall_internal.h"
 
+// As for any other path: from the working directory or the root of the caller, and with its permissions
+static int resolve_mount_point(const char* restrict path, const credentials_t* restrict credentials, vnode_t** restrict out)
+{
+    vnode_t* base_dir;
+    int retval = syscall_dirfd(AT_FDCWD, path, &base_dir);
+
+    if(retval < 0) {
+        return retval;
+    }
+
+    retval = path_resolve_at(base_dir, path, 0, credentials, out);
+
+    if(base_dir) {
+        vnode_decref(base_dir);
+    }
+
+    return retval;
+}
+
 static intptr_t sys_mount(user_addr_t source, user_addr_t target, user_addr_t type, uintptr_t flags, user_addr_t params)
 {
     thread_t* thread = this_thread();
@@ -109,7 +128,12 @@ static intptr_t sys_mount(user_addr_t source, user_addr_t target, user_addr_t ty
         return -EINVAL;
     }
 
-    int retval = vfs_mount(fstype_ptr, mount_point, interface, flags, params_ptr);
+    vnode_t* mountpoint;
+    int retval = resolve_mount_point(mount_point, credentials, &mountpoint);
+
+    if(retval == 0) {
+        retval = vfs_mount_at(fstype_ptr, mountpoint, interface, flags, params_ptr);
+    }
 
     if(interface) {
         block_interface_decref(interface);
@@ -142,7 +166,14 @@ static intptr_t sys_umount(user_addr_t path)
         return copied;
     }
 
-    return vfs_unmount(mount_point);
+    vnode_t* root;
+    int retval = resolve_mount_point(mount_point, credentials, &root);
+
+    if(retval < 0) {
+        return retval;
+    }
+
+    return vfs_unmount_at(root);
 }
 
 define_syscall(sys_umount, SYS_UMOUNT, 1);
