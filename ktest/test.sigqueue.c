@@ -159,8 +159,8 @@ int main(void)
 
     set_mask(__k_SIG_BLOCK, BIT(RT_FIRST));
 
-    // The queue of a process holds RLIMIT_SIGPENDING entries. sigqueue refuses the next one, and kill goes on
-    // without an entry of its own, as it must not lose a signal
+    // The queue of a process holds RLIMIT_SIGPENDING entries for sigqueue, which refuses the next one.
+    // kill goes past the limit with an entry of its own, as in Linux
     limit_pending(LOW_LIMIT);
 
     for(long value = 1; value <= LOW_LIMIT; value += 1) {
@@ -176,9 +176,8 @@ int main(void)
         ktest_expect((long)(info.si_value.sival_ptr), value);
     }
 
-    // The kill that found no room is pending as a plain signal
     ktest_expect(take(both, &info), RT_SECOND);
-    ktest_expect(info.si_code, __k_SI_KERNEL);
+    ktest_expect(info.si_code, __k_SI_USER);
     ktest_expect(take(both, nullptr), -__k_EAGAIN);
 
     // Taking entries makes room again
