@@ -15,6 +15,7 @@
 #define CHILD_NSEC    (50 * NSEC_PER_MSEC)
 #define PAGE_SIZE     4096
 #define TOUCH_PAGES   16
+#define PEAK_PAGES    1024
 #define SLACK_NSEC    (5 * NSEC_PER_MSEC) // The cycle counter and the clock source can disagree a little
 
 static long read_clock(long clock)
@@ -158,7 +159,7 @@ static void test_usage(void)
 
     ktest_assert(usec_of(&self.ru_utime) >= usec_of(&thread.ru_utime));
     ktest_assert(usec_of(&self.ru_stime) >= usec_of(&thread.ru_stime));
-    ktest_expect(self.ru_maxrss, 0);
+    ktest_assert(self.ru_maxrss > 0);
     ktest_expect(self.ru_inblock, 0);
     ktest_expect(ktest_syscall2(__k_SYS_GETRUSAGE, 7, (long)(&self)), -__k_EINVAL);
     ktest_expect(ktest_syscall2(__k_SYS_GETRUSAGE, __k_RUSAGE_SELF, 1), -__k_EFAULT);
@@ -252,9 +253,9 @@ static void on_signal(__k_int32_t sig)
 }
 
 // Each page of fresh anonymous memory faults once on its first write
-static void touch_fresh_pages(void)
+static void touch_pages(long count)
 {
-    long length = TOUCH_PAGES * PAGE_SIZE;
+    long length = count * PAGE_SIZE;
     long address = ktest_syscall6(__k_SYS_MMAP, 0, length, __k_PROT_READ | __k_PROT_WRITE, __k_MAP_PRIVATE | __k_MAP_ANONYMOUS, -1, 0);
 
     ktest_assert(address > 0);
@@ -272,7 +273,7 @@ static void test_faults(void)
     struct __k_rusage after = {};
 
     get_usage(__k_RUSAGE_THREAD, &before);
-    touch_fresh_pages();
+    touch_pages(TOUCH_PAGES);
     get_usage(__k_RUSAGE_THREAD, &after);
 
     ktest_assert(after.ru_minflt - before.ru_minflt >= TOUCH_PAGES);
@@ -324,7 +325,7 @@ static void test_child_counters(void)
     long child = ktest_syscall1(__k_SYS_FORK, 0);
 
     if(child == 0) {
-        touch_fresh_pages();
+        touch_pages(TOUCH_PAGES);
         ktest_syscall1(__k_SYS_EXIT, 0);
     }
 
@@ -335,6 +336,42 @@ static void test_child_counters(void)
 
     ktest_expect(ktest_syscall4(__k_SYS_WAITPID, child, (long)(&wstatus), 0, (long)(&usage)), child);
     ktest_assert(usage.ru_minflt >= TOUCH_PAGES);
+    ktest_assert(usage.ru_nvcsw >= 1); // The exit counts
+}
+
+// The peak stays after the memory goes, and reaches the parent
+static void test_peak(void)
+{
+    long child = ktest_syscall1(__k_SYS_FORK, 0);
+
+    if(child == 0) {
+        struct __k_rusage before = {};
+        struct __k_rusage after = {};
+
+        touch_pages(PEAK_PAGES);
+        get_usage(__k_RUSAGE_SELF, &after);
+        ktest_assert(after.ru_maxrss >= PEAK_PAGES * PAGE_SIZE / 1024);
+
+        before = after;
+        touch_pages(1);
+        get_usage(__k_RUSAGE_SELF, &after);
+        ktest_assert(after.ru_maxrss >= before.ru_maxrss);
+
+        ktest_syscall1(__k_SYS_EXIT, ktest_result());
+    }
+
+    ktest_assert(child > 0);
+
+    struct __k_rusage usage = {};
+    int wstatus = -1;
+
+    ktest_expect(ktest_syscall4(__k_SYS_WAITPID, child, (long)(&wstatus), 0, (long)(&usage)), child);
+    ktest_expect(wstatus, 0);
+    ktest_assert(usage.ru_maxrss >= PEAK_PAGES * PAGE_SIZE / 1024);
+
+    struct __k_rusage children = {};
+    get_usage(__k_RUSAGE_CHILDREN, &children);
+    ktest_assert(children.ru_maxrss >= usage.ru_maxrss);
 }
 
 int main(void)
@@ -353,6 +390,7 @@ int main(void)
     test_switches();
     test_signals();
     test_child_counters();
+    test_peak();
 
     // No wait goes by a CPU time clock
     struct __k_timespec request = {};
