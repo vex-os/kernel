@@ -1,7 +1,6 @@
 #include <vex/block_interface.h>
 #include <vex/errno.h>
 #include <vex/fcache.h>
-#include <vex/fcntl.h>
 #include <vex/kprintf.h>
 #include <vex/limits.h>
 #include <vex/mount.h>
@@ -374,8 +373,7 @@ static int resize_locked(vnode_t* restrict node, uint64_t new_size)
     return retval;
 }
 
-// Blocks past the end stay when the size does not follow, and truncate frees them
-static int fallocate_locked(vnode_t* restrict node, unsigned mode, off_t offset, off_t length)
+static int fallocate_locked(vnode_t* restrict node, off_t offset, off_t length)
 {
     ext2_vnode_context_t* ctx = node->ctxdata;
     uint64_t block_size = ctx->fs_ctx->block_size;
@@ -386,9 +384,7 @@ static int fallocate_locked(vnode_t* restrict node, unsigned mode, off_t offset,
 
     int retval = ext2_preallocate(node, first, last - first + 1);
 
-    bool grows = end > size && 0 == (mode & FALLOC_FL_KEEP_SIZE);
-
-    if(retval == 0 && grows) {
+    if(retval == 0 && end > size) {
         retval = resize_locked(node, end);
     }
 
@@ -1110,10 +1106,17 @@ static int ext2_vnode_set_attr(vnode_t* restrict node, const vnode_attr_t* restr
     return retval;
 }
 
+// Only a file with extents can mark blocks past its end
+// as not written, which ext2 has none of. Blocks past i_size
+// that hold data make e2fsck report a wrong size, so there is no KEEP_SIZE, as in Linux
 static int ext2_vnode_fallocate(vnode_t* restrict node, unsigned mode, off_t offset, off_t length)
 {
+    if(mode) {
+        return -EOPNOTSUPP;
+    }
+
     mutex_acquire(fs_lock(node));
-    int retval = fallocate_locked(node, mode, offset, length);
+    int retval = fallocate_locked(node, offset, length);
     mutex_release(fs_lock(node));
     return retval;
 }
