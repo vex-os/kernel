@@ -179,6 +179,10 @@ void process_set_cwd(process_t* process, vnode_t* node);
 
 file_t* process_fd_get(process_t* process, int fd) __nodiscard;
 int process_fd_alloc(process_t* process, file_t* file, int min_fd, uint32_t fd_flags) __nodiscard;
+
+/// Makes new_fd another descriptor for the file of old_fd, and closes the file it had
+/// @pre new_fd is not negative and differs from old_fd
+/// @retval -EBADF old_fd is not open, or new_fd is past the descriptor limit
 int process_fd_dup(process_t* process, int old_fd, int new_fd, uint32_t fd_flags) __nodiscard;
 int process_fd_release(process_t* process, int fd);
 int process_fd_get_flags(process_t* process, int fd) __nodiscard;

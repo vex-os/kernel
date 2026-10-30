@@ -821,25 +821,12 @@ int process_fd_alloc(process_t* process, file_t* file, int min_fd, uint32_t fd_f
 
 int process_fd_dup(process_t* process, int old_fd, int new_fd, uint32_t fd_flags)
 {
+    kassert(new_fd >= 0 && new_fd != old_fd);
+
     file_t* copy = process_fd_get(process, old_fd);
 
     if(copy == nullptr) {
         return -EBADF;
-    }
-
-    if(old_fd == new_fd) {
-        file_close(copy);
-        return new_fd;
-    }
-
-    if(new_fd < 0) {
-        int fd = process_fd_alloc(process, copy, 0, fd_flags);
-
-        if(fd < 0) {
-            file_close(copy);
-        }
-
-        return fd;
     }
 
     // As POSIX has it, a descriptor past
