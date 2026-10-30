@@ -348,6 +348,8 @@ static void sched_irq_handler(unsigned number, const hart_context_t* restrict ct
 
     if(curr != hart->idle_thread) {
         if(curr->state == THREAD_DEAD) {
+            usage_increase(&curr->usage.voluntary_switches, 1); // Exit is a voluntary switch
+
             hart->dead_thread = curr;
         }
         else if(next == nullptr && curr->state != THREAD_BLOCKED) {
