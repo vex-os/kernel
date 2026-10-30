@@ -632,11 +632,13 @@ static int lock_request_of(file_t* restrict file, const flock_t* restrict lock, 
     process_t* process = thread->process;
 
     out->owner = process;
+    out->of_process = true;
     out->pid = process->pid;
     out->type = lock->l_type;
 
     if(of_file) {
         out->owner = file;
+        out->of_process = false;
         out->pid = -1;
     }
 

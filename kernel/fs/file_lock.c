@@ -8,12 +8,18 @@
 #include <vex/spinlock.h>
 #include <vex/vnode.h>
 
+// Linux stops at the same depth; a longer cycle
+// goes unseen and sleeps as it would without the check
+#define MAX_WAIT_CHAIN 10
+
 typedef struct file_lock_s file_lock_t;
 typedef struct lock_spares_s lock_spares_t;
+typedef struct lock_waiter_s lock_waiter_t;
 
 struct file_lock_s {
     file_lock_t* next;
     const void* owner;
+    bool of_process;
     pid_t pid;
     unsigned type;
     off_t start;
@@ -35,8 +41,21 @@ struct lock_spares_s {
     file_lock_t* second;
 };
 
+// A process that waits for a lock of another process,
+// on the stack of its thread for as long as it sleeps
+struct lock_waiter_s {
+    lock_waiter_t* next;
+    const void* owner;
+    const void* blocker;
+};
+
 static_assert(sizeof(file_lock_t) <= SLAB_MAX_SIZE);
 static_assert(sizeof(file_locks_t) <= SLAB_MAX_SIZE);
+
+// Taken inside the spinlock of the locks
+// of a node, never the other way around
+static spinlock_t waiters_lock = SPINLOCK_INIT;
+static lock_waiter_t* waiters = nullptr;
 
 static file_locks_t* get_locks(vnode_t* restrict node, bool create)
 {
@@ -236,6 +255,7 @@ static void insert_locked(file_locks_t* restrict locks, const file_lock_request_
 {
     file_lock_t* fresh = use_spare(spares);
     fresh->owner = request->owner;
+    fresh->of_process = request->of_process;
     fresh->pid = request->pid;
     fresh->type = request->type;
     fresh->start = request->start;
@@ -259,6 +279,70 @@ static bool holds_locked(const file_locks_t* restrict locks, const file_lock_req
     }
 
     return false;
+}
+
+static const void* blocker_of_locked(const void* owner)
+{
+    for(lock_waiter_t* waiter = waiters; waiter; waiter = waiter->next) {
+        if(waiter->owner == owner) {
+            return waiter->blocker;
+        }
+    }
+
+    return nullptr;
+}
+
+// Follows the processes that wait for each other
+// from the one in the way, looking for the caller
+static bool closes_cycle_locked(const void* owner, const void* blocker)
+{
+    for(int depth = 0; depth < MAX_WAIT_CHAIN; ++depth) {
+        if(blocker == owner) {
+            return true;
+        }
+
+        blocker = blocker_of_locked(blocker);
+
+        if(blocker == nullptr) {
+            return false;
+        }
+    }
+
+    return false;
+}
+
+// @retval false The wait would close a cycle, and nothing was added
+static bool add_waiter(lock_waiter_t* restrict waiter, const file_lock_request_t* restrict request, const file_lock_t* restrict conflict)
+{
+    waiter->owner = request->owner;
+    waiter->blocker = conflict->owner;
+
+    spinlock_acquire(&waiters_lock);
+
+    bool cycle = closes_cycle_locked(request->owner, conflict->owner);
+
+    if(!cycle) {
+        waiter->next = waiters;
+        waiters = waiter;
+    }
+
+    spinlock_release(&waiters_lock);
+
+    return !cycle;
+}
+
+static void remove_waiter(lock_waiter_t* restrict waiter)
+{
+    bool intr_state = spinlock_acquire_intr(&waiters_lock);
+
+    for(lock_waiter_t** prev = &waiters; *prev; prev = &(*prev)->next) {
+        if(*prev == waiter) {
+            *prev = waiter->next;
+            break;
+        }
+    }
+
+    spinlock_release_intr(&waiters_lock, intr_state);
 }
 
 int file_lock_replace(vnode_t* restrict node, const file_lock_request_t* restrict request, bool wait)
@@ -308,15 +392,38 @@ int file_lock_set(vnode_t* restrict node, const file_lock_request_t* restrict re
 
     bool intr_state = spinlock_acquire_intr(&locks->lock);
 
-    while(!unlock && find_conflict_locked(locks, request)) {
+    for(;;) {
+        file_lock_t* conflict = nullptr;
+
+        if(!unlock) {
+            conflict = find_conflict_locked(locks, request);
+        }
+
+        if(conflict == nullptr) {
+            break;
+        }
+
         if(!wait) {
             spinlock_release_intr(&locks->lock, intr_state);
             drop_spares(&spares);
             return -EAGAIN;
         }
 
+        lock_waiter_t waiter = {};
+        bool tracked = request->of_process && conflict->of_process;
+
+        if(tracked && !add_waiter(&waiter, request, conflict)) {
+            spinlock_release_intr(&locks->lock, intr_state);
+            drop_spares(&spares);
+            return -EDEADLK;
+        }
+
         event_t* released = &locks->released;
         ssize_t result = event_await_unlock(&released, 1, &locks->lock, intr_state, 0);
+
+        if(tracked) {
+            remove_waiter(&waiter);
+        }
 
         if(result < 0) {
             drop_spares(&spares);
@@ -361,6 +468,7 @@ bool file_lock_test(vnode_t* restrict node, file_lock_request_t* restrict reques
 
     if(conflict) {
         request->owner = conflict->owner;
+        request->of_process = conflict->of_process;
         request->pid = conflict->pid;
         request->type = conflict->type;
         request->start = conflict->start;

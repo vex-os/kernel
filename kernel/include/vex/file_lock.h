@@ -13,6 +13,7 @@ typedef struct file_lock_request_s file_lock_request_t;
 // conflict where their ranges overlap and one of them is a write lock
 struct file_lock_request_s {
     const void* owner; // The process for a POSIX lock, the file for a lock of an open file
+    bool of_process;   // The owner is a process, so a wait of it takes part in the deadlock check
     pid_t pid;         // What F_GETLK reports: the pid of the owner, or -1 for an open file
     unsigned type;     // F_RDLCK, F_WRLCK or F_UNLCK
     off_t start;
@@ -23,6 +24,7 @@ struct file_lock_request_s {
 /// @param wait Sleep while a lock of another owner is in the way, instead of failing
 /// @retval -EAGAIN A lock of another owner is in the way, and wait is false
 /// @retval -ERESTART A signal came while the thread waited
+/// @retval -EDEADLK The owner and the one in the way are processes, and the wait would close a cycle of such waits
 /// @retval -ENOMEM No memory for the ranges
 int file_lock_set(vnode_t* restrict node, const file_lock_request_t* restrict request, bool wait);
 
