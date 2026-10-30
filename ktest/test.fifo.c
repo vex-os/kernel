@@ -226,14 +226,10 @@ static void test_interrupt(void)
 
 int main(void)
 {
-    const char* work_directory = ktest_enter_work_directory("fifo");
-
-    // A mount point is a path from the root
-    char memory[__k_PATH_MAX];
-    ktest_snprintf(memory, sizeof(memory), "%s/memory", work_directory);
+    ktest_enter_work_directory("fifo");
 
     ktest_expect(ktest_syscall3(__k_SYS_MKDIRAT, __k_AT_FDCWD, (long)("memory"), 0755), 0);
-    ktest_expect(ktest_syscall6(__k_SYS_MOUNT, 0, (long)(memory), (long)("tmpfs"), 0, 0, 0), 0);
+    ktest_expect(ktest_syscall6(__k_SYS_MOUNT, 0, (long)("memory"), (long)("tmpfs"), 0, 0, 0), 0);
 
     test_make();
     test_privilege();
@@ -244,7 +240,7 @@ int main(void)
     // A filesystem without nodes of these kinds says so
     ktest_expect(make_node("fifo-on-disk", __k_S_IFIFO | 0600, 0), -__k_EPERM);
 
-    ktest_expect(ktest_syscall1(__k_SYS_UMOUNT, (long)(memory)), 0);
+    ktest_expect(ktest_syscall1(__k_SYS_UMOUNT, (long)("memory")), 0);
 
     return ktest_result();
 }
