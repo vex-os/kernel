@@ -875,6 +875,36 @@ static int tmpfs_vnode_set_attr(vnode_t* restrict node, const vnode_attr_t* rest
     return retval;
 }
 
+// The commit limit counts the whole size of a file, holes included, so a file that is long enough has its pages paid for
+// already. There is nothing to reserve past the end, and so no KEEP_SIZE
+static int tmpfs_vnode_fallocate(vnode_t* restrict node, unsigned mode, off_t offset, off_t length)
+{
+    if(mode) {
+        return -EOPNOTSUPP;
+    }
+
+    tmpfs_t* tmpfs = tmpfs_of(node);
+    tmpfs_inode_t* inode = node->ctxdata;
+    off_t end = offset + length;
+    int retval = 0;
+
+    mutex_acquire(&tmpfs->lock);
+
+    bool grows = end > inode->size;
+
+    if(grows) {
+        retval = resize_locked(node, inode, end);
+    }
+
+    if(retval == 0 && grows) {
+        touch(inode, true);
+    }
+
+    mutex_release(&tmpfs->lock);
+
+    return retval;
+}
+
 static int tmpfs_vnode_fault(vnode_t* restrict node, off_t offset, pmap_t* restrict pmap, virt_addr_t virt, unsigned vprot)
 {
     tmpfs_t* tmpfs = tmpfs_of(node);
@@ -906,6 +936,7 @@ const vnode_ops_t tmpfs_vnode_ops = {
     .write = &tmpfs_vnode_write,
     .stat = &tmpfs_vnode_stat,
     .set_attr = &tmpfs_vnode_set_attr,
+    .fallocate = &tmpfs_vnode_fallocate,
     .fault = &tmpfs_vnode_fault,
 };
 
