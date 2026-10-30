@@ -38,17 +38,20 @@ ssize_t file_read(file_t* restrict file, void* restrict buffer, size_t size, off
 
 /// Writes at *position and moves it by the number of bytes written
 /// @param position The offset of the file for write, a private one for pwrite
-/// @note Ignores O_APPEND: the caller picks the position
+/// @note Ignores O_APPEND: the caller picks the position. A write to a regular file stops at RLIMIT_FSIZE, and one that
+/// starts there fails with -EFBIG and sends SIGXFSZ to the calling thread
 ssize_t file_write(file_t* restrict file, const credentials_t* restrict credentials, const void* restrict buffer, size_t size,
     off_t* restrict position);
 
+/// @retval -EFBIG The file grows past RLIMIT_FSIZE; the calling thread also gets SIGXFSZ
 int file_truncate(file_t* restrict file, const credentials_t* restrict credentials, off_t size);
 
 /// @retval -EBADF The file is not open for writing
 /// @retval -ESPIPE The file is a FIFO
 /// @retval -EISDIR The file is a directory
 /// @retval -ENODEV The file is not a regular file
-/// @retval -EFBIG The range ends past the largest offset
+/// @retval -EFBIG The range ends past the largest offset, or
+/// the file grows past RLIMIT_FSIZE, for which the calling thread also gets SIGXFSZ
 /// @retval -EOPNOTSUPP A mode the kernel does not have, or one that the filesystem does not do
 int file_fallocate(file_t* restrict file, const credentials_t* restrict credentials, uintptr_t mode, off_t offset, off_t length);
 

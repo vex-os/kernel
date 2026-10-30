@@ -4,14 +4,71 @@
 #include <vex/file_lock.h>
 #include <vex/mount.h>
 #include <vex/path.h>
+#include <vex/resource.h>
+#include <vex/rlimit.h>
+#include <vex/signal.h>
 #include <vex/slab.h>
 #include <vex/stat.h>
 #include <vex/string.h>
+#include <vex/thread.h>
 #include <vex/vnode.h>
 
 static bool writes_file(unsigned flags)
 {
     return file_flags_allow_write(flags) || (flags & O_TRUNC);
+}
+
+// Only a regular file has a size limit, and a kernel thread has none
+static uint64_t size_limit(const file_t* restrict file)
+{
+    if(file->node->type != VNODE_FILE) {
+        return RLIM_INFINITY;
+    }
+
+    thread_t* thread = this_thread();
+
+    if(thread->process == nullptr) {
+        return RLIM_INFINITY;
+    }
+
+    rlimit_t limit = process_get_rlimit(thread->process, RLIMIT_FSIZE);
+
+    return limit.rlim_cur;
+}
+
+// SIGXFSZ goes to the thread that went past the limit, as POSIX has it
+static int size_exceeded(void)
+{
+    thread_t* thread = this_thread();
+
+    siginfo_t info = {};
+    info.si_signo = SIGXFSZ;
+    info.si_code = SI_KERNEL;
+
+    signal_send(thread->process, thread->tid, &info);
+
+    return -EFBIG;
+}
+
+// A file that is longer than the limit already may still shrink, or change inside its size, as in Linux
+static int check_new_size(file_t* restrict file, uint64_t end)
+{
+    if(end <= size_limit(file)) {
+        return 0;
+    }
+
+    stat_t stat;
+    int retval = vnode_stat(file->node, &stat);
+
+    if(retval < 0) {
+        return retval;
+    }
+
+    if(end <= (uint64_t)(stat.st_size)) {
+        return 0;
+    }
+
+    return size_exceeded();
 }
 
 static unsigned access_for(unsigned flags)
@@ -230,6 +287,21 @@ ssize_t file_write(file_t* restrict file, const credentials_t* restrict credenti
         return -EBADF;
     }
 
+    uint64_t limit = size_limit(file);
+
+    // A write that crosses the limit stops at it, and only the next one fails
+    if(size > 0 && limit != RLIM_INFINITY) {
+        if((uint64_t)(*position) >= limit) {
+            return size_exceeded();
+        }
+
+        uint64_t room = limit - (uint64_t)(*position);
+
+        if(size > room) {
+            size = room;
+        }
+    }
+
     if(size > 0) {
         int retval = vnode_remove_privs(file->node, credentials);
 
@@ -257,7 +329,15 @@ int file_truncate(file_t* restrict file, const credentials_t* restrict credentia
         return -EBADF;
     }
 
-    int retval = vnode_remove_privs(file->node, credentials);
+    int retval = 0;
+
+    if(size > 0) {
+        retval = check_new_size(file, (uint64_t)(size));
+    }
+
+    if(retval == 0) {
+        retval = vnode_remove_privs(file->node, credentials);
+    }
 
     if(retval < 0) {
         return retval;
@@ -305,7 +385,16 @@ int file_fallocate(file_t* restrict file, const credentials_t* restrict credenti
         return -EOPNOTSUPP;
     }
 
-    int retval = vnode_remove_privs(file->node, credentials);
+    int retval = 0;
+
+    // With KEEP_SIZE the size does not change, so the limit does not apply
+    if(0 == (mode & FALLOC_FL_KEEP_SIZE)) {
+        retval = check_new_size(file, (uint64_t)(offset + length));
+    }
+
+    if(retval == 0) {
+        retval = vnode_remove_privs(file->node, credentials);
+    }
 
     if(retval < 0) {
         return retval;
