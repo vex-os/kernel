@@ -1,5 +1,6 @@
 #include <vex/errno.h>
 #include <vex/fcntl.h>
+#include <vex/ioctl.h>
 #include <vex/signal.h>
 #include <vex/stat.h>
 #include <vex/syscall.h>
@@ -79,6 +80,21 @@ static void test_basic(void)
     ktest_expect(ktest_write(fds[1], "hello", 5), 5);
     ktest_expect(ktest_read(fds[0], buffer, sizeof(buffer)), 5); // Hands out what it has
     ktest_expect(ktest_bytes_equal(buffer, "hello", 5), 1);
+
+    // Either end tells how much is waiting
+    int waiting = -1;
+
+    ktest_expect(ktest_syscall3(__k_SYS_IOCTL, fds[0], __k_FIONREAD, (long)(&waiting)), 0);
+    ktest_expect(waiting, 0);
+    ktest_expect(ktest_write(fds[1], pattern, 3 * PAGE_SIZE + 5), 3 * PAGE_SIZE + 5);
+    ktest_expect(ktest_syscall3(__k_SYS_IOCTL, fds[1], __k_FIONREAD, (long)(&waiting)), 0);
+    ktest_expect(waiting, 3 * PAGE_SIZE + 5);
+    ktest_expect(ktest_read(fds[0], readback, 100), 100);
+    ktest_expect(ktest_syscall3(__k_SYS_IOCTL, fds[0], __k_FIONREAD, (long)(&waiting)), 0);
+    ktest_expect(waiting, 3 * PAGE_SIZE - 95);
+    ktest_expect(drain(fds[0], readback, 3 * PAGE_SIZE - 95), 3 * PAGE_SIZE - 95);
+    ktest_expect(ktest_syscall3(__k_SYS_IOCTL, fds[0], __k_FIONREAD, 0), -__k_EFAULT);
+    ktest_expect(ktest_syscall3(__k_SYS_IOCTL, fds[0], __k_FIONREAD + 1, (long)(&waiting)), -__k_ENOTTY);
 
     // Each end allows only its own direction
     ktest_expect(ktest_write(fds[0], "x", 1), -__k_EBADF);
