@@ -34,6 +34,9 @@ amd64_syscall_entry:
     movq %ds, %rax
     pushq %rax                  # hart_context::amd64_ds
 
+    # Before STI, so that an interrupt in between counts as system time
+    call cputime_enter_kernel
+
     sti
 
     movq %rsp, %rdi

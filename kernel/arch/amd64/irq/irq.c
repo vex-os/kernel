@@ -1,6 +1,7 @@
 #include <arch/amd64.idt.h>
 #include <arch/amd64.lapic.h>
 #include <arch/irq.h>
+#include <vex/cputime.h>
 #include <vex/hart.h>
 #include <vex/initcall.h>
 #include <vex/irq.h>
@@ -216,6 +217,10 @@ extern void amd64_irq_FF(void);
 
 void __used amd64_irq_handler(hart_context_t* restrict ctx, uint64_t idt_vector)
 {
+    if(3 == (ctx->amd64_cs & 3)) {
+        cputime_enter_kernel();
+    }
+
     // Intel SDM 3A, 11.9: a spurious interrupt
     // isn't in service, so an EOI would end another one
     if(idt_vector == LAPIC_SPURIOUS_VECTOR) {

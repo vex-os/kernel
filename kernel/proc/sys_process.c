@@ -285,13 +285,23 @@ static void fill_exited(wait_result_t* restrict out, const process_t* restrict c
     }
 }
 
-static intptr_t collect_child(process_t* restrict target, uintptr_t options, wait_result_t* restrict result)
+// The times of a zombie no longer change, so they are read without its lock
+static void collect_cputime(process_t* restrict caller, const process_t* restrict target)
+{
+    bool intr_state = spinlock_acquire_intr(&caller->lock);
+    cputime_add(&caller->children_cputime, &target->cputime);
+    cputime_add(&caller->children_cputime, &target->children_cputime);
+    spinlock_release_intr(&caller->lock, intr_state);
+}
+
+static intptr_t collect_child(process_t* restrict caller, process_t* restrict target, uintptr_t options, wait_result_t* restrict result)
 {
     fill_exited(result, target);
 
     intptr_t retval = target->pid;
 
     if(0 == (options & WNOWAIT)) {
+        collect_cputime(caller, target);
         process_destroy(target);
     }
 
@@ -426,7 +436,7 @@ static intptr_t wait_child(process_t* restrict caller, pid_t pid, const process_
             return -ECHILD;
         }
 
-        return collect_child(target, options, result);
+        return collect_child(caller, target, options, result);
     }
 }
 

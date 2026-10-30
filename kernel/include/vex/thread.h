@@ -3,6 +3,7 @@
 #include <arch/hart.h>
 #include <arch/thread.h>
 #include <vex/compiler.h>
+#include <vex/cputime.h>
 #include <vex/signal.h>
 #include <vex/spinlock.h>
 #include <vex/types.h>
@@ -77,6 +78,8 @@ struct thread_s {
     uintptr_t sig_altstack;
     uint32_t sig_altstack_size;
     bool sig_saved_valid;
+
+    cputime_t cputime; // Changed only on the hart that runs the thread
 
     uintptr_t clear_tid; // Zeroed and woken as a futex when the thread exits
 

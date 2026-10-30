@@ -319,6 +319,8 @@ static void sched_irq_handler(unsigned number, const hart_context_t* restrict ct
 
     thread_t* curr = hart->curr_thread;
 
+    cputime_switch(hart, curr);
+
     // preempt_enable switches away once the last spinlock is
     // released; a blocking or dying thread has none to hold
     if(curr != hart->idle_thread && curr->state == THREAD_RUNNING && curr->preempt_count > 0) {

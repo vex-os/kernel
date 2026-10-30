@@ -1,5 +1,6 @@
 #pragma once
 
+#include <vex/cputime.h>
 #include <vex/cred.h>
 #include <vex/event.h>
 #include <vex/itimer.h>
@@ -89,6 +90,9 @@ struct process_s {
     pending_signal_t* adopt_note;
     sigset_t sig_pending;
     pending_signal_t* sig_queue;
+
+    cputime_t cputime;          // Of the threads that are reaped, under lock
+    cputime_t children_cputime; // Of the children that wait collected and their own collected children, under lock
 
     itimer_t itimer; // Not inherited by a fork, and kept over an exec
 

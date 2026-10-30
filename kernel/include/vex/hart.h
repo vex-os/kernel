@@ -32,6 +32,8 @@ struct hart_local_s {
     thread_t* idle_thread;
     thread_t* dead_thread;
 
+    uint64_t cputime_mark; // local_clock_ns when the time of the hart was last charged to a thread
+
     bool tlb_online;
     uint64_t tlb_flushed;
 

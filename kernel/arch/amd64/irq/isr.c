@@ -1,6 +1,7 @@
 #include <arch/amd64.fpu.h>
 #include <arch/amd64.idt.h>
 #include <vex/compiler.h>
+#include <vex/cputime.h>
 #include <vex/errno.h>
 #include <vex/hart.h>
 #include <vex/initcall.h>
@@ -220,6 +221,10 @@ void __used amd64_isr_handler(hart_context_t* restrict ctx, uint64_t intvec)
         asm volatile("movq %%cr2, %0" : "=r"(fault));
         panic("early exception 0x%02zX: rip=%p cr2=%p err=0x%zX", (size_t)(intvec), (void*)(ctx->amd64_rip), (void*)(fault),
             (size_t)(ctx->amd64_err));
+    }
+
+    if(3 == (ctx->amd64_cs & 3)) {
+        cputime_enter_kernel();
     }
 
     if(intvec == 0x0E) {

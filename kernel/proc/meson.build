@@ -1,5 +1,6 @@
 kernel_sources += files(
     'cpucaps.c',
+    'cputime.c',
     'cred.c',
     'event.c',
     'futex.c',

@@ -1,4 +1,5 @@
 #include <vex/atomic.h>
+#include <vex/cputime.h>
 #include <vex/process.h>
 #include <vex/sched.h>
 #include <vex/signal.h>
@@ -12,6 +13,7 @@ void exit_to_user(hart_context_t* restrict ctx)
         uint32_t work = atomic_load(&thread->pending_work, ATOMIC_ACQUIRE);
 
         if(work == 0) {
+            cputime_exit_kernel();
             return;
         }
 
