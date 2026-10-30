@@ -1,7 +1,10 @@
 #include <vex/errno.h>
+#include <vex/fcntl.h>
 #include <vex/mman.h>
+#include <vex/poll.h>
 #include <vex/random.h>
 #include <vex/syscall.h>
+#include <vex/time.h>
 
 #include "ktest.h"
 
@@ -148,8 +151,70 @@ static void test_fault_after_start(void)
     ktest_expect(ktest_syscall2(__k_SYS_MUNMAP, base, PAGE_SIZE), 0);
 }
 
+static long poll_now(long fd)
+{
+    struct __k_pollfd entry = {};
+    entry.fd = fd;
+    entry.events = __k_POLLIN | __k_POLLOUT;
+
+    struct __k_timespec zero = {};
+    long result = ktest_syscall4(__k_SYS_PPOLL, (long)(&entry), 1, (long)(&zero), 0);
+
+    if(result < 0) {
+        return result;
+    }
+
+    return entry.revents;
+}
+
+static void test_device(const char* path)
+{
+    unsigned char first[32];
+    unsigned char second[32];
+    unsigned char big[2 * PAGE_SIZE];
+
+    long fd = ktest_open(path, __k_O_RDWR, 0);
+
+    ktest_expect(fd >= 0, 1);
+
+    if(fd < 0) {
+        return;
+    }
+
+    ktest_expect(ktest_read(fd, first, sizeof(first)), sizeof(first));
+    ktest_expect(ktest_read(fd, second, sizeof(second)), sizeof(second));
+    ktest_expect(ktest_bytes_equal(first, second, sizeof(first)), 0);
+    ktest_expect(is_zero(first, sizeof(first)), 0);
+
+    // A device may hand out less than asked at once, but never nothing
+    long got = ktest_read(fd, big, sizeof(big));
+
+    ktest_expect(got > 0, 1);
+    ktest_expect(got <= (long)(sizeof(big)), 1);
+
+    ktest_expect(ktest_write(fd, "stir", 4), 4);
+    ktest_expect(poll_now(fd), __k_POLLIN | __k_POLLOUT);
+
+    ktest_close(fd);
+
+    // The generator has its seed, so a read that may not wait still gives bytes
+    fd = ktest_open(path, __k_O_RDONLY | __k_O_NONBLOCK, 0);
+
+    ktest_expect(fd >= 0, 1);
+
+    if(fd >= 0) {
+        ktest_expect(ktest_read(fd, first, sizeof(first)), sizeof(first));
+        ktest_close(fd);
+    }
+}
+
 int main(void)
 {
+    unsigned char seed_wait[1];
+
+    // Without a hardware source the seed can still be on its way, and only a blocking call waits for it
+    ktest_expect(get_random(seed_wait, sizeof(seed_wait), 0), sizeof(seed_wait));
+
     test_flags();
     test_bad_buffer();
     test_lengths();
@@ -157,6 +222,8 @@ int main(void)
     test_balance();
     test_big();
     test_fault_after_start();
+    test_device("/dev/random");
+    test_device("/dev/urandom");
 
     return ktest_result();
 }
