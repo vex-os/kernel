@@ -723,6 +723,8 @@ uint8_t dirent_type_from_vnode(unsigned vnode_type)
             return DT_CHR;
         case VNODE_SYM_LINK:
             return DT_LNK;
+        case VNODE_FIFO:
+            return DT_FIFO;
         default:
             return DT_UNKNOWN;
     }

@@ -23,6 +23,7 @@ enum {
     VNODE_BLOCK_DEV,
     VNODE_CHAR_DEV,
     VNODE_SYM_LINK,
+    VNODE_FIFO,
 };
 
 enum {
