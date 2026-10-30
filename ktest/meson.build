@@ -35,6 +35,7 @@ ktest_programs = [
     'fs_times',
     'pread',
     'iov',
+    'pipe',
     'getdents',
     'mount',
     'tmpfs',
