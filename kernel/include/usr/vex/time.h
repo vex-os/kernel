@@ -24,6 +24,11 @@ struct __k_timespec {
     __k_suseconds_t tv_nsec;
 };
 
+struct __k_timeval {
+    __k_time_t tv_sec;
+    __k_suseconds_t tv_usec;
+};
+
 struct __k_itimerspec {
     struct __k_timespec it_interval;
     struct __k_timespec it_value;

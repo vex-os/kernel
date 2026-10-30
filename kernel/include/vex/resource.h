@@ -22,4 +22,9 @@
 
 #define RLIM_INFINITY __k_RLIM_INFINITY
 
+#define RUSAGE_SELF     __k_RUSAGE_SELF
+#define RUSAGE_CHILDREN __k_RUSAGE_CHILDREN
+#define RUSAGE_THREAD   __k_RUSAGE_THREAD
+
 typedef struct __k_rlimit rlimit_t;
+typedef struct __k_rusage rusage_t;

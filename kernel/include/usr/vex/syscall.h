@@ -123,5 +123,6 @@
 #define __k_SYS_SYSINFO     0x126
 #define __k_SYS_GETRLIMIT   0x127
 #define __k_SYS_SETRLIMIT   0x128
+#define __k_SYS_GETRUSAGE   0x129
 
 #endif /* USR_VEX_SYSCALL_H */

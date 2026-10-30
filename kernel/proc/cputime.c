@@ -3,8 +3,11 @@
 #include <vex/cycles.h>
 #include <vex/hart.h>
 #include <vex/process.h>
+#include <vex/resource.h>
 #include <vex/spinlock.h>
+#include <vex/string.h>
 #include <vex/thread.h>
+#include <vex/time.h>
 
 // NOTENOTE: a thread's times change only on the hart that runs it,
 // but another hart reads them, so each field is one atomic store
@@ -30,6 +33,12 @@ static void charge(uint64_t* restrict counter, uint64_t elapsed)
     atomic_store_n(counter, value + elapsed, ATOMIC_RELAXED);
 }
 
+static void load_cputime(const thread_t* restrict thread, cputime_t* restrict out)
+{
+    out->user_ns = atomic_load_n(&thread->cputime.user_ns, ATOMIC_RELAXED);
+    out->system_ns = atomic_load_n(&thread->cputime.system_ns, ATOMIC_RELAXED);
+}
+
 void cputime_enter_kernel(void)
 {
     hart_local_t* hart = this_hart();
@@ -52,12 +61,6 @@ void cputime_switch(hart_local_t* restrict hart, thread_t* restrict curr)
     if(curr != hart->idle_thread) {
         charge(&curr->cputime.system_ns, elapsed);
     }
-}
-
-static void load_cputime(const thread_t* restrict thread, cputime_t* restrict out)
-{
-    out->user_ns = atomic_load_n(&thread->cputime.user_ns, ATOMIC_RELAXED);
-    out->system_ns = atomic_load_n(&thread->cputime.system_ns, ATOMIC_RELAXED);
 }
 
 void cputime_of_thread(const thread_t* restrict thread, cputime_t* restrict out)
@@ -93,4 +96,11 @@ void cputime_of_process(process_t* restrict process, cputime_t* restrict out)
     }
 
     spinlock_release_intr(&process->lock, intr_state);
+}
+
+void cputime_to_rusage(const cputime_t* restrict time, rusage_t* restrict out)
+{
+    memset(out, 0, sizeof(*out));
+    timeval_from_nsec(&out->ru_utime, time->user_ns);
+    timeval_from_nsec(&out->ru_stime, time->system_ns);
 }

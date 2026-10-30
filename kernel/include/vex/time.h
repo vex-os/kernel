@@ -18,15 +18,24 @@
 
 #define ITIMER_REAL __k_ITIMER_REAL
 
-#define NSEC_PER_SEC INT64_C(1000000000)
+#define NSEC_PER_SEC  INT64_C(1000000000)
+#define NSEC_PER_USEC INT64_C(1000)
 
 typedef struct __k_timespec timespec_t;
+typedef struct __k_timeval timeval_t;
 typedef struct __k_itimerspec itimerspec_t;
 
 static __always_inline void timespec_from_nsec(timespec_t* restrict out, uint64_t nsec)
 {
     out->tv_sec = (int64_t)(nsec / NSEC_PER_SEC);
     out->tv_nsec = (int64_t)(nsec % NSEC_PER_SEC);
+}
+
+/// Cuts the nanoseconds down to whole microseconds
+static __always_inline void timeval_from_nsec(timeval_t* restrict out, uint64_t nsec)
+{
+    out->tv_sec = (int64_t)(nsec / NSEC_PER_SEC);
+    out->tv_usec = (int64_t)(nsec % NSEC_PER_SEC / NSEC_PER_USEC);
 }
 
 /// Whether the fields are in range, as POSIX requires for a request
