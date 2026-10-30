@@ -1,6 +1,10 @@
+#include <vex/assert.h>
 #include <vex/blake2s.h>
 #include <vex/chacha20.h>
 #include <vex/clocksrc.h>
+#include <vex/errno.h>
+#include <vex/event.h>
+#include <vex/initcall.h>
 #include <vex/kprintf.h>
 #include <vex/random.h>
 #include <vex/random_source.h>
@@ -22,7 +26,9 @@ static_assert(RANDOM_CHUNK_SIZE % CHACHA20_BLOCK_SIZE == 0);
 
 static const chacha20_nonce_t zero_nonce = {};
 
-// Everything below belongs to the lock. The key is new for each request, so the nonce stays zero.
+// Everything below belongs to the lock. The key
+// is new for each request, so the nonce stays zero.
+
 static spinlock_t lock = SPINLOCK_INIT;
 static blake2s_t pool;
 static bool pool_started;
@@ -30,6 +36,7 @@ static unsigned credit_bits;
 static chacha20_key_t key;
 static bool seeded;
 static uint64_t last_reseed_ns;
+static event_t ready_event; // Triggered under the lock when the first seed arrives, so that a waiter that looked under it cannot miss it
 
 static void start_pool(void)
 {
@@ -59,9 +66,15 @@ static void reseed(uint64_t now_ns)
 
     memzero_explicit(seed, sizeof(seed));
 
+    bool first = !seeded;
+
     credit_bits = 0;
     last_reseed_ns = now_ns;
     seeded = true;
+
+    if(first) {
+        event_trigger(&ready_event, false);
+    }
 }
 
 static void reseed_if_due(void)
@@ -79,21 +92,41 @@ static void reseed_if_due(void)
 }
 
 // Fast key erasure: the block after the output becomes the next key
-static void generate(uint8_t* out, size_t size)
+static void generate(chacha20_key_t secret, uint8_t* out, size_t size)
 {
     chacha20_t stream;
     chacha20_block_t block;
 
-    chacha20_init(&stream, key, zero_nonce, 0);
+    chacha20_init(&stream, secret, zero_nonce, 0);
 
     memset(out, 0, size);
     chacha20_xor_next_blocks(&stream, out, out, size);
     chacha20_next_block(&stream, block);
 
-    memcpy(key, block, sizeof(key));
+    memcpy(secret, block, CHACHA20_KEY_SIZE);
 
     memzero_explicit(block, sizeof(block));
     memzero_explicit(&stream, sizeof(stream));
+}
+
+// The key comes from what the pool holds so far, and the
+// pool takes the next key back so that the next call differs
+static void generate_unseeded(uint8_t* out, size_t size)
+{
+    chacha20_key_t temporary;
+
+    if(!pool_started) {
+        start_pool();
+    }
+
+    blake2s_t copy = pool;
+    blake2s_finish(&copy, temporary);
+
+    generate(temporary, out, size);
+
+    blake2s_update(&pool, temporary, sizeof(temporary));
+
+    memzero_explicit(temporary, sizeof(temporary));
 }
 
 static bool needs_noise(void)
@@ -138,7 +171,7 @@ void random_add(const void* data, size_t size, unsigned bits)
     spinlock_release_intr(&lock, intr_state);
 }
 
-bool random_bytes(void* out, size_t size)
+static bool fill(void* out, size_t size, bool insecure)
 {
     uint8_t* dest = out;
 
@@ -146,7 +179,7 @@ bool random_bytes(void* out, size_t size)
         random_source_poll_all();
     }
 
-    if(!random_ready()) {
+    if(!insecure && !random_ready()) {
         return false;
     }
 
@@ -160,7 +193,14 @@ bool random_bytes(void* out, size_t size)
         bool intr_state = spinlock_acquire_intr(&lock);
 
         reseed_if_due();
-        generate(dest, chunk);
+
+        if(seeded) {
+            generate(key, dest, chunk);
+        }
+        else {
+            generate_unseeded(dest, chunk);
+        }
+
         spinlock_release_intr(&lock, intr_state);
 
         dest += chunk;
@@ -169,3 +209,52 @@ bool random_bytes(void* out, size_t size)
 
     return true;
 }
+
+bool random_bytes(void* out, size_t size)
+{
+    return fill(out, size, false);
+}
+
+void random_bytes_insecure(void* out, size_t size)
+{
+    bool filled = fill(out, size, true);
+
+    kassert(filled);
+}
+
+ssize_t random_wait_ready(bool blocking)
+{
+    event_t* events[] = { &ready_event };
+
+    while(!random_ready()) {
+        random_source_poll_all();
+
+        bool intr_state = spinlock_acquire_intr(&lock);
+
+        if(seeded) {
+            spinlock_release_intr(&lock, intr_state);
+            break;
+        }
+
+        if(!blocking) {
+            spinlock_release_intr(&lock, intr_state);
+            return -EAGAIN;
+        }
+
+        // Nothing polls the sources while the caller sleeps, so it wakes to do it
+        ssize_t result = event_await_unlock(events, 1, &lock, intr_state, MIN_RESEED_INTERVAL);
+
+        if(result < 0 && result != -ETIMEDOUT) {
+            return result;
+        }
+    }
+
+    return 0;
+}
+
+static void init_random(void)
+{
+    event_init(&ready_event);
+}
+
+initcall_bsp_early(init_random, INIT_FIRST);
