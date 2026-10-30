@@ -12,6 +12,8 @@ enum cpu_feature_e {
     CPU_FEATURE_AVX512,  // 512-bit vector math
     CPU_FEATURE_SMEP,    // Supervisor Execution Prevention
     CPU_FEATURE_SMAP,    // Supervisor Access Prevention
+    CPU_FEATURE_RDRAND,  // Random numbers from the on-chip generator
+    CPU_FEATURE_RDSEED,  // Seeds from the on-chip entropy source
     NUM_CPU_FEATURES,
 };
 

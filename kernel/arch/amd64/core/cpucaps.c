@@ -14,6 +14,8 @@ const cpu_feature_desc_t arch_cpu_features[] = {
     [CPU_FEATURE_AVX512] = { .name = "avx512" },
     [CPU_FEATURE_SMEP] = { .name = "smep", .scope = CPU_SCOPE_LOCAL },
     [CPU_FEATURE_SMAP] = { .name = "smap", .scope = CPU_SCOPE_LOCAL },
+    [CPU_FEATURE_RDRAND] = { .name = "rdrand", .scope = CPU_SCOPE_LOCAL },
+    [CPU_FEATURE_RDSEED] = { .name = "rdseed", .scope = CPU_SCOPE_LOCAL },
 };
 
 static_assert(NUM_CPU_FEATURES == sizeof(arch_cpu_features) / sizeof(arch_cpu_features[0]));
@@ -36,6 +38,10 @@ void arch_cpucaps_probe(cpucaps_t* restrict caps)
         cpucaps_set(caps, CPU_FEATURE_PAT);
     }
 
+    if(ecx & CPUID_1_ECX_RDRAND) {
+        cpucaps_set(caps, CPU_FEATURE_RDRAND);
+    }
+
     if(max_leaf >= 7) {
         cpuid(7, 0, &eax, &ebx, &ecx, &edx);
 
@@ -45,6 +51,10 @@ void arch_cpucaps_probe(cpucaps_t* restrict caps)
 
         if(ebx & CPUID_7_EBX_SMAP) {
             cpucaps_set(caps, CPU_FEATURE_SMAP);
+        }
+
+        if(ebx & CPUID_7_EBX_RDSEED) {
+            cpucaps_set(caps, CPU_FEATURE_RDSEED);
         }
     }
 
