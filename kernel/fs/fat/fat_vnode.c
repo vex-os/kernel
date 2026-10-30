@@ -7,6 +7,7 @@
 #include <vex/errno.h>
 #include <vex/fcache.h>
 #include <vex/kprintf.h>
+#include <vex/limits.h>
 #include <vex/mount.h>
 #include <vex/pslab.h>
 #include <vex/slab.h>
@@ -1183,8 +1184,9 @@ static int stat_locked(vnode_t* restrict node, stat_t* restrict out)
     out->st_size = context->size_bytes;
     out->st_blksize = fs->cluster_size_b;
 
-    out->st_blocks = context->size_bytes + fs->sector_size - 1;
-    out->st_blocks /= fs->sector_size;
+    // Whole sectors, counted in the unit of st_blocks
+    uint64_t allocated = (context->size_bytes + fs->sector_size - 1) / fs->sector_size * fs->sector_size;
+    out->st_blocks = (allocated + S_BLKSIZE - 1) / S_BLKSIZE;
 
     mode_t rw_bits = S_IRUSR | S_IRGRP | S_IROTH;
 

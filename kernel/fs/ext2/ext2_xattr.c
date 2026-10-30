@@ -491,7 +491,7 @@ static int store_block(vnode_t* restrict node, uint8_t* restrict buffer, uint32_
     ext2_vnode_context_t* ctx = node->ctxdata;
     ext2_vfs_context_t* fs_ctx = ctx->fs_ctx;
     ext2_inode_t* inode = &ctx->inode;
-    uint32_t sectors = fs_ctx->block_size / 512;
+    uint32_t sectors = fs_ctx->block_size / EXT2_SECTOR_SIZE;
 
     if(is_last(buffer + sizeof(ext2_xattr_header_t))) {
         if(block) {

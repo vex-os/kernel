@@ -2,6 +2,7 @@
 #include <vex/block_interface.h>
 #include <vex/errno.h>
 #include <vex/kmalloc.h>
+#include <vex/limits.h>
 #include <vex/mutex.h>
 #include <vex/slab.h>
 #include <vex/stat.h>
@@ -215,7 +216,7 @@ static int devfs_block_stat(vnode_t* restrict node, stat_t* restrict out)
 
     out->st_size = interface->sector_count * interface->sector_size;
     out->st_blksize = interface->sector_size;
-    out->st_blocks = interface->sector_count;
+    out->st_blocks = (out->st_size + S_BLKSIZE - 1) / S_BLKSIZE;
 
     return 0;
 }

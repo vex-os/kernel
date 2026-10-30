@@ -2,6 +2,7 @@
 #include <vex/errno.h>
 #include <vex/fcache.h>
 #include <vex/kprintf.h>
+#include <vex/limits.h>
 #include <vex/mount.h>
 #include <vex/mutex.h>
 #include <vex/pslab.h>
@@ -25,7 +26,7 @@ static bool is_fast_symlink(const ext2_vfs_context_t* restrict fs_ctx, const ext
     uint32_t xattr_sectors = 0;
 
     if(inode->i_file_acl) {
-        xattr_sectors = fs_ctx->block_size / 512;
+        xattr_sectors = fs_ctx->block_size / EXT2_SECTOR_SIZE;
     }
 
     return xattr_sectors == le32toh(inode->i_blocks);
@@ -1039,6 +1040,7 @@ static int ext2_vnode_stat(vnode_t* restrict node, stat_t* restrict out)
     ext2_inode_get_time(inode, EXT2_CTIME, &out->st_ctim);
     out->st_blksize = fs_ctx->block_size;
     out->st_blocks = le32toh(inode->i_blocks);
+    out->st_blocks *= EXT2_SECTOR_SIZE / S_BLKSIZE;
 
     mutex_release(&fs_ctx->lock);
 

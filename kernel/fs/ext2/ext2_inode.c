@@ -73,7 +73,7 @@ static int table_set(ext2_vfs_context_t* restrict context, ext2_inode_t* restric
 
 static void add_blocks(const ext2_vfs_context_t* restrict context, ext2_inode_t* restrict inode, int count)
 {
-    int64_t sectors = (int64_t)(le32toh(inode->i_blocks)) + count * (int64_t)(context->block_size / 512);
+    int64_t sectors = (int64_t)(le32toh(inode->i_blocks)) + count * (int64_t)(context->block_size / EXT2_SECTOR_SIZE);
 
     if(sectors < 0) {
         sectors = 0;

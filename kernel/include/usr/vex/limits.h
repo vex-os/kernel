@@ -14,4 +14,8 @@
 
 #define __k_IOV_MAX 1024
 
+/* The unit of st_blocks, ru_inblock and ru_oublock
+ * regardless of the actual sector size of the device */
+#define __k_S_BLKSIZE 512
+
 #endif /* USR_VEX_LIMITS_H */

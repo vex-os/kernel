@@ -13,3 +13,5 @@
 #define MAX_INPUT __k_MAX_INPUT
 
 #define IOV_MAX __k_IOV_MAX
+
+#define S_BLKSIZE __k_S_BLKSIZE

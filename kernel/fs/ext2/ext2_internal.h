@@ -16,6 +16,7 @@ typedef struct vnode_ops_s vnode_ops_t;
 
 #define EXT2_SUPER_OFFSET 1024 // Bytes from the start of the partition, whatever the block size
 #define EXT2_SUPER_MAGIC  UINT16_C(0xEF53)
+#define EXT2_SECTOR_SIZE  512 // The unit of i_blocks, whatever the sector size of the device
 
 #define EXT2_MIN_BLOCK_LOG_SIZE 10
 #define EXT2_MAX_BLOCK_LOG_SIZE 16

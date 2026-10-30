@@ -777,7 +777,7 @@ static int tmpfs_vnode_stat(vnode_t* restrict node, stat_t* restrict out)
     out->st_blksize = PAGE_SIZE;
 
     if(node->type == VNODE_FILE) {
-        out->st_blocks = pages_of(inode->size) * (PAGE_SIZE / 512);
+        out->st_blocks = pages_of(inode->size) * (PAGE_SIZE / S_BLKSIZE);
     }
 
     mutex_release(&tmpfs->lock);
