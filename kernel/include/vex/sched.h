@@ -55,6 +55,9 @@ thread_t* thread_create_fork(process_t* restrict process, const thread_t* restri
 /// The new thread stays blocked until sched_enqueue, and starts with the signal mask and the affinity of the creator
 thread_t* thread_create_sibling(const thread_t* restrict creator, uintptr_t entry, uintptr_t stack_top, uintptr_t arg, uintptr_t tcb);
 
+/// The first thread of a spawned process: like a sibling, but of a process that has no threads yet
+thread_t* thread_create_spawn(process_t* restrict process, const thread_t* restrict creator, uintptr_t entry, uintptr_t stack_top);
+
 /// Gives the thread a mask of its own for every hart if it has none yet, so that thread_set_affinity cannot fail
 /// @pre The caller keeps the thread from being reaped, as the process lock held does
 /// @retval -ENOMEM There is no memory for the mask

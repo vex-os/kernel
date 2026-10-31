@@ -15,6 +15,7 @@
 #include <vex/rlimit.h>
 #include <vex/sched.h>
 #include <vex/signal.h>
+#include <vex/spawn.h>
 #include <vex/syscall.h>
 #include <vex/thread.h>
 #include <vex/uaccess.h>
@@ -314,6 +315,169 @@ static intptr_t exec_image(thread_t* restrict thread, char* restrict image_path,
     thread->clear_tid = 0; // An address in the image just left
 
     process_note_exec(process);
+
+    return 0;
+}
+
+static bool spawn_action_valid(const spawn_action_t* restrict action)
+{
+    if(action->op == SPAWN_OPEN) {
+        return action->open.reserved == 0;
+    }
+
+    bool known = action->op == SPAWN_CLOSE || action->op == SPAWN_DUP2;
+
+    return known;
+}
+
+/// syscall_dirfd for the child: the actions
+/// apply to its table in order, so a dirfd
+/// sees what the earlier actions left there
+static int spawn_dirfd(process_t* restrict process, int dirfd, const char* restrict path, vnode_t** restrict out)
+{
+    if(path[0] == PATH_SEPARATOR) {
+        *out = nullptr;
+        return 0;
+    }
+
+    if(dirfd == AT_FDCWD) {
+        *out = process_get_cwd(process);
+
+        if(*out == nullptr) {
+            return -ENOENT;
+        }
+
+        return 0;
+    }
+
+    file_t* file = process_fd_get(process, dirfd);
+
+    if(file == nullptr) {
+        return -EBADF;
+    }
+
+    vnode_t* node = file->node;
+
+    if(node->type != VNODE_DIRECTORY) {
+        file_close(file);
+        return -ENOTDIR;
+    }
+
+    vnode_incref(node);
+    file_close(file);
+
+    *out = node;
+
+    return 0;
+}
+
+// The path buffer is the page that sys_spawn resolved the image path in:
+// that use ends before the actions begin
+static int spawn_action_open(process_t* restrict child, char* restrict path, const struct __k_spawn_action_open* restrict action)
+{
+    ssize_t copied = user_copyin_str(path, user_addr(action->path), PATH_MAX);
+
+    if(copied < 0) {
+        return copied;
+    }
+
+    vnode_t* base_dir;
+    int retval = spawn_dirfd(child, action->dirfd, path, &base_dir);
+
+    if(retval < 0) {
+        return retval;
+    }
+
+    mode_t umask = atomic_load_n(&child->umask, ATOMIC_RELAXED);
+    file_t* file;
+    retval = file_open(base_dir, path, action->open_flags & ~(uint32_t)(O_CLOEXEC), action->mode & ~umask, child->credentials, &file);
+
+    if(base_dir) {
+        vnode_decref(base_dir);
+    }
+
+    if(retval < 0) {
+        return retval;
+    }
+
+    uint32_t fd_flags = 0;
+
+    if(action->open_flags & O_CLOEXEC) {
+        fd_flags = FD_CLOEXEC;
+    }
+
+    // The occupant leaves first, then the exact number is taken
+    process_fd_release(child, action->fd);
+
+    retval = process_fd_alloc(child, file, action->fd, fd_flags);
+
+    if(retval < 0) {
+        file_close(file);
+        return retval;
+    }
+
+    return 0;
+}
+
+static int spawn_action_dup2(process_t* restrict child, int oldfd, int newfd)
+{
+    if(oldfd == newfd) {
+        // As dup2 has it, the same number twice only checks that it is open
+        file_t* file = process_fd_get(child, oldfd);
+
+        if(file == nullptr) {
+            return -EBADF;
+        }
+
+        file_close(file);
+        return 0;
+    }
+
+    return process_fd_dup(child, oldfd, newfd, 0);
+}
+
+static int spawn_run_action(process_t* restrict child, char* restrict path, const spawn_action_t* restrict action)
+{
+    switch(action->op) {
+        case SPAWN_OPEN:
+            return spawn_action_open(child, path, &action->open);
+
+        case SPAWN_CLOSE:
+            // Closing a descriptor that is not open is not an error, as POSIX has it
+            process_fd_release(child, action->close.fd);
+            return 0;
+
+        case SPAWN_DUP2:
+            return spawn_action_dup2(child, action->dup2.oldfd, action->dup2.newfd);
+
+        default:
+            return -ENOSYS;
+    }
+}
+
+/// Copies the actions one at a time and applies each as it comes, so that the
+/// call holds no more than one of them; a failure ends in process_destroy of
+/// the child, which takes the partial table with it
+static int spawn_apply_actions(process_t* restrict child, char* restrict path, user_addr_t address, size_t count)
+{
+    for(size_t i = 0; i < count; i += 1) {
+        spawn_action_t action;
+        ssize_t copied = user_copyin(&action, user_addr_add(address, i * sizeof(action)), sizeof(action));
+
+        if(copied < 0) {
+            return copied;
+        }
+
+        if(!spawn_action_valid(&action)) {
+            return -EINVAL;
+        }
+
+        int retval = spawn_run_action(child, path, &action);
+
+        if(retval < 0) {
+            return retval;
+        }
+    }
 
     return 0;
 }
@@ -620,7 +784,7 @@ static intptr_t sys_exec(user_addr_t path, user_addr_t argv, user_addr_t envp)
         return -ENOSYS;
     }
 
-    char* image_path = kmalloc(PATH_MAX);
+    char* image_path = pslab_alloc_virt();
     char* strings = pslab_alloc_virt();
 
     intptr_t retval = -ENOMEM;
@@ -629,13 +793,184 @@ static intptr_t sys_exec(user_addr_t path, user_addr_t argv, user_addr_t envp)
         retval = exec_image(thread, image_path, strings, path, argv, envp);
     }
 
-    pslab_free_virt(strings);
-    kfree(image_path);
+    if(strings) {
+        pslab_free_virt(strings);
+    }
+
+    if(image_path) {
+        pslab_free_virt(image_path);
+    }
 
     return retval;
 }
 
 define_syscall(sys_exec, SYS_EXEC, 3);
+
+static intptr_t sys_spawn(user_addr_t address)
+{
+    thread_t* thread = this_thread();
+    process_t* parent = thread->process;
+
+    if(parent == nullptr) {
+        return -ENOSYS;
+    }
+
+    spawn_args_t args;
+    ssize_t copied = user_copyin(&args, address, sizeof(args));
+
+    if(copied < 0) {
+        return copied;
+    }
+
+    if(args.flags & ~SPAWN_KNOWN_FLAGS) {
+        return -EINVAL;
+    }
+
+    if((args.flags & SPAWN_SETSID) && (args.flags & SPAWN_SETPGID)) {
+        return -EINVAL;
+    }
+
+    if(args.pgid < 0) {
+        return -EINVAL;
+    }
+
+    if(args.action_count > SPAWN_MAX_ACTIONS) {
+        return -EINVAL;
+    }
+
+    // One page serves twice: the image path
+    // lives in it until the image is resolved
+    // and then the paths of the actions do
+    char* image_path = pslab_alloc_virt();
+    char* strings = pslab_alloc_virt();
+
+    if(image_path == nullptr || strings == nullptr) {
+        if(strings) {
+            pslab_free_virt(strings);
+        }
+
+        if(image_path) {
+            pslab_free_virt(image_path);
+        }
+
+        return -ENOMEM;
+    }
+
+    user_addr_t path = user_addr(args.path);
+    user_addr_t argv = user_addr(args.argv);
+    user_addr_t envp = user_addr(args.envp);
+    user_addr_t action_list = user_addr(args.actions);
+
+    const char* arguments[BINFMT_ARGS_MAX + 1];
+    const char* environment[BINFMT_ARGS_MAX + 1];
+
+    int retval = copyin_exec_args(path, argv, envp, image_path, strings, arguments, environment);
+
+    file_t* file = nullptr;
+    stat_t st;
+    file_caps_t file_caps;
+    bool has_caps = false;
+
+    if(retval == 0) {
+        retval = resolve_exec_file(image_path, thread->credentials, &file, &st, &file_caps, &has_caps);
+    }
+
+    process_t* child = nullptr;
+
+    if(retval == 0) {
+        child = process_create(parent);
+
+        if(child == nullptr) {
+            retval = -ENOMEM;
+        }
+    }
+
+    if(retval == 0 && 0 == (args.flags & SPAWN_EMPTY_FDS)) {
+        retval = process_fds_copy(child, parent);
+    }
+
+    if(retval == 0 && args.action_count > 0) {
+        retval = spawn_apply_actions(child, image_path, action_list, args.action_count);
+    }
+
+    credentials_t* new_cred = nullptr;
+    binfmt_entry_t entry;
+
+    if(retval == 0) {
+        rlimit_t stack_limit = process_get_rlimit(child, RLIMIT_STACK);
+
+        mutex_acquire(&child->credentials_lock);
+
+        retval = exec_new_cred(child, &st, has_caps, &file_caps, &new_cred);
+
+        if(retval == 0) {
+            retval = load_binary(child->vmspace, file, arguments, environment, new_cred, stack_limit.rlim_cur, &entry);
+
+            if(retval == 0) {
+                process_set_cred(child, new_cred);
+            }
+            else {
+                cred_decref(new_cred);
+            }
+        }
+
+        mutex_release(&child->credentials_lock);
+    }
+
+    if(file) {
+        file_close(file);
+    }
+
+    if(retval == 0 && (args.flags & SPAWN_SETSID)) {
+        pid_t sid = process_group_new_session(child);
+
+        if(sid < 0) {
+            retval = sid;
+        }
+    }
+
+    if(retval == 0 && (args.flags & SPAWN_SETPGID)) {
+        pid_t pgid = args.pgid;
+
+        if(pgid == 0) {
+            pgid = child->pid;
+        }
+
+        retval = process_group_move(parent, child, pgid);
+    }
+
+    thread_t* child_thread = nullptr;
+
+    if(retval == 0) {
+        process_note_exec(child);
+        child_thread = thread_create_spawn(child, thread, entry.address, entry.user_stack);
+
+        if(child_thread == nullptr) {
+            retval = -ENOMEM;
+        }
+    }
+
+    if(retval < 0) {
+        if(child) {
+            process_destroy(child);
+        }
+
+        pslab_free_virt(strings);
+        pslab_free_virt(image_path);
+        return retval;
+    }
+
+    pid_t pid = child->pid;
+
+    sched_enqueue(child_thread);
+
+    pslab_free_virt(strings);
+    pslab_free_virt(image_path);
+
+    return pid;
+}
+
+define_syscall(sys_spawn, SYS_SPAWN, 1);
 
 static ssize_t copyout_rusage(user_addr_t address, const wait_result_t* restrict result)
 {

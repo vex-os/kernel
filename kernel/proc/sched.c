@@ -798,6 +798,26 @@ thread_t* thread_create_sibling(const thread_t* restrict creator, uintptr_t entr
     return thread;
 }
 
+thread_t* thread_create_spawn(process_t* restrict process, const thread_t* restrict creator, uintptr_t entry, uintptr_t stack_top)
+{
+    thread_t* thread = alloc_thread_user(process);
+
+    if(thread && inherit_affinity(thread, creator) < 0) {
+        discard_thread_user(thread);
+        return nullptr;
+    }
+
+    if(thread) {
+        // Before the thread is attached, or a process-wide signal
+        // could pick it for one that its mask is going to block
+        thread->sig_blocked = creator->sig_blocked;
+        arch_thread_setup_user(thread, (void*)(entry), (void*)(stack_top), 0, 0, process->vmspace);
+        attach_thread_user(process, thread);
+    }
+
+    return thread;
+}
+
 thread_t* thread_create_fork(process_t* restrict process, const thread_t* restrict creator, const hart_context_t* restrict ctx)
 {
     thread_t* thread = alloc_thread_user(process);
