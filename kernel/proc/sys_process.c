@@ -146,8 +146,8 @@ static int exec_cred(const credentials_t* restrict credentials, const stat_t* re
     return 0;
 }
 
-static intptr_t exec_image(thread_t* restrict thread, char* restrict image_path, char* restrict strings, user_addr_t path, user_addr_t argv,
-    user_addr_t envp)
+static int copyin_exec_args(user_addr_t path, user_addr_t argv, user_addr_t envp, char* restrict image_path, char* restrict strings,
+    const char** restrict arguments, const char** restrict environment)
 {
     ssize_t copied = user_copyin_str(image_path, path, PATH_MAX);
 
@@ -155,8 +155,6 @@ static intptr_t exec_image(thread_t* restrict thread, char* restrict image_path,
         return copied;
     }
 
-    const char* arguments[BINFMT_ARGS_MAX + 1];
-    const char* environment[BINFMT_ARGS_MAX + 1];
     char* cursor = strings;
 
     int retval = copyin_string_array(argv, arguments, &cursor, strings + PAGE_SIZE);
@@ -165,15 +163,16 @@ static intptr_t exec_image(thread_t* restrict thread, char* restrict image_path,
         retval = copyin_string_array(envp, environment, &cursor, strings + PAGE_SIZE);
     }
 
-    if(retval < 0) {
-        return retval;
-    }
+    return retval;
+}
 
-    process_t* process = thread->process;
-    const credentials_t* credentials = thread->credentials;
-
+/// Opens the image file for exec and reads what exec_cred needs
+/// @note file_open_node takes the node reference into the file on every path
+static int resolve_exec_file(const char* restrict image_path, const credentials_t* restrict credentials, file_t** restrict out_file,
+    stat_t* restrict out_st, file_caps_t* restrict out_caps, bool* restrict out_has_caps)
+{
     vnode_t* node;
-    retval = syscall_resolve_at(AT_FDCWD, image_path, 0, &node);
+    int retval = syscall_resolve_at(AT_FDCWD, image_path, 0, &node);
 
     if(retval < 0) {
         return retval;
@@ -184,18 +183,14 @@ static intptr_t exec_image(thread_t* restrict thread, char* restrict image_path,
         return -EACCES;
     }
 
-    stat_t st;
     retval = vnode_access(node, credentials, X_OK);
 
     if(retval == 0) {
-        retval = vnode_stat(node, &st);
+        retval = vnode_stat(node, out_st);
     }
 
-    file_caps_t file_caps;
-    bool has_caps;
-
     if(retval == 0) {
-        retval = read_file_caps(node, &file_caps, &has_caps);
+        retval = read_file_caps(node, out_caps, out_has_caps);
     }
 
     if(retval < 0) {
@@ -203,42 +198,91 @@ static intptr_t exec_image(thread_t* restrict thread, char* restrict image_path,
         return retval;
     }
 
-    file_t* file;
-    retval = file_open_node(node, O_RDONLY, credentials, &file);
+    return file_open_node(node, O_RDONLY, credentials, out_file);
+}
+
+/// Computes the credentials a new image runs with, from its setid bits and file capabilities
+/// @pre process->credentials_lock is held
+static int exec_new_cred(process_t* restrict process, const stat_t* restrict st, bool has_caps, const file_caps_t* restrict file_caps,
+    credentials_t** restrict out)
+{
+    credentials_t* new_cred = nullptr;
+    int retval;
+
+    if(has_caps) {
+        retval = exec_cred(process->credentials, st, file_caps, &new_cred);
+    }
+    else {
+        retval = exec_cred(process->credentials, st, nullptr, &new_cred);
+    }
 
     if(retval < 0) {
         return retval;
     }
 
+    *out = new_cred;
+
+    return 0;
+}
+
+/// The state every path that installs a new image shares
+static void process_note_exec(process_t* restrict process)
+{
+    signal_actions_exec(process->signal_actions);
+    atomic_fetch_or(&process->flags, PROCESS_DID_EXEC, ATOMIC_RELEASE);
+    process_fds_close_on_exec(process);
+}
+
+static intptr_t exec_image(thread_t* restrict thread, char* restrict image_path, char* restrict strings, user_addr_t path, user_addr_t argv,
+    user_addr_t envp)
+{
+    const char* arguments[BINFMT_ARGS_MAX + 1];
+    const char* environment[BINFMT_ARGS_MAX + 1];
+
+    int retval = copyin_exec_args(path, argv, envp, image_path, strings, arguments, environment);
+
+    process_t* process = thread->process;
+    const credentials_t* credentials = thread->credentials;
+    file_t* file = nullptr;
+    stat_t st;
+    file_caps_t file_caps;
+    bool has_caps = false;
+
+    if(retval == 0) {
+        retval = resolve_exec_file(image_path, credentials, &file, &st, &file_caps, &has_caps);
+    }
+
     // Built aside, so a failure leaves
     // the caller running in its old image
-    vmspace_t* vmspace = vms_create();
-
-    if(vmspace == nullptr) {
-        file_close(file);
-        return -ENOMEM;
-    }
-
-    mutex_acquire(&process->credentials_lock);
-
+    vmspace_t* vmspace = nullptr;
     credentials_t* new_cred = nullptr;
     binfmt_entry_t entry;
-    rlimit_t stack_limit = process_get_rlimit(process, RLIMIT_STACK);
 
-    if(has_caps) {
-        retval = exec_cred(process->credentials, &st, &file_caps, &new_cred);
-    }
-    else {
-        retval = exec_cred(process->credentials, &st, nullptr, &new_cred);
+    if(retval == 0) {
+        vmspace = vms_create();
+
+        if(vmspace == nullptr) {
+            retval = -ENOMEM;
+        }
     }
 
     if(retval == 0) {
-        retval = load_binary(vmspace, file, arguments, environment, new_cred, stack_limit.rlim_cur, &entry);
+        rlimit_t stack_limit = process_get_rlimit(process, RLIMIT_STACK);
+
+        mutex_acquire(&process->credentials_lock);
+
+        retval = exec_new_cred(process, &st, has_caps, &file_caps, &new_cred);
+
+        if(retval == 0) {
+            retval = load_binary(vmspace, file, arguments, environment, new_cred, stack_limit.rlim_cur, &entry);
+        }
+
+        mutex_release(&process->credentials_lock);
     }
 
-    mutex_release(&process->credentials_lock);
-
-    file_close(file);
+    if(file) {
+        file_close(file);
+    }
 
     // The other threads go only once the new image is in place, and not under the
     // credentials lock: one of them may be waiting for it and never get to exit
@@ -251,7 +295,10 @@ static intptr_t exec_image(thread_t* restrict thread, char* restrict image_path,
             cred_decref(new_cred);
         }
 
-        vms_release(vmspace);
+        if(vmspace) {
+            vms_release(vmspace);
+        }
+
         return retval;
     }
 
@@ -261,14 +308,12 @@ static intptr_t exec_image(thread_t* restrict thread, char* restrict image_path,
 
     process_set_vmspace(process, vmspace);
     arch_thread_exec(thread, vmspace, entry.address, entry.user_stack);
-    signal_actions_exec(process->signal_actions);
 
     thread->sig_altstack = 0;
     thread->sig_altstack_size = 0;
     thread->clear_tid = 0; // An address in the image just left
-    atomic_fetch_or(&process->flags, PROCESS_DID_EXEC, ATOMIC_RELEASE);
 
-    process_fds_close_on_exec(process);
+    process_note_exec(process);
 
     return 0;
 }
