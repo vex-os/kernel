@@ -31,6 +31,7 @@ ktest_programs = [
     'process_group',
     'job',
     'exec_threads',
+    'spawn',
     'tlb_shootdown',
     'mmap_flags',
     'mmap',
