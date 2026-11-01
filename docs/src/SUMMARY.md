@@ -29,6 +29,7 @@
 - [Firmware and ACPI](architecture/firmware.md)
 - [IPC](architecture/ipc.md)
 - [Security](architecture/security.md)
+- [Random numbers](architecture/random.md)
 
 # Drivers
 

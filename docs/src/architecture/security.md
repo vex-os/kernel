@@ -2,5 +2,7 @@
 
 > TODO: write this page.
 
-Covers: credentials, capabilities, crypto and the random sources.
+Covers: credentials, capabilities and crypto.
+
+Random numbers have their own page: [Random numbers](random.md).
 

@@ -41,6 +41,10 @@ Use the line anchor for the function or the decision that the text is about.
 Relative links work on GitHub but break in the built book, because the book
 contains only `docs/src`.
 
+## Diagrams
+
+Use a plain ASCII diagram. Keep every line within 70 columns. The page column fits about 80 columns of code on a 1080p screen, so a wider diagram scrolls sideways.
+
 ## Synced tables
 
 A table that must not drift from the code, such as the syscall numbers, can
