@@ -21,3 +21,6 @@ __pycache__/
 ## Ignore test disk images
 *.img
 *.iso
+
+## Ignore the built documentation book
+/docs/book/

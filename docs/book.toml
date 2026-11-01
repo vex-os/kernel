@@ -1,0 +1,13 @@
+[book]
+title = "Vex"
+description = "Architecture guide for the Vex kernel"
+language = "en"
+src = "src"
+
+[build]
+build-dir = "book"
+
+[output.html]
+site-url = "/kernel/"
+git-repository-url = "https://github.com/vex-os/kernel"
+edit-url-template = "https://github.com/vex-os/kernel/edit/main/docs/src/{path}"
