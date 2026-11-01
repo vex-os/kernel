@@ -68,7 +68,7 @@ static uint64_t next_ino = PIPEFS_ROOT_INO + 1;
 
 static void* page_take(void)
 {
-    if(commit_charge(1) < 0) {
+    if(commit_charge(1, false) < 0) {
         return nullptr;
     }
 

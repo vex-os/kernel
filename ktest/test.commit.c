@@ -226,7 +226,7 @@ static void test_noreserve(long room)
     ktest_expect(free_pages(), room);
 }
 
-static void test_noreserve_denied(void)
+static void test_noreserve_denied(long room)
 {
     long child = ktest_syscall1(__k_SYS_FORK, 0);
 
@@ -237,17 +237,21 @@ static void test_noreserve_denied(void)
         caps.effective &= ~__k_CAP_TO_MASK(__k_CAP_VM_NORESERVE);
         ktest_expect(ktest_syscall1(__k_SYS_CAPSET, (long)(&caps)), 0);
 
+        // Without the capability the reserve of the limit is out of reach
+        long denied = free_pages();
+
+        ktest_assert(denied < room);
+        ktest_expect(map_writable(room), -__k_ENOMEM);
+
         // The flag does nothing then, and the pages count as for any other mapping
-        long room = free_pages();
+        ktest_expect(map_anonymous(0, denied + 1, RW, NORESERVE), -__k_ENOMEM);
 
-        ktest_expect(map_anonymous(0, room + 1, RW, NORESERVE), -__k_ENOMEM);
-
-        long half = map_anonymous(0, room / 2, RW, NORESERVE);
+        long half = map_anonymous(0, denied / 2, RW, NORESERVE);
 
         ktest_assert(half > 0);
-        ktest_expect(free_pages(), room - room / 2);
-        ktest_expect(unmap(half, room / 2), 0);
-        ktest_expect(free_pages(), room);
+        ktest_expect(free_pages(), denied - denied / 2);
+        ktest_expect(unmap(half, denied / 2), 0);
+        ktest_expect(free_pages(), denied);
 
         ktest_exit(ktest_result());
     }
@@ -267,7 +271,7 @@ int main(void)
     test_replace(room);
     test_fork(room);
     test_noreserve(room);
-    test_noreserve_denied();
+    test_noreserve_denied(room);
 
     ktest_expect(free_pages(), room);
 

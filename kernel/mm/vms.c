@@ -1,5 +1,7 @@
 #include <vex/assert.h>
+#include <vex/capability.h>
 #include <vex/commit.h>
+#include <vex/cred.h>
 #include <vex/errno.h>
 #include <vex/event.h>
 #include <vex/file.h>
@@ -208,6 +210,15 @@ static bool region_counted(const vm_region_t* restrict region)
     return counts_commit(region, region->vprot);
 }
 
+// The reserve of the commit limit is for
+// the mappings of a CAP_VM_NORESERVE holder
+static bool may_use_reserve(void)
+{
+    thread_t* thread = this_thread();
+
+    return cred_capable(thread->credentials, CAP_VM_NORESERVE);
+}
+
 static size_t region_pages(const vm_region_t* restrict region)
 {
     return page_count(address_diff(region->end, region->start));
@@ -365,7 +376,7 @@ static vm_region_t* grow_stack_locked(vmspace_t* restrict vmspace, virt_addr_t p
 
     size_t pages = page_count(address_diff(stack->start, page));
 
-    if(region_counted(stack) && commit_charge(pages) < 0) {
+    if(region_counted(stack) && commit_charge(pages, may_use_reserve()) < 0) {
         return nullptr;
     }
 
@@ -725,7 +736,7 @@ static vm_region_t* alloc_region(virt_addr_t start, virt_addr_t end, unsigned vp
 
     size_t pages = region_pages(region);
 
-    if(region_counted(region) && commit_charge_replacing(pages, replaced) < 0) {
+    if(region_counted(region) && commit_charge_replacing(pages, replaced, may_use_reserve()) < 0) {
         destroy_region(region);
         return nullptr;
     }
@@ -1060,7 +1071,7 @@ int vms_remap(vmspace_t* restrict vmspace, virt_addr_t start, size_t old_size, s
 
         size_t extra = page_count(new_size - old_size);
 
-        if(in_place && region_counted(region) && commit_charge(extra) < 0) {
+        if(in_place && region_counted(region) && commit_charge(extra, may_use_reserve()) < 0) {
             retval = -ENOMEM;
         }
         else if(in_place) {
@@ -1129,7 +1140,7 @@ int vms_protect(vmspace_t* restrict vmspace, virt_addr_t start, virt_addr_t end,
     }
 
     // The regions stay split when this fails, which changes nothing that a program sees
-    if(gain && commit_charge(gain) < 0) {
+    if(gain && commit_charge(gain, may_use_reserve()) < 0) {
         mutex_release(&vmspace->lock);
         return -ENOMEM;
     }

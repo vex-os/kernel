@@ -1,5 +1,7 @@
+#include <vex/capability.h>
 #include <vex/cmdline.h>
 #include <vex/commit.h>
+#include <vex/cred.h>
 #include <vex/errno.h>
 #include <vex/hrsize.h>
 #include <vex/initcall.h>
@@ -10,6 +12,7 @@
 #include <vex/stat.h>
 #include <vex/stdlib.h>
 #include <vex/string.h>
+#include <vex/thread.h>
 #include <vex/vnode.h>
 
 #include "tmpfs_internal.h"
@@ -221,7 +224,10 @@ int tmpfs_charge(tmpfs_t* restrict tmpfs, size_t pages)
         return -ENOSPC;
     }
 
-    if(commit_charge(pages) < 0) {
+    thread_t* thread = this_thread();
+    bool use_reserve = cred_capable(thread->credentials, CAP_VM_NORESERVE);
+
+    if(commit_charge(pages, use_reserve) < 0) {
         return -ENOSPC;
     }
 
