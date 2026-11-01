@@ -29,6 +29,6 @@ clangd shows it on hover.
 
 ## Status
 
-Most pages are stubs. Until they are written, `docs/kernel/architecture.md` is
-the current description of the kernel, and `CONTRIBUTING.md` holds the build,
-test and style rules.
+The getting-started pages are complete. Most architecture pages are still
+stubs. Until they are complete, `docs/kernel/architecture.md` describes the
+kernel-wide mechanisms, and `CONTRIBUTING.md` holds the full style rules.

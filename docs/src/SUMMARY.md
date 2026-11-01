@@ -6,6 +6,7 @@
 
 - [Build](getting-started/build.md)
 - [Run](getting-started/run.md)
+  - [The test image and kst](getting-started/ktest.md)
 - [Source map](getting-started/source-map.md)
 
 # Architecture
@@ -73,5 +74,5 @@
 
 # Development
 
-- [Testing](development/testing.md)
+- [Writing a test](development/testing.md)
 - [Writing docs](development/writing-docs.md)
