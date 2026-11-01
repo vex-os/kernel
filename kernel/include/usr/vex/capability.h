@@ -14,6 +14,7 @@
 #define __k_CAP_KILL           5 /* Signal any process */
 #define __k_CAP_SETGID         6
 #define __k_CAP_SETUID         7
+#define __k_CAP_IPC_LOCK       14 /* Lock memory */
 #define __k_CAP_SYS_CHROOT     18 /* Change the root directory */
 #define __k_CAP_SYS_ADMIN      21 /* Catch-all for administration, trusted.* extended attributes among it */
 #define __k_CAP_SYS_NICE       23 /* Lower the nice value of a process, and change processes of other users */

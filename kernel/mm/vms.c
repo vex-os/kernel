@@ -779,6 +779,7 @@ vmspace_t* vms_create(void)
     }
 
     vmspace->regions = nullptr;
+    vmspace->locked_bytes = 0;
     mutex_init(&vmspace->lock);
 
     return vmspace;

@@ -1,3 +1,4 @@
+#include <vex/atomic.h>
 #include <vex/capability.h>
 #include <vex/cred.h>
 #include <vex/errno.h>
@@ -7,6 +8,7 @@
 #include <vex/page.h>
 #include <vex/pmap.h>
 #include <vex/process.h>
+#include <vex/rlimit.h>
 #include <vex/shmem.h>
 #include <vex/syscall.h>
 #include <vex/thread.h>
@@ -356,8 +358,7 @@ static intptr_t sys_madvise(user_addr_t addr, uintptr_t length, uintptr_t advice
 
 define_syscall(sys_madvise, SYS_MADVISE, 3);
 
-// UNDONE: Locked pages matter once there is swap. Then
-// this needs a capability and a limit, with RLIMIT_MEMLOCK
+// Nothing is pinned yet; the count only feeds RLIMIT_MEMLOCK
 static intptr_t sys_mlock(user_addr_t addr, uintptr_t length)
 {
     thread_t* thread = this_thread();
@@ -371,14 +372,57 @@ static intptr_t sys_mlock(user_addr_t addr, uintptr_t length)
         return 0;
     }
 
-    return check_range(process->vmspace, user_addr_to_virt(addr), length);
+    virt_addr_t start = user_addr_to_virt(addr);
+    intptr_t retval = check_range(process->vmspace, start, length);
+
+    if(retval < 0 || cred_capable(thread->credentials, CAP_IPC_LOCK)) {
+        return retval;
+    }
+
+    size_t bytes = page_align_up(length);
+    rlimit_t limit = process_get_rlimit(process, RLIMIT_MEMLOCK);
+    size_t locked = atomic_load_n(&process->vmspace->locked_bytes, ATOMIC_RELAXED);
+    bool overflow = locked > SIZE_MAX - bytes;
+
+    if(overflow || locked + bytes > limit.rlim_cur) {
+        return -ENOMEM;
+    }
+
+    atomic_fetch_add(&process->vmspace->locked_bytes, bytes, ATOMIC_RELAXED);
+    return 0;
 }
 
 define_syscall(sys_mlock, SYS_MLOCK, 2);
 
 static intptr_t sys_munlock(user_addr_t addr, uintptr_t length)
 {
-    return sys_mlock(addr, length); // Nothing is locked, so unlocking only checks the range
+    thread_t* thread = this_thread();
+    process_t* process = thread->process;
+
+    if(process == nullptr) {
+        return -ENOSYS;
+    }
+
+    if(length == 0) {
+        return 0;
+    }
+
+    intptr_t retval = check_range(process->vmspace, user_addr_to_virt(addr), length);
+
+    if(retval < 0) {
+        return retval;
+    }
+
+    size_t bytes = page_align_up(length);
+    size_t locked = atomic_load_n(&process->vmspace->locked_bytes, ATOMIC_RELAXED);
+    size_t release = bytes;
+
+    if(locked < bytes) {
+        release = locked;
+    }
+
+    atomic_fetch_sub(&process->vmspace->locked_bytes, release, ATOMIC_RELAXED);
+    return 0;
 }
 
 define_syscall(sys_munlock, SYS_MUNLOCK, 2);
@@ -452,6 +496,7 @@ static intptr_t sys_munlockall(void)
         return -ENOSYS;
     }
 
+    atomic_store_n(&thread->process->vmspace->locked_bytes, 0, ATOMIC_RELAXED);
     return 0;
 }
 

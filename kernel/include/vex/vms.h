@@ -50,6 +50,7 @@ struct vmspace_s {
     vm_region_t* regions;
     pmap_t* pmap;
     mutex_t lock;
+    size_t locked_bytes; // Of mlock calls, with atomic ops: nothing is pinned yet, the count only feeds RLIMIT_MEMLOCK
 };
 
 vmspace_t* vms_create(void) __nodiscard;

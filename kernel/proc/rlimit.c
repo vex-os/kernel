@@ -44,6 +44,8 @@ rlimits_t* rlimits_create(void)
 
     rlimits->limits[RLIMIT_NOFILE].rlim_cur = CONFIG_MAX_FDS;
     rlimits->limits[RLIMIT_NOFILE].rlim_max = CONFIG_MAX_FDS;
+    rlimits->limits[RLIMIT_MEMLOCK].rlim_cur = RLIMIT_MEMLOCK_DEFAULT;
+    rlimits->limits[RLIMIT_MEMLOCK].rlim_max = RLIMIT_MEMLOCK_DEFAULT;
     rlimits->limits[RLIMIT_STACK].rlim_cur = RLIMIT_STACK_DEFAULT;
     rlimits->limits[RLIMIT_SIGPENDING].rlim_cur = RLIMIT_SIGPENDING_DEFAULT;
     rlimits->limits[RLIMIT_SIGPENDING].rlim_max = RLIMIT_SIGPENDING_CEILING;
