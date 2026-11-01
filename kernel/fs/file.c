@@ -409,6 +409,10 @@ off_t file_seek(file_t* restrict file, off_t offset, int origin)
         return -EINVAL;
     }
 
+    if(!file_seekable(file)) {
+        return -ESPIPE;
+    }
+
     off_t moved = vnode_seek(file->node, file, offset, origin);
 
     if(moved >= 0) {
