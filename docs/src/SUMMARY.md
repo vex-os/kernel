@@ -28,7 +28,10 @@
 - [Interrupts](architecture/interrupts.md)
 - [Time](architecture/time.md)
 - [Firmware and ACPI](architecture/firmware.md)
-- [IPC](architecture/ipc.md)
+- [IPC](architecture/ipc/index.md)
+  - [Pipes and FIFOs](architecture/ipc/pipes.md)
+  - [Futexes](architecture/ipc/futexes.md)
+  - [Shared memory](architecture/ipc/shmem.md)
 - [Security](architecture/security.md)
 - [Random numbers](architecture/random.md)
 
@@ -66,7 +69,13 @@
 # Reference
 
 - [Syscalls](reference/syscalls.md)
-- [ABI](reference/abi.md)
+- [ABI](reference/abi/index.md)
+  - [Errors](reference/abi/errors.md)
+  - [ioctls](reference/abi/ioctls.md)
+  - [Serial port](reference/abi/serial.md)
+  - [Terminal](reference/abi/terminal.md)
+  - [Framebuffer](reference/abi/framebuffer.md)
+  - [Device feeds](reference/abi/feeds.md)
 - [Capabilities](reference/capabilities.md)
 - [Device names](reference/device-names.md)
 - [Logging](reference/logging.md)
