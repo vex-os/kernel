@@ -1,0 +1,144 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="880" viewBox="0 0 1000 880" role="img" aria-labelledby="boot-title boot-desc">
+  <title id="boot-title">The boot flow of Vex</title>
+  <desc id="boot-desc">Limine jumps to kmain. The boot hart runs the BSP initcalls with interrupts disabled in five groups: bring-up, memory, platform, devices, and services. The application harts start during the arch stage, wait, and run the SMP initcalls when the multicore stage releases them. After the BSP stream, kmain mounts the root filesystem, loads init, spawns the first process and the watchdog, enables interrupts and lets the scheduler run.</desc>
+  <style>
+    :root {
+      --fg: #1b2430;
+      --muted: #4a5568;
+      --card: #fbfcfe;
+      --card-line: #dbe1ea;
+      --box: #f4f7fb;
+      --box-line: #c9d2de;
+      --container: #b9c3d1;
+      --accent: #2f6feb;
+      --accent-soft: #eaf1ff;
+      --ap: #7a5af8;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --fg: #e6e9ef;
+        --muted: #aab3c2;
+        --card: #1b2029;
+        --card-line: #323b49;
+        --box: #232a35;
+        --box-line: #6b7686;
+        --container: #5c6676;
+        --accent: #8ab4ff;
+        --accent-soft: #1d2a40;
+        --ap: #b9a7ff;
+      }
+    }
+    .card { fill: var(--card); stroke: var(--card-line); stroke-width: 1; }
+    .box { fill: var(--box); stroke: var(--box-line); stroke-width: 1.5; }
+    .box-accent { fill: var(--accent-soft); stroke: var(--accent); stroke-width: 1.5; }
+    .container { fill: none; stroke: var(--container); stroke-width: 1.5; stroke-dasharray: 8 5; }
+    .title { font: 600 22px system-ui, -apple-system, "Segoe UI", sans-serif; fill: var(--fg); }
+    .subtitle { font: 13px system-ui, -apple-system, "Segoe UI", sans-serif; fill: var(--muted); }
+    .phase { font: 600 15px system-ui, -apple-system, "Segoe UI", sans-serif; fill: var(--fg); }
+    .stage { font: 13px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; fill: var(--fg); }
+    .detail { font: 12px system-ui, -apple-system, "Segoe UI", sans-serif; fill: var(--muted); }
+    .lane { font: 600 12px system-ui, -apple-system, "Segoe UI", sans-serif; fill: var(--muted); letter-spacing: 0.06em; }
+    .legend { font: 12px system-ui, -apple-system, "Segoe UI", sans-serif; fill: var(--muted); }
+    .arrow { stroke: var(--accent); stroke-width: 2; fill: none; }
+    .arrow-ap { stroke: var(--ap); stroke-width: 2; fill: none; stroke-dasharray: 6 4; }
+    .head { fill: var(--accent); }
+    .head-ap { fill: var(--ap); }
+  </style>
+  <defs>
+    <marker id="boot-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path class="head" d="M 0 0 L 10 5 L 0 10 z"/>
+    </marker>
+    <marker id="boot-arrow-ap" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path class="head-ap" d="M 0 0 L 10 5 L 0 10 z"/>
+    </marker>
+  </defs>
+
+  <rect class="card" x="8" y="8" width="984" height="864" rx="14"/>
+
+  <text class="title" x="40" y="42">The boot flow</text>
+  <text class="subtitle" x="40" y="66">One boot hart runs the BSP stream. Every other hart joins at the multicore stage.</text>
+
+  <rect class="box" x="40" y="92" width="270" height="70" rx="8"/>
+  <text class="phase" x="56" y="118">Limine (EFI)</text>
+  <text class="detail" x="56" y="140">loads vexsys.elf, builds page tables, jumps</text>
+
+  <rect class="box-accent" x="370" y="92" width="270" height="70" rx="8"/>
+  <text class="phase" x="386" y="118">kmain</text>
+  <text class="detail" x="386" y="140">entry point · interrupts disabled</text>
+
+  <line class="arrow" x1="310" y1="127" x2="362" y2="127" marker-end="url(#boot-arrow)"/>
+  <line class="arrow" x1="505" y1="162" x2="505" y2="188" marker-end="url(#boot-arrow)"/>
+
+  <rect class="container" x="40" y="196" width="620" height="534" rx="10"/>
+  <text class="lane" x="56" y="220">BSP INITCALLS · IF = 0</text>
+
+  <rect class="box" x="56" y="236" width="588" height="76" rx="6"/>
+  <text class="phase" x="72" y="260">Bring-up</text>
+  <text class="stage" x="72" y="282">early → arch → bootinfo</text>
+  <text class="detail" x="72" y="302">boot thread, GDT/IDT, APs start, HHDM, memmap, cmdline</text>
+
+  <rect class="box" x="56" y="324" width="588" height="76" rx="6"/>
+  <text class="phase" x="72" y="348">Memory</text>
+  <text class="stage" x="72" y="370">pmm → slab → mmu → heap</text>
+  <text class="detail" x="72" y="390">pdma, pframe, pslab, commit · slab · own page tables · kmalloc</text>
+
+  <rect class="box" x="56" y="412" width="588" height="76" rx="6"/>
+  <text class="phase" x="72" y="436">Platform</text>
+  <text class="stage" x="72" y="458">irq → timer → syscall → multicore</text>
+  <text class="detail" x="72" y="478">IOAPIC, HPET/PM, dispatch table · idle threads · APs released</text>
+
+  <rect class="box" x="56" y="500" width="588" height="100" rx="6"/>
+  <text class="phase" x="72" y="524">Devices and filesystems</text>
+  <text class="stage" x="72" y="546">bus → vfs → dev → fs → cpudev → binfmt</text>
+  <text class="detail" x="72" y="566">PCI/ACPI · VFS · drivers, partitions, tty · ext2/fat/echfs · ELF64</text>
+  <text class="detail" x="72" y="586">cpudev has no registrations today</text>
+
+  <rect class="box" x="56" y="612" width="588" height="76" rx="6"/>
+  <text class="phase" x="72" y="636">Services</text>
+  <text class="stage" x="72" y="658">services → late</text>
+  <text class="detail" x="72" y="678">random worker · sched_start sends the scheduler IPI</text>
+
+  <text class="lane" x="700" y="220">AP LANE</text>
+
+  <rect class="box" x="700" y="236" width="260" height="70" rx="6"/>
+  <text class="phase" x="716" y="260">init_harts</text>
+  <text class="detail" x="716" y="282">starts each AP through Limine</text>
+
+  <rect class="box" x="700" y="326" width="260" height="70" rx="6"/>
+  <text class="phase" x="716" y="350">hart_park</text>
+  <text class="detail" x="716" y="372">probes CPU caps · waits</text>
+
+  <rect class="box-accent" x="700" y="416" width="260" height="70" rx="6"/>
+  <text class="phase" x="716" y="440">GO</text>
+  <text class="detail" x="716" y="462">run_idle on each hart</text>
+
+  <rect class="box" x="700" y="506" width="260" height="70" rx="6"/>
+  <text class="phase" x="716" y="530">bring_online</text>
+  <text class="detail" x="716" y="552">SMP initcalls · TLB online</text>
+
+  <rect class="box" x="700" y="596" width="260" height="70" rx="6"/>
+  <text class="phase" x="716" y="620">online</text>
+  <text class="detail" x="716" y="642">enables interrupts · hlt</text>
+
+  <line class="arrow-ap" x1="644" y1="274" x2="692" y2="271" marker-end="url(#boot-arrow-ap)"/>
+  <line class="arrow-ap" x1="830" y1="306" x2="830" y2="318" marker-end="url(#boot-arrow-ap)"/>
+  <line class="arrow-ap" x1="830" y1="396" x2="830" y2="408" marker-end="url(#boot-arrow-ap)"/>
+  <line class="arrow-ap" x1="830" y1="486" x2="830" y2="498" marker-end="url(#boot-arrow-ap)"/>
+  <line class="arrow-ap" x1="830" y1="576" x2="830" y2="588" marker-end="url(#boot-arrow-ap)"/>
+  <line class="arrow" x1="644" y1="450" x2="692" y2="450" marker-end="url(#boot-arrow)"/>
+
+  <text class="detail" x="700" y="694">init_hart_boot at multicore/last</text>
+  <text class="detail" x="700" y="712">releases the APs and waits</text>
+
+  <rect class="box-accent" x="40" y="760" width="920" height="70" rx="8"/>
+  <text class="phase" x="56" y="786">After the BSP stream</text>
+  <text class="stage" x="56" y="808">mount root → load init → spawn init + watchdog → sti → scheduler</text>
+  <text class="detail" x="56" y="824">The pending sched_start IPI runs. Init becomes the first user thread.</text>
+
+  <line class="arrow" x1="505" y1="730" x2="505" y2="752" marker-end="url(#boot-arrow)"/>
+
+  <line class="arrow" x1="40" y1="856" x2="76" y2="856"/>
+  <text class="legend" x="86" y="860">BSP</text>
+  <line class="arrow-ap" x1="140" y1="856" x2="176" y2="856"/>
+  <text class="legend" x="186" y="860">AP</text>
+</svg>
