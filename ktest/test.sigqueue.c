@@ -37,7 +37,7 @@ static void on_signal(__k_int32_t sig, struct __k_siginfo* info, void* context)
 static void install(int sig, void (*handler)(__k_int32_t, struct __k_siginfo*, void*))
 {
     struct __k_sigaction action = {};
-    action.sa_handler = (__k_sighandler_t)(handler);
+    action.sa_handler = (__k_sighandler_t)(void*)(handler);
     action.sa_flags = __k_SA_RESTORER | __k_SA_SIGINFO;
     action.sa_restorer = &ktest_signal_restorer;
     ktest_syscall3(__k_SYS_SIGACTION, sig, (long)&action, 0);
