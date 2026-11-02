@@ -742,15 +742,18 @@ void vnode_destroy(vnode_t* restrict node)
 
     vnode_t* parent = node->parent;
 
-    if(node->orphaned) {
-        atomic_fetch_sub(&node->fs->orphans, 1, ATOMIC_RELEASE);
-    }
-
     fcache_deinit(&node->pages);
     file_locks_destroy(node);
 
     if(node->ops->release)
         node->ops->release(node);
+
+    // release takes the node out of the filesystem before this store.
+    // An unmount that sees no orphans then cannot find the node still listed
+    if(node->orphaned) {
+        atomic_fetch_sub(&node->fs->orphans, 1, ATOMIC_RELEASE);
+    }
+
     slab_free(node);
 
     if(parent) {
