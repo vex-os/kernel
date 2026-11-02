@@ -19,6 +19,8 @@
 #define SHARED_RW      (__k_PROT_READ | __k_PROT_WRITE)
 #define FILE_MODE      0644
 #define DIRECTORY_MODE 0755
+#define RACE_PASSES    32
+#define UNMOUNT_TRIES  100000L
 
 static char mount_point[__k_PATH_MAX];
 
@@ -605,6 +607,154 @@ static void test_limits(const char* work_directory)
     ktest_expect(remove_directory(limited), 0);
 }
 
+static long open_unnamed(const char* directory)
+{
+    return ktest_open(directory, __k_O_RDWR | __k_O_TMPFILE, FILE_MODE);
+}
+
+static long count_names(const char* path)
+{
+    alignas(8) char records[RECORD_BUFFER];
+    long fd = ktest_open(path, __k_O_RDONLY, 0);
+
+    if(fd < 0) {
+        return fd;
+    }
+
+    long count = 0;
+
+    for(;;) {
+        long filled = ktest_syscall3(__k_SYS_GETDENTS, fd, (long)(records), sizeof(records));
+
+        if(filled < 0) {
+            ktest_close(fd);
+            return filled;
+        }
+
+        if(filled == 0) {
+            break;
+        }
+
+        long offset = 0;
+
+        while(offset < filled) {
+            const struct __k_dirent* entry = (const struct __k_dirent*)(records + offset);
+
+            count += 1;
+            offset += entry->d_reclen;
+        }
+    }
+
+    ktest_close(fd);
+
+    return count;
+}
+
+// The file is never linked, so the directory listing does not grow, and the mount stays busy until the last close
+static void test_unnamed(const char* work_directory)
+{
+    char point[__k_PATH_MAX];
+    char file[__k_PATH_MAX];
+    char buffer[8] = {};
+    struct __k_stat info;
+
+    path_in(point, work_directory, "unnamed");
+    ktest_expect(make_directory(point), 0);
+    ktest_expect(mount_tmpfs(point, nullptr), 0);
+
+    ktest_expect(count_names(point), 2);
+
+    long fd = open_unnamed(point);
+
+    ktest_assert(fd >= 0);
+    ktest_expect(count_names(point), 2);
+    ktest_expect(ktest_syscall2(__k_SYS_FSTAT, fd, (long)(&info)), 0);
+    ktest_expect(info.st_nlink, 0);
+    ktest_expect(info.st_size, 0);
+    ktest_expect(ktest_write(fd, "nameless", 8), 8);
+    ktest_expect(read_at(fd, buffer, sizeof(buffer), 0), 8);
+    ktest_assert(ktest_bytes_equal(buffer, "nameless", 8));
+
+    path_in(file, point, "real");
+    ktest_close(create_file(point, "real"));
+    ktest_expect(ktest_open(file, __k_O_RDWR | __k_O_TMPFILE, FILE_MODE), -__k_ENOTDIR);
+    ktest_expect(ktest_open(point, __k_O_RDWR | __k_O_TMPFILE | __k_O_CREAT, FILE_MODE), -__k_EINVAL);
+    ktest_expect(remove_file(file), 0);
+
+    ktest_expect(unmount(point), -__k_EBUSY);
+    ktest_close(fd);
+    ktest_expect(unmount(point), 0);
+
+    // The root takes one node, so the second unnamed file does not fit
+    ktest_expect(mount_tmpfs(point, "nodes=2"), 0);
+    fd = open_unnamed(point);
+    ktest_assert(fd >= 0);
+    ktest_expect(open_unnamed(point), -__k_ENOSPC);
+    ktest_close(fd);
+    fd = open_unnamed(point);
+    ktest_assert(fd >= 0);
+    ktest_close(fd);
+    ktest_expect(unmount(point), 0);
+
+    ktest_expect(mount_tmpfs(point, "ro"), 0);
+    ktest_expect(open_unnamed(point), -__k_EROFS);
+    ktest_expect(unmount(point), 0);
+    ktest_expect(remove_directory(point), 0);
+
+    // ext2 has no unnamed files. The root is one
+    ktest_expect(ktest_open("/", __k_O_RDWR | __k_O_TMPFILE, FILE_MODE), -__k_ENOSYS);
+}
+
+static volatile int close_unnamed;
+
+static void close_when_asked(long fd)
+{
+    while(close_unnamed == 0) {
+        ktest_syscall1(__k_SYS_YIELD, 0);
+    }
+
+    ktest_close(fd);
+    ktest_thread_exit();
+}
+
+// Unmount and the last close run together. The close used to drop the busy count
+// before the file left the filesystem, and unmount then followed a freed inode
+static void test_unnamed_unmount(const char* work_directory)
+{
+    char point[__k_PATH_MAX];
+
+    path_in(point, work_directory, "unnamed-race");
+    ktest_expect(make_directory(point), 0);
+
+    for(int pass = 0; pass < RACE_PASSES; ++pass) {
+        ktest_expect(mount_tmpfs(point, nullptr), 0);
+
+        long fd = open_unnamed(point);
+
+        ktest_assert(fd >= 0);
+        close_unnamed = 0;
+
+        long tid = ktest_spawn_joinable(close_when_asked, fd);
+
+        ktest_assert(tid > 0);
+        ktest_expect(unmount(point), -__k_EBUSY);
+
+        close_unnamed = 1;
+
+        long retval = -__k_EBUSY;
+
+        for(long try = 0; try < UNMOUNT_TRIES && retval == -__k_EBUSY; try += 1) {
+            ktest_syscall1(__k_SYS_YIELD, 0);
+            retval = unmount(point);
+        }
+
+        ktest_expect(retval, 0);
+        ktest_join();
+    }
+
+    ktest_expect(remove_directory(point), 0);
+}
+
 int main(void)
 {
     const char* work_directory = ktest_enter_work_directory("tmpfs");
@@ -631,6 +781,8 @@ int main(void)
 
     test_limits(work_directory);
     test_symlink_limits(work_directory);
+    test_unnamed(work_directory);
+    test_unnamed_unmount(work_directory);
 
     return ktest_result();
 }
