@@ -14,8 +14,18 @@ Discoveries so far:
 
 - LLMs in general make way better commit messages than I have ever done in my entire career lmao;  
 
-### 11/2026 experiment - Kimi models
+### 11/2026 experiment - Kimi models and DeepSeek
 
 Anthropic, in their infinite wisdom, decided to go public on the verge of the AI bubble bursting. And to satisfy potential steak holders (I can't remotely call anyone who decides to buy shares a normal word) they, unlike OpenAI and Google, decided that just looking like you ban Russians is not enough and went on a KYC streak. _It's not like they're already losing way more funds than they gain, right? Who in their right mind would want to stop getting money from people?_
 
-So let's experiment with new Moonshot models then...
+So let's experiment with new Moonshot and DeepSeek models then...
+
+Discoveries so far:  
+
+- You can actually buy a Kimi subscription with MIR cards;  
+
+- $20 Kimi subscription eats through 5-hour limits like crazy;
+
+- DeepSeek-V4.1-Flash is surprisingly good at writing documentation if used with DSH. I wonder if it would be also as good at writing code via it. My biggest suspection as of now is that its perceived dumbness exists because people tend to use the model in Web UI instead of a specialized thing like DSH, so far it's been quite good and pleasant to use... 
+
+- All these models seem to suffer from "AI ADHD", they tend to forget certain things, hence a clause defintely not yoinked from Limine's CONTRIBUTING.md in AGENTS.md that _explicitly_ requires an agent to re-read commit section before suggesting a commit message  
