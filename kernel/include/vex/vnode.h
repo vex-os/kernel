@@ -81,6 +81,12 @@ struct vnode_ops_s {
     int (*create)(vnode_t* restrict node, const char* restrict name, unsigned type, mode_t mode, const credentials_t* restrict credentials,
         vnode_t** restrict out);
 
+    /// Makes a regular file that has no name
+    /// @pre node is a directory
+    /// @post On success out has one reference, with fs and ino set, and is not in the vcache. Its link count is 0
+    /// @note The VFS marks it orphaned when it is not cached, so the filesystem stays busy until that reference is dropped
+    int (*tmpfile)(vnode_t* restrict node, mode_t mode, const credentials_t* restrict credentials, vnode_t** restrict out);
+
     /// @param target The vnode the name led to
     /// @note Once its last name is gone, vcache_remove the target under the filesystem's lock, before the entry
     /// can be reused, or a new file there would get this vnode
@@ -224,6 +230,14 @@ int vnode_mknod(vnode_t* restrict node, const char* restrict name, unsigned type
     const credentials_t* restrict credentials, vnode_t** restrict out);
 int vnode_create(vnode_t* restrict node, const char* restrict name, unsigned type, mode_t mode, const credentials_t* restrict credentials,
     vnode_t** restrict out);
+
+/// Makes a regular file that has no name
+/// @pre node is a directory
+/// @post On success out has one reference, with fs and ino set, and is not in the vcache. Its link count is 0
+/// @note Marks the file orphaned when the filesystem leaves it out of the vcache, so the filesystem stays busy
+/// until that reference is dropped
+int vnode_tmpfile(vnode_t* restrict node, mode_t mode, const credentials_t* restrict credentials, vnode_t** restrict out);
+
 int vnode_unlink(vnode_t* restrict node, const char* restrict name, bool directory);
 int vnode_rename(vnode_t* olddir, const char* oldname, vnode_t* newdir, const char* newname);
 int vnode_link(vnode_t* restrict node, const char* restrict name, vnode_t* restrict target);

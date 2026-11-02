@@ -265,6 +265,39 @@ static int create_crossed(vnode_t* restrict node, const char* restrict name, uns
     return cache_created(node, created, out);
 }
 
+static int tmpfile_crossed(vnode_t* restrict node, mode_t mode, const credentials_t* restrict credentials, vnode_t** restrict out)
+{
+    if(node->type != VNODE_DIRECTORY) {
+        return -ENOTDIR;
+    }
+
+    if(node->ops->tmpfile == nullptr) {
+        return -ENOSYS;
+    }
+
+    if(node->fs->readonly) {
+        return -EROFS;
+    }
+
+    vnode_t* created;
+    int retval = node->ops->tmpfile(node, mode, credentials, &created);
+
+    if(retval < 0) {
+        return retval;
+    }
+
+    // Same as the last name of a file going away:
+    // nothing in the cache keeps the filesystem busy
+    if(!vcache_cached(created)) {
+        created->orphaned = true;
+        atomic_fetch_add(&created->fs->orphans, 1, ATOMIC_RELAXED);
+    }
+
+    *out = created;
+
+    return 0;
+}
+
 static int unlink_crossed(vnode_t* restrict node, const char* restrict name, bool directory)
 {
     if(node->ops->unlink == nullptr) {
@@ -882,6 +915,25 @@ int vnode_create(vnode_t* restrict node, const char* restrict name, unsigned typ
     }
 
     retval = create_crossed(target, name, type, mode & ~S_IFMT, credentials, out);
+
+    vnode_decref(target);
+
+    return retval;
+}
+
+int vnode_tmpfile(vnode_t* restrict node, mode_t mode, const credentials_t* restrict credentials, vnode_t** restrict out)
+{
+    kassert(node);
+    kassert(credentials);
+
+    vnode_t* target;
+    int retval = vfs_cross_mount(node, &target);
+
+    if(retval < 0) {
+        return retval;
+    }
+
+    retval = tmpfile_crossed(target, mode & ~S_IFMT, credentials, out);
 
     vnode_decref(target);
 

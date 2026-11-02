@@ -411,6 +411,49 @@ static int tmpfs_vnode_create(vnode_t* restrict node, const char* restrict name,
     return 0;
 }
 
+static int tmpfs_vnode_tmpfile(vnode_t* restrict node, mode_t mode, const credentials_t* restrict credentials, vnode_t** restrict out)
+{
+    tmpfs_t* tmpfs = tmpfs_of(node);
+    tmpfs_inode_t* parent = node->ctxdata;
+
+    mutex_acquire(&tmpfs->lock);
+
+    // As for create: a removed directory
+    // is not a place to make a file
+    if(parent->nlink == 0) {
+        mutex_release(&tmpfs->lock);
+        return -ENOENT;
+    }
+
+    gid_t gid = credentials->egid;
+    mode &= MODE_MASK;
+
+    if(parent->mode & S_ISGID) {
+        gid = parent->gid;
+    }
+
+    vnode_t* created;
+    int retval = tmpfs_node_alloc(node->fs, VNODE_FILE, mode, credentials->euid, gid, &created);
+
+    if(retval == 0) {
+        tmpfs_inode_t* inode = created->ctxdata;
+
+        // The allocator's reference belongs to the
+        // caller. A name would keep it for the filesystem
+        inode->nlink = 0;
+    }
+
+    mutex_release(&tmpfs->lock);
+
+    if(retval < 0) {
+        return retval;
+    }
+
+    *out = created;
+
+    return 0;
+}
+
 static int tmpfs_vnode_mknod(vnode_t* restrict node, const char* restrict name, unsigned type, mode_t mode, dev_t rdev,
     const credentials_t* restrict credentials, vnode_t** restrict out)
 {
@@ -926,6 +969,7 @@ const vnode_ops_t tmpfs_vnode_ops = {
     .lookup = &tmpfs_vnode_lookup,
     .iterate = &tmpfs_vnode_iterate,
     .create = &tmpfs_vnode_create,
+    .tmpfile = &tmpfs_vnode_tmpfile,
     .mknod = &tmpfs_vnode_mknod,
     .unlink = &tmpfs_vnode_unlink,
     .rename = &tmpfs_vnode_rename,
