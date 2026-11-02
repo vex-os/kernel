@@ -160,12 +160,52 @@ int file_open_node(vnode_t* restrict node, unsigned flags, const credentials_t* 
     return 0;
 }
 
+// The path names the directory that holds the file. The file itself has no name
+static int open_tmpfile(vnode_t* restrict base_dir, const char* restrict path, unsigned flags, mode_t mode,
+    const credentials_t* restrict credentials, file_t** restrict out)
+{
+    if(flags & (O_CREAT | O_EXCL)) {
+        return -EINVAL;
+    }
+
+    vnode_t* directory;
+    int retval = path_resolve_at(base_dir, path, 0, credentials, &directory);
+
+    if(retval < 0) {
+        return retval;
+    }
+
+    if(directory->type != VNODE_DIRECTORY) {
+        vnode_decref(directory);
+        return -ENOTDIR;
+    }
+
+    retval = vnode_access(directory, credentials, W_OK | X_OK);
+
+    if(retval == 0) {
+        vnode_t* created;
+        retval = vnode_tmpfile(directory, mode, credentials, &created);
+
+        if(retval == 0) {
+            retval = file_open_node(created, flags, credentials, out);
+        }
+    }
+
+    vnode_decref(directory);
+
+    return retval;
+}
+
 int file_open(vnode_t* restrict base_dir, const char* restrict path, unsigned flags, mode_t mode, const credentials_t* restrict credentials,
     file_t** restrict out)
 {
     // Both access mode bits set stand for no mode at all
     if(path == nullptr || (flags & O_ACCMODE) == O_ACCMODE) {
         return -EINVAL;
+    }
+
+    if(flags & O_TMPFILE) {
+        return open_tmpfile(base_dir, path, flags, mode, credentials, out);
     }
 
     // The name itself must be new, so a

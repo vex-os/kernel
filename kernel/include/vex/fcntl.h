@@ -14,6 +14,7 @@
 #define O_DIRECTORY __k_O_DIRECTORY
 #define O_NOFOLLOW  __k_O_NOFOLLOW
 #define O_CLOEXEC   __k_O_CLOEXEC
+#define O_TMPFILE   __k_O_TMPFILE
 
 #define F_DUPFD         __k_F_DUPFD
 #define F_GETFD         __k_F_GETFD

@@ -15,6 +15,7 @@
 #define __k_O_DIRECTORY ((__k_mode_t)(0x0080))
 #define __k_O_NOFOLLOW  ((__k_mode_t)(0x0100))
 #define __k_O_CLOEXEC   ((__k_mode_t)(0x0200))
+#define __k_O_TMPFILE   ((__k_mode_t)(0x0400)) /* A new file with no name, in the directory the path names */
 
 #define __k_F_DUPFD         0
 #define __k_F_GETFD         1
