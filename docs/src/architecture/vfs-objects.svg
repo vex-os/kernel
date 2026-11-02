@@ -1,0 +1,109 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="470" viewBox="0 0 960 470" role="img" aria-labelledby="vfs-objects-title vfs-objects-desc">
+  <title id="vfs-objects-title">The objects of the VFS</title>
+  <desc id="vfs-objects-desc">A file points to a vnode. The cache entry maps the pair of filesystem and inode number to the same vnode. The vnode points to its mounted filesystem, to its parent directory and to the ops table of that filesystem. The mounted filesystem points to its root vnode.</desc>
+  <style>
+    :root {
+      --fg: #1b2430;
+      --muted: #4a5568;
+      --note: #2d3748;
+      --card: #fbfcfe;
+      --card-line: #dbe1ea;
+      --box: #f4f7fb;
+      --box-line: #c9d2de;
+      --accent: #2f6feb;
+      --accent-soft: #eaf1ff;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --fg: #e6e9ef;
+        --muted: #aab3c2;
+        --note: #c9d1de;
+        --card: #1b2029;
+        --card-line: #323b49;
+        --box: #232a35;
+        --box-line: #6b7686;
+        --accent: #8ab4ff;
+        --accent-soft: #1d2a40;
+      }
+    }
+    .card { fill: var(--card); stroke: var(--card-line); stroke-width: 1; }
+    .box { fill: var(--box); stroke: var(--box-line); stroke-width: 1.5; }
+    .box-accent { fill: var(--accent-soft); stroke: var(--accent); stroke-width: 1.5; }
+    .title { font: 600 22px system-ui, -apple-system, "Segoe UI", sans-serif; fill: var(--fg); }
+    .subtitle { font: 13px system-ui, -apple-system, "Segoe UI", sans-serif; fill: var(--muted); }
+    .label { font: 600 11px system-ui, -apple-system, "Segoe UI", sans-serif; fill: var(--muted); letter-spacing: 0.08em; }
+    .code { font: 13px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; fill: var(--fg); }
+    .small { font: 11px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; fill: var(--muted); }
+    .note { font: 13px system-ui, -apple-system, "Segoe UI", sans-serif; fill: var(--note); }
+    .arrow { stroke: var(--accent); stroke-width: 2; fill: none; }
+    .head { fill: var(--accent); }
+  </style>
+  <defs>
+    <marker id="vfs-objects-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path class="head" d="M 0 0 L 10 5 L 0 10 z"/>
+    </marker>
+  </defs>
+
+  <rect class="card" x="8" y="8" width="944" height="454" rx="14"/>
+
+  <text class="title" x="40" y="44">The objects of the VFS</text>
+  <text class="subtitle" x="40" y="68">The cache maps an inode number to a vnode. A name is not a key.</text>
+
+  <rect class="box" x="25" y="95" width="250" height="145" rx="8"/>
+  <text class="label" x="41" y="119">OPEN FILE</text>
+  <text class="code" x="41" y="146">struct file_s</text>
+  <text class="code" x="41" y="170">file-&gt;node</text>
+  <text class="code" x="41" y="192">file-&gt;offset</text>
+  <text class="code" x="41" y="214">file-&gt;flags, mode</text>
+  <text class="code" x="41" y="236">file-&gt;refcount</text>
+
+  <rect class="box" x="25" y="265" width="250" height="125" rx="8"/>
+  <text class="label" x="41" y="289">CACHE ENTRY</text>
+  <text class="code" x="41" y="316">key: fs + ino</text>
+  <text class="code" x="41" y="338">entry-&gt;node</text>
+  <text class="code" x="41" y="360">unused, pinned</text>
+
+  <rect class="box-accent" x="350" y="105" width="280" height="250" rx="8"/>
+  <text class="label" x="366" y="129">VNODE (ONE INODE)</text>
+  <text class="code" x="366" y="156">struct vnode_s</text>
+  <text class="code" x="366" y="180">fs, ino, type, refcount</text>
+  <text class="code" x="366" y="202">ops</text>
+  <text class="code" x="366" y="224">parent</text>
+  <text class="code" x="366" y="246">mounted_fs</text>
+  <text class="code" x="366" y="268">pages (the file cache)</text>
+  <text class="code" x="366" y="290">locks, special_ops</text>
+  <text class="small" x="366" y="322">refcount stops at zero: the</text>
+  <text class="small" x="366" y="340">cache decides if it lives on</text>
+
+  <rect class="box" x="700" y="95" width="235" height="155" rx="8"/>
+  <text class="label" x="716" y="119">MOUNTED FILESYSTEM</text>
+  <text class="code" x="716" y="146">struct vfs_s</text>
+  <text class="code" x="716" y="170">root</text>
+  <text class="code" x="716" y="192">mountpoint</text>
+  <text class="code" x="716" y="214">volume, dev</text>
+  <text class="code" x="716" y="236">unmounting, orphans</text>
+
+  <rect class="box" x="700" y="280" width="235" height="110" rx="8"/>
+  <text class="label" x="716" y="304">OPS TABLE</text>
+  <text class="code" x="716" y="331">vnode_ops_t</text>
+  <text class="small" x="716" y="355">lookup, create, unlink,</text>
+  <text class="small" x="716" y="373">read, write, ...</text>
+
+  <line class="arrow" x1="275" y1="160" x2="340" y2="160" marker-end="url(#vfs-objects-arrow)"/>
+  <text class="small" x="283" y="150">node</text>
+
+  <line class="arrow" x1="275" y1="320" x2="340" y2="320" marker-end="url(#vfs-objects-arrow)"/>
+  <text class="small" x="283" y="310">node</text>
+
+  <line class="arrow" x1="630" y1="160" x2="690" y2="160" marker-end="url(#vfs-objects-arrow)"/>
+  <text class="small" x="638" y="150">fs</text>
+
+  <line class="arrow" x1="700" y1="216" x2="640" y2="216" marker-end="url(#vfs-objects-arrow)"/>
+  <text class="small" x="638" y="234">root</text>
+
+  <line class="arrow" x1="630" y1="330" x2="690" y2="330" marker-end="url(#vfs-objects-arrow)"/>
+  <text class="small" x="638" y="320">ops</text>
+
+  <text class="note" x="40" y="420">A file and a vnode carry a reference count. A cache entry does not.</text>
+  <text class="note" x="40" y="444">A vnode of a directory also carries a reference to its parent directory.</text>
+</svg>
