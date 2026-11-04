@@ -60,15 +60,14 @@ The sections below group the work by directory.
 
 1. `boot-1`, make the test init sync and unmount before it ends the run. The
    item is in the bootstrap repository. The kernel keeps the panic.
-2. `boot-2`, reserve the two shutdown numbers. The handlers come later.
-3. `proc-1`, run a woken thread before the current thread. It makes nice a
+2. `proc-1`, run a woken thread before the current thread. It makes nice a
    priority and closes the last two scheduler items of the old plan.
-4. `mm-2`, finish `mlockall`. It is small and closes the last `UNDONE` of the
+3. `mm-2`, finish `mlockall`. It is small and closes the last `UNDONE` of the
    memory subsystem.
-5. `test-2`, so that the shutdown test has a place in the run order.
-6. `doc-1` and `doc-2` continue in the background. Write a page when the
+4. `test-2`, so that the shutdown test has a place in the run order.
+5. `doc-1` and `doc-2` continue in the background. Write a page when the
    code of its subsystem changes.
-7. The mlibc session starts in parallel. It needs no new kernel call.
+6. The mlibc session starts in parallel. It needs no new kernel call.
 
 ## Boot and init
 
@@ -86,7 +85,6 @@ the kernel. There is no declared dependency graph between the directories.
 | ID | Work | Cost | Status |
 | --- | --- | --- | --- |
 | boot-1 | Make the test init sync and unmount before it ends the run (bootstrap repository) | S | now |
-| boot-2 | Reserve `SYS_REBOOT` and `SYS_SHUTDOWN` in the ABI | S | now |
 | boot-3 | Implement `SYS_REBOOT` and `SYS_SHUTDOWN` | M | later |
 | boot-4 | Time out a hart that never reports online | S | later |
 | boot-5 | Give the empty `cpudev` stage its calls, or drop the stage | S | later |
@@ -107,17 +105,13 @@ the kernel. There is no declared dependency graph between the directories.
   left behind readable, and that is a different case from a clean end of the
   run. Done when a test image whose `kst` unmounts before it ends the run
   passes `e2fsck -fn`, and the panic path still syncs.
-- **boot-2.** Reserve two numbers in the system block of
-  `usr/vex/syscall.h`: `REBOOT` at `0x12B` and `SHUTDOWN` at `0x12C`. Write
-  no handler. The dispatcher gives `ENOSYS` for an empty slot. This fixes the
-  numbers before a program depends on them.
 - **boot-3.** Add the handlers. Both need `CAP_SYS_ADMIN`. Both sync the
   filesystems first and do not return on success. A restart uses the ACPI
   reset register. A power off uses `_S5` or the fixed feature register. If
   ACPI is absent, a restart uses a triple fault. The handler neither stops the
   services nor unmounts: the caller does that first and then asks for the power
-  off, as a system manager does before a shutdown call. Depends on `boot-2`.
-  mlibc does not need the calls.
+  off, as a system manager does before a shutdown call. The ABI numbers are
+  `0x12B` and `0x12C`. mlibc does not need the calls.
 - **boot-4.** `init_hart_boot` has no timeout. A hart that never reports
   online hangs the boot. The protocol parks each AP until the kernel writes
   `goto_address` with a release store. The AP then runs on a bootloader stack
@@ -641,7 +635,7 @@ takes over the machine runs last.
 
 ## Order of work
 
-**Wave 1, now.** `boot-1`, `boot-2`, `proc-1`, `mm-2`, `test-2`. Start the
+**Wave 1, now.** `boot-1`, `proc-1`, `mm-2`, `test-2`. Start the
 mlibc session at the same time. These items make the test loop clean and make
 nice a priority. No item blocks mlibc.
 

@@ -7,8 +7,8 @@ reads, and the kernel function that runs it. The mechanism is in
 The numbers come from `kernel/include/usr/vex/syscall.h`. Each subsystem owns a
 block of 32 numbers that starts at a multiple of `0x20`. The table gives the
 calls of each block in number order and leaves out the numbers that no call
-uses. A call with such a number fails with `ENOSYS`. Every number in the
-header has a handler.
+uses. A call with such a number fails with `ENOSYS`. A number in the header
+without a registered handler fails with `ENOSYS` too.
 
 ## Conventions
 
@@ -188,3 +188,5 @@ header has a handler.
 | `0x128` | [`SYS_SETRLIMIT`](https://github.com/vex-os/kernel/blob/main/kernel/proc/sys_rlimit.c#L39) | `uintptr_t resource, user_addr_t in` |
 | `0x129` | [`SYS_GETRUSAGE`](https://github.com/vex-os/kernel/blob/main/kernel/proc/sys_rlimit.c#L74) | `intptr_t who, user_addr_t out` |
 | `0x12A` | [`SYS_GETRANDOM`](https://github.com/vex-os/kernel/blob/main/kernel/proc/sys_random.c#L16) | `user_addr_t buffer, size_t size, uintptr_t flags` |
+| `0x12B` | `SYS_REBOOT` | reserved; `ENOSYS` |
+| `0x12C` | `SYS_SHUTDOWN` | reserved; `ENOSYS` |
