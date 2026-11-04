@@ -410,7 +410,7 @@ names are unique. An interface is the driver's to remove.
   A modem consumer needs both.
 - **drv-11.** `fb_boot_claim` refuses a second claim, because a removal
   would leave a gap in the names
-  ([fb_interface.c](https://github.com/vex-os/kernel/blob/main/kernel/dev/fb_interface.c#L563)).
+  ([fb_interface.c](https://github.com/vex-os/kernel/blob/main/kernel/dev/fb_interface.c#L562)).
   Remove the added interfaces and their names instead.
 - **drv-12, drv-13 and drv-15** are parked. A pty belongs to a terminal
   multiplexer on a KMS console. A device class belongs to a power-managed
@@ -448,7 +448,7 @@ clock source. The RTC is UTC, with no zone.
   A hart whose local timer stops in idle loses its tick. Add a broadcast or
   a per-hart fallback timer for idle. `time-5` needs it.
 - **time-2.** `hpet_offline` refuses to remove the active source
-  ([hpet.c](https://github.com/vex-os/kernel/blob/main/kernel/arch/amd64/time/hpet.c#L86)).
+  ([hpet.c](https://github.com/vex-os/kernel/blob/main/kernel/arch/amd64/time/hpet.c#L93)).
   Switch to another source first.
 - **time-3.** The realtime and monotonic clocks alias the raw and coarse
   clocks, because the kernel steps and never slews
@@ -583,7 +583,7 @@ build, but no code exists.
 | arch-1 | A riscv64 port | L | parked |
 | arch-2 | An aarch64 port | L | parked |
 | arch-3 | x2APIC mode, and ask Limine for it | M | later |
-| arch-4 | Match a CPU device by ACPI UID, not LAPIC ID | S | later |
+| arch-4 | No change: the CPU device match already goes through the MADT | S | parked |
 
 **Notes.**
 
@@ -599,12 +599,13 @@ build, but no code exists.
   says whether the mode is on. A 32-bit LAPIC ID is not enough for a large
   machine, and the boot must not fail on firmware that already turned the
   mode on.
-- **arch-4.** `find_hart` compares the ACPI UID of the CPU device with the
-  LAPIC ID ([cpu.c](https://github.com/vex-os/kernel/blob/main/kernel/arch/amd64/core/cpu.c#L15)).
-  The protocol gives `processor_id` (the ACPI UID) and `lapic_id` as
-  separate fields. Store both in `hart_local_t`, match the device by the
-  UID, and use the LAPIC ID only for IPIs. The two values usually agree, so
-  this bug appears only on some firmware.
+- **arch-4.** A survey found no bug here. `fwnode_get_cpu_id` maps the
+  ACPI `_UID` through the MADT and returns the LAPIC ID of its entry
+  ([acpi_fwnode.c](https://github.com/vex-os/kernel/blob/main/kernel/firmware/acpi/acpi_fwnode.c#L201)),
+  and `find_hart` compares that with the LAPIC ID of the hart
+  ([cpu.c](https://github.com/vex-os/kernel/blob/main/kernel/arch/amd64/core/cpu.c#L16)).
+  Both sides are LAPIC IDs, so the match is already correct. Storing the
+  ACPI UID in `hart_local_t` would only skip the MADT walk. Parked.
 
 ## Tests and docs
 
@@ -651,8 +652,7 @@ path, the first virtio support and the TSC frequency from the bootloader.
 **Wave 3, later.** `boot-3`, `boot-4`, `boot-5`, `proc-3`, `proc-4`,
 `proc-5`, `sig-1`, `mm-3`, `mm-4`, `fs-1`, `fs-3`, `fs-4`, `fs-5`, `fs-7`,
 `fs-8`, `drv-4` to `drv-9`, `drv-11`, `drv-14`, `time-1`, `time-2`, `time-6`,
-`ipc-1`, `ipc-3`, `rnd-1`, `rnd-3`, `fw-1`, `fw-2`, `fw-4`, `arch-3` and
-`arch-4`.
+`ipc-1`, `ipc-3`, `rnd-1`, `rnd-3`, `fw-1`, `fw-2`, `fw-4` and `arch-3`.
 
 **Wave 4, when asked.** The parked items. A parked item needs a user, a
 machine or a specification before it starts.
@@ -698,8 +698,10 @@ The docs work (`doc-1`, `doc-2`) runs with every wave.
   about the commit limit, not about frames.
 - The kernel asks for Limine base revision 6. The MP request sends no flags
   until `arch-3`, so x2APIC stays off.
-- A CPU device matches its hart by the ACPI UID, not by the LAPIC ID. The
-  protocol gives them as separate fields.
+- A CPU device matches its hart through the MADT: the ACPI `_UID` of the
+  device picks the MADT entry, and its LAPIC ID picks the hart. Both sides
+  of the compare are LAPIC IDs, so there is no UID/LAPIC mismatch to fix
+  (`arch-4`).
 - `SYS_PREADV`, `SYS_PWRITEV` and `SYS_SPAWN` have no caller in mlibc. Their
   ABI is the kernel's own and not the Linux one, so each gets a header of its
   own under `include/usr/vex/` when a user appears. mlibc runs `posix_spawn`
@@ -716,7 +718,7 @@ The docs work (`doc-1`, `doc-2`) runs with every wave.
   call `sync` and `umount`.
 - The Limine protocol text (base revision 6) was read for the MP, stack
   size, TSC frequency, device tree, entropy and IOMMU features. The kernel
-  side of `arch-3`, `arch-4`, `boot-4`, `time-7` and `fw-3` was checked
+  side of `arch-3`, `boot-4`, `time-7` and `fw-3` was checked
   against it. The x2APIC code path was not read.
 - Whether a cache-only readahead fits `fcache` without a new lock.
 - The virtio device versions that QEMU offers with the current machine
