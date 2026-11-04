@@ -43,7 +43,7 @@ The sections below group the work by directory.
 | Processes | fork, exec, spawn, wait, job control, itimers, CPU time | no ptrace |
 | Scheduling | `SCHED_OTHER`, nice changes the slice, affinity | nice is not a priority, no load balance |
 | Signals | full set, queue, alt stack, `sigtimedwait` | `SA_NOCLDWAIT` ignored, no core file |
-| Memory | pmm, slab, pmap, vms, strict commit, shmem | no swap, no `RLIMIT_AS`, partial `mlockall` |
+| Memory | pmm, slab, pmap, vms, strict commit, shmem | no swap, no `RLIMIT_AS` |
 | VFS | vnode, vcache, mount, path, file, locks | device node outside devfs, one rename lock |
 | Filesystems | devfs, tmpfs, ext2, FAT, echfs | ext2 device nodes, FAT Unicode names |
 | Devices | device tree, one worker, block and char, tty | no pty, no NVMe, no virtio, one worker |
@@ -62,12 +62,10 @@ The sections below group the work by directory.
    item is in the bootstrap repository. The kernel keeps the panic.
 2. `proc-1`, run a woken thread before the current thread. It makes nice a
    priority and closes the last two scheduler items of the old plan.
-3. `mm-2`, finish `mlockall`. It is small and closes the last `UNDONE` of the
-   memory subsystem.
-4. `test-2`, so that the shutdown test has a place in the run order.
-5. `doc-1` and `doc-2` continue in the background. Write a page when the
+3. `test-2`, so that the shutdown test has a place in the run order.
+4. `doc-1` and `doc-2` continue in the background. Write a page when the
    code of its subsystem changes.
-6. The mlibc session starts in parallel. It needs no new kernel call.
+5. The mlibc session starts in parallel. It needs no new kernel call.
 
 ## Boot and init
 
@@ -246,7 +244,6 @@ takes no commit charge. `mlock` counts bytes and pins nothing.
 | ID | Work | Cost | Status |
 | --- | --- | --- | --- |
 | mm-1 | Give `MADV_WILLNEED` a readahead | S to M | next |
-| mm-2 | Apply `MCL_CURRENT` and `MCL_FUTURE` in `mlockall` | S to M | now |
 | mm-3 | Reach device memory of another address space | M | later |
 | mm-4 | Enforce `RLIMIT_AS` | S | later |
 | mm-5 | Huge pages for user memory | L | parked |
@@ -269,15 +266,6 @@ takes no commit charge. `mlock` counts bytes and pins nothing.
   evicts clean pages, so readahead cannot leak memory
   ([fcache.c](https://github.com/vex-os/kernel/blob/main/kernel/fs/fcache.c#L994)).
   Decide the form first. mlibc does not need the call.
-- **mm-2.** `locked_bytes` and `RLIMIT_MEMLOCK` work
-  ([sys_mman.c](https://github.com/vex-os/kernel/blob/main/kernel/proc/sys_mman.c#L361)).
-  `mlockall` checks the flags and does nothing
-  ([sys_mman.c](https://github.com/vex-os/kernel/blob/main/kernel/proc/sys_mman.c#L471)).
-  For `MCL_CURRENT`, walk the regions and charge their sizes. For
-  `MCL_FUTURE`, add a `locked` bit to `vm_region_t`, as `noreserve` is.
-  `alloc_region` and `free_region` charge and uncharge. A fork copies the
-  total. With no swap, the pages are counted, not pinned. Done when a ktest
-  checks the limits and the `ENOMEM` path.
 - **mm-3.** `access_begin_locked` refuses device memory of another address
   space, because the mapping is not loaded
   ([vms.c](https://github.com/vex-os/kernel/blob/main/kernel/mm/vms.c#L519)).
@@ -635,7 +623,7 @@ takes over the machine runs last.
 
 ## Order of work
 
-**Wave 1, now.** `boot-1`, `proc-1`, `mm-2`, `test-2`. Start the
+**Wave 1, now.** `boot-1`, `proc-1`, `test-2`. Start the
 mlibc session at the same time. These items make the test loop clean and make
 nice a priority. No item blocks mlibc.
 
@@ -703,8 +691,7 @@ The docs work (`doc-1`, `doc-2`) runs with every wave.
 
 ## Not verified
 
-- The cost estimates. Only `proc-1`, `boot-1` and `mm-2` were studied in
-  detail.
+- The cost estimates. Only `proc-1` and `boot-1` were studied in detail.
 - The ext2, FAT and echfs internals beyond the `UNDONE` lines.
 - The ACPI reset and power-off path with uACPI. `boot-3` needs a probe on
   QEMU first.

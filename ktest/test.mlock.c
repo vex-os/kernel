@@ -1,7 +1,10 @@
+#include <vex/capability.h>
 #include <vex/errno.h>
 #include <vex/fcntl.h>
 #include <vex/mman.h>
+#include <vex/resource.h>
 #include <vex/syscall.h>
+#include <vex/wait.h>
 
 #include "ktest.h"
 
@@ -141,10 +144,65 @@ static void test_lock(long base)
     ktest_expect(lock(base + 2 * PAGE_SIZE, 2 * PAGE_SIZE), 0);
 }
 
-static void test_lock_all(void)
+static long wait_status(long child)
 {
+    int wstatus = -1;
+
+    ktest_syscall4(__k_SYS_WAITPID, child, (long)(&wstatus), 0, 0);
+
+    return wstatus;
+}
+
+static void test_lock_future_limit(void)
+{
+    long child = ktest_syscall1(__k_SYS_FORK, 0);
+
+    if(child == 0) {
+        struct __k_caps caps;
+
+        ktest_syscall1(__k_SYS_CAPGET, (long)(&caps));
+        caps.effective &= ~__k_CAP_TO_MASK(__k_CAP_IPC_LOCK);
+        ktest_expect(ktest_syscall1(__k_SYS_CAPSET, (long)(&caps)), 0);
+
+        struct __k_rlimit tight = {};
+
+        tight.rlim_cur = LENGTH;
+        tight.rlim_max = LENGTH;
+
+        ktest_expect(ktest_syscall2(__k_SYS_SETRLIMIT, __k_RLIMIT_MEMLOCK, (long)(&tight)), 0);
+        ktest_expect(ktest_syscall1(__k_SYS_MLOCKALL, __k_MCL_FUTURE), 0);
+
+        long extra = ktest_syscall6(__k_SYS_MMAP, 0, LENGTH, __k_PROT_READ | __k_PROT_WRITE, __k_MAP_PRIVATE | __k_MAP_ANONYMOUS, -1, 0);
+
+        ktest_assert(extra > 0);
+
+        ktest_expect(ktest_syscall6(__k_SYS_MMAP, 0, PAGE_SIZE, __k_PROT_READ | __k_PROT_WRITE, __k_MAP_PRIVATE | __k_MAP_ANONYMOUS, -1, 0),
+            -__k_ENOMEM);
+
+        ktest_syscall1(__k_SYS_EXIT, ktest_result());
+    }
+
+    ktest_expect(wait_status(child), __k_W_EXITCODE(0, 0));
+}
+
+static void test_lock_all(long base)
+{
+    struct __k_rlimit high = {};
+
+    high.rlim_cur = 1UL << 30;
+    high.rlim_max = 1UL << 30;
+
+    ktest_expect(ktest_syscall1(__k_SYS_MUNLOCKALL, 0), 0);
+    ktest_expect(ktest_syscall2(__k_SYS_SETRLIMIT, __k_RLIMIT_MEMLOCK, (long)(&high)), 0);
+
     ktest_expect(ktest_syscall1(__k_SYS_MLOCKALL, __k_MCL_CURRENT), 0);
+    ktest_expect(ktest_syscall1(__k_SYS_MUNLOCKALL, 0), 0);
+
     ktest_expect(ktest_syscall1(__k_SYS_MLOCKALL, __k_MCL_FUTURE), 0);
+
+    test_lock_future_limit();
+
+    ktest_expect(ktest_syscall2(__k_SYS_SETRLIMIT, __k_RLIMIT_MEMLOCK, (long)(&high)), 0);
     ktest_expect(ktest_syscall1(__k_SYS_MLOCKALL, __k_MCL_CURRENT | __k_MCL_FUTURE), 0);
     ktest_expect(ktest_syscall1(__k_SYS_MLOCKALL, __k_MCL_CURRENT | __k_MCL_ONFAULT), 0);
 
@@ -154,6 +212,8 @@ static void test_lock_all(void)
     ktest_expect(ktest_syscall1(__k_SYS_MLOCKALL, 8), -__k_EINVAL);
 
     ktest_expect(ktest_syscall1(__k_SYS_MUNLOCKALL, 0), 0);
+
+    (void)(base);
 }
 
 int main(void)
@@ -166,7 +226,7 @@ int main(void)
     test_dontneed_anonymous(base);
     test_dontneed_file();
     test_lock(base);
-    test_lock_all();
+    test_lock_all(base);
 
     return ktest_result();
 }

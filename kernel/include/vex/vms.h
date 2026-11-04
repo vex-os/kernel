@@ -40,6 +40,7 @@ struct vm_region_s {
     bool may_write;
     bool device;
     bool noreserve;
+    bool locked;              // The region counts against RLIMIT_MEMLOCK; nothing is pinned yet
     bool grows_down;          // A stack: a fault under it moves start down, as far as grow_floor
     virt_addr_t grow_floor;   // The lowest start of a stack
     vm_region_t* device_next; // In the list of device regions vms_revoke walks
@@ -50,7 +51,8 @@ struct vmspace_s {
     vm_region_t* regions;
     pmap_t* pmap;
     mutex_t lock;
-    size_t locked_bytes; // Of mlock calls, with atomic ops: nothing is pinned yet, the count only feeds RLIMIT_MEMLOCK
+    size_t locked_bytes; // Sum of locked regions, with atomic ops: nothing is pinned yet, the count only feeds RLIMIT_MEMLOCK
+    bool lock_future;    // New regions charge against RLIMIT_MEMLOCK when they appear
 };
 
 vmspace_t* vms_create(void) __nodiscard;
@@ -99,6 +101,22 @@ int vms_sync(vmspace_t* restrict vmspace, virt_addr_t start, virt_addr_t end, bo
 int vms_protect(vmspace_t* restrict vmspace, virt_addr_t start, virt_addr_t end, unsigned vprot);
 int vms_unmap_all(vmspace_t* restrict vmspace);
 int vms_clone(vmspace_t* restrict vmspace, vmspace_t* restrict source);
+
+/// Locks every page of the range against RLIMIT_MEMLOCK
+/// @retval -EINVAL The range is not page aligned, empty, or not in user space
+/// @retval -ENOMEM Part of the range is not mapped, or the limit is over
+int vms_memlock_range(vmspace_t* restrict vmspace, virt_addr_t start, virt_addr_t end);
+
+/// Unlocks every page of the range
+/// @retval -EINVAL The range is not page aligned, empty, or not in user space
+/// @retval -ENOMEM Part of the range is not mapped
+int vms_memunlock_range(vmspace_t* restrict vmspace, virt_addr_t start, virt_addr_t end);
+
+/// Applies MCL_CURRENT and MCL_FUTURE
+int vms_memlockall(vmspace_t* restrict vmspace, bool current, bool future);
+
+/// Clears every lock and MCL_FUTURE
+int vms_munlockall(vmspace_t* restrict vmspace);
 
 /// @retval VMS_FAULT_MINOR The page is mapped, and nothing waited for a device
 /// @retval VMS_FAULT_MAJOR The page is mapped, and the contents of a file came from its backing store

@@ -1,4 +1,3 @@
-#include <vex/atomic.h>
 #include <vex/capability.h>
 #include <vex/cred.h>
 #include <vex/errno.h>
@@ -8,7 +7,6 @@
 #include <vex/page.h>
 #include <vex/pmap.h>
 #include <vex/process.h>
-#include <vex/rlimit.h>
 #include <vex/shmem.h>
 #include <vex/syscall.h>
 #include <vex/thread.h>
@@ -375,21 +373,15 @@ static intptr_t sys_mlock(user_addr_t addr, uintptr_t length)
     virt_addr_t start = user_addr_to_virt(addr);
     intptr_t retval = check_range(process->vmspace, start, length);
 
-    if(retval < 0 || cred_capable(thread->credentials, CAP_IPC_LOCK)) {
+    if(retval < 0) {
         return retval;
     }
 
-    size_t bytes = page_align_up(length);
-    rlimit_t limit = process_get_rlimit(process, RLIMIT_MEMLOCK);
-    size_t locked = atomic_load_n(&process->vmspace->locked_bytes, ATOMIC_RELAXED);
-    bool overflow = locked > SIZE_MAX - bytes;
+    virt_addr_t first = page_align(start);
+    virt_addr_t end = address_add(start, length);
+    virt_addr_t last = page_align_up(end);
 
-    if(overflow || locked + bytes > limit.rlim_cur) {
-        return -ENOMEM;
-    }
-
-    atomic_fetch_add(&process->vmspace->locked_bytes, bytes, ATOMIC_RELAXED);
-    return 0;
+    return vms_memlock_range(process->vmspace, first, last);
 }
 
 define_syscall(sys_mlock, SYS_MLOCK, 2);
@@ -407,22 +399,18 @@ static intptr_t sys_munlock(user_addr_t addr, uintptr_t length)
         return 0;
     }
 
-    intptr_t retval = check_range(process->vmspace, user_addr_to_virt(addr), length);
+    virt_addr_t start = user_addr_to_virt(addr);
+    intptr_t retval = check_range(process->vmspace, start, length);
 
     if(retval < 0) {
         return retval;
     }
 
-    size_t bytes = page_align_up(length);
-    size_t locked = atomic_load_n(&process->vmspace->locked_bytes, ATOMIC_RELAXED);
-    size_t release = bytes;
+    virt_addr_t first = page_align(start);
+    virt_addr_t end = address_add(start, length);
+    virt_addr_t last = page_align_up(end);
 
-    if(locked < bytes) {
-        release = locked;
-    }
-
-    atomic_fetch_sub(&process->vmspace->locked_bytes, release, ATOMIC_RELAXED);
-    return 0;
+    return vms_memunlock_range(process->vmspace, first, last);
 }
 
 define_syscall(sys_munlock, SYS_MUNLOCK, 2);
@@ -468,13 +456,12 @@ static intptr_t sys_mremap(user_addr_t addr, uintptr_t old_size, uintptr_t new_s
 
 define_syscall(sys_mremap, SYS_MREMAP, 4);
 
-// UNDONE: As for mlock, and MCL_FUTURE
-// has to reach the mappings made later
 static intptr_t sys_mlockall(uintptr_t flags)
 {
     thread_t* thread = this_thread();
+    process_t* process = thread->process;
 
-    if(thread->process == nullptr) {
+    if(process == nullptr) {
         return -ENOSYS;
     }
 
@@ -483,7 +470,10 @@ static intptr_t sys_mlockall(uintptr_t flags)
         return -EINVAL;
     }
 
-    return 0;
+    bool current = flags & MCL_CURRENT;
+    bool future = flags & MCL_FUTURE;
+
+    return vms_memlockall(process->vmspace, current, future);
 }
 
 define_syscall(sys_mlockall, SYS_MLOCKALL, 1);
@@ -496,8 +486,7 @@ static intptr_t sys_munlockall(void)
         return -ENOSYS;
     }
 
-    atomic_store_n(&thread->process->vmspace->locked_bytes, 0, ATOMIC_RELAXED);
-    return 0;
+    return vms_munlockall(thread->process->vmspace);
 }
 
 define_syscall(sys_munlockall, SYS_MUNLOCKALL, 0);

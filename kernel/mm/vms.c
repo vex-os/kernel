@@ -1,4 +1,5 @@
 #include <vex/assert.h>
+#include <vex/atomic.h>
 #include <vex/capability.h>
 #include <vex/commit.h>
 #include <vex/cred.h>
@@ -13,6 +14,7 @@
 #include <vex/pmap.h>
 #include <vex/process.h>
 #include <vex/pslab.h>
+#include <vex/rlimit.h>
 #include <vex/rmap.h>
 #include <vex/sched.h>
 #include <vex/slab.h>
@@ -139,6 +141,7 @@ static int split_region(vmspace_t* restrict vmspace, virt_addr_t virt)
     upper->may_write = region->may_write;
     upper->device = region->device;
     upper->noreserve = region->noreserve;
+    upper->locked = region->locked;
     upper->grows_down = region->grows_down; // Only the lowest part has the free gap under it to grow into
     upper->grow_floor = region->grow_floor;
     upper->next = region->next;
@@ -219,6 +222,168 @@ static bool may_use_reserve(void)
     return cred_capable(thread->credentials, CAP_VM_NORESERVE);
 }
 
+static bool memlock_honor_limit(void)
+{
+    thread_t* thread = this_thread();
+    process_t* process = thread->process;
+
+    if(process == nullptr) {
+        return true;
+    }
+
+    return !cred_capable(thread->credentials, CAP_IPC_LOCK);
+}
+
+static size_t region_bytes(const vm_region_t* restrict region)
+{
+    return address_diff(region->end, region->start);
+}
+
+static int memlock_charge(vmspace_t* restrict vmspace, size_t bytes)
+{
+    if(0 == bytes) {
+        return 0;
+    }
+
+    if(!memlock_honor_limit()) {
+        atomic_fetch_add(&vmspace->locked_bytes, bytes, ATOMIC_RELAXED);
+        return 0;
+    }
+
+    thread_t* thread = this_thread();
+    process_t* process = thread->process;
+    rlimit_t limit = process_get_rlimit(process, RLIMIT_MEMLOCK);
+    size_t locked = atomic_load_n(&vmspace->locked_bytes, ATOMIC_RELAXED);
+    bool overflow = locked > SIZE_MAX - bytes;
+
+    if(overflow || locked + bytes > limit.rlim_cur) {
+        return -ENOMEM;
+    }
+
+    atomic_fetch_add(&vmspace->locked_bytes, bytes, ATOMIC_RELAXED);
+    return 0;
+}
+
+static void memlock_uncharge(vmspace_t* restrict vmspace, size_t bytes)
+{
+    if(0 == bytes) {
+        return;
+    }
+
+    size_t locked = atomic_load_n(&vmspace->locked_bytes, ATOMIC_RELAXED);
+    size_t release = bytes;
+
+    if(locked < bytes) {
+        release = locked;
+    }
+
+    atomic_fetch_sub(&vmspace->locked_bytes, release, ATOMIC_RELAXED);
+}
+
+static int memlock_region(vmspace_t* restrict vmspace, vm_region_t* restrict region)
+{
+    if(region->locked) {
+        return 0;
+    }
+
+    size_t bytes = region_bytes(region);
+    int retval = memlock_charge(vmspace, bytes);
+
+    if(retval < 0) {
+        return retval;
+    }
+
+    region->locked = true;
+    return 0;
+}
+
+static void memunlock_region(vmspace_t* restrict vmspace, vm_region_t* restrict region)
+{
+    if(!region->locked) {
+        return;
+    }
+
+    memlock_uncharge(vmspace, region_bytes(region));
+    region->locked = false;
+}
+
+static int apply_lock_future_locked(vmspace_t* restrict vmspace, vm_region_t* restrict region)
+{
+    if(!vmspace->lock_future) {
+        return 0;
+    }
+
+    return memlock_region(vmspace, region);
+}
+
+static int memlock_range_locked(vmspace_t* restrict vmspace, virt_addr_t start, virt_addr_t end)
+{
+    int retval = split_region(vmspace, start);
+
+    if(retval == 0) {
+        retval = split_region(vmspace, end);
+    }
+
+    if(retval < 0) {
+        return retval;
+    }
+
+    size_t needed = 0;
+
+    for(vm_region_t* it = find_region(vmspace, start); it && address_less(it->start, end); it = it->next) {
+        if(address_less(it->start, start) || address_greater_equal(it->end, end)) {
+            continue;
+        }
+
+        if(!it->locked) {
+            needed += region_bytes(it);
+        }
+    }
+
+    if(memlock_honor_limit()) {
+        thread_t* thread = this_thread();
+        process_t* process = thread->process;
+        rlimit_t limit = process_get_rlimit(process, RLIMIT_MEMLOCK);
+        size_t locked = atomic_load_n(&vmspace->locked_bytes, ATOMIC_RELAXED);
+        bool overflow = locked > SIZE_MAX - needed;
+
+        if(overflow || locked + needed > limit.rlim_cur) {
+            return -ENOMEM;
+        }
+    }
+
+    for(vm_region_t* it = find_region(vmspace, start); it && address_less(it->start, end); it = it->next) {
+        if(address_less(it->start, start) || address_greater_equal(it->end, end)) {
+            continue;
+        }
+
+        retval = memlock_region(vmspace, it);
+
+        if(retval < 0) {
+            return retval;
+        }
+    }
+
+    return 0;
+}
+
+static void memunlock_range_locked(vmspace_t* restrict vmspace, virt_addr_t start, virt_addr_t end)
+{
+    int retval = split_region(vmspace, start);
+
+    if(retval == 0) {
+        split_region(vmspace, end);
+    }
+
+    for(vm_region_t* it = find_region(vmspace, start); it && address_less(it->start, end); it = it->next) {
+        if(address_less(it->start, start) || address_greater_equal(it->end, end)) {
+            continue;
+        }
+
+        memunlock_region(vmspace, it);
+    }
+}
+
 static size_t region_pages(const vm_region_t* restrict region)
 {
     return page_count(address_diff(region->end, region->start));
@@ -251,8 +416,10 @@ static void destroy_region(vm_region_t* restrict region)
     slab_free(region);
 }
 
-static void free_region(vm_region_t* restrict region, bool deferred)
+static void free_region(vmspace_t* restrict vmspace, vm_region_t* restrict region, bool deferred)
 {
+    memunlock_region(vmspace, region);
+
     if(region_counted(region)) {
         commit_uncharge(region_pages(region));
     }
@@ -268,6 +435,27 @@ static void free_region(vm_region_t* restrict region, bool deferred)
     spinlock_release_intr(&stale_lock, intr_state);
 
     event_trigger(&stale_wakeup, true);
+}
+
+static int insert_region_with_lock_future(vmspace_t* restrict vmspace, vm_region_t* restrict region)
+{
+    insert_region(vmspace, region);
+
+    int retval = apply_lock_future_locked(vmspace, region);
+
+    if(retval < 0) {
+        vm_region_t** slot = &vmspace->regions;
+
+        while(*slot != region) {
+            kassert(*slot);
+            slot = &(*slot)->next;
+        }
+
+        *slot = region->next;
+        free_region(vmspace, region, false);
+    }
+
+    return retval;
 }
 
 static int unshare_locked(vmspace_t* restrict vmspace, const vm_region_t* restrict region, virt_addr_t page)
@@ -380,7 +568,23 @@ static vm_region_t* grow_stack_locked(vmspace_t* restrict vmspace, virt_addr_t p
         return nullptr;
     }
 
+    virt_addr_t old_start = stack->start;
     stack->start = page;
+
+    if(stack->locked) {
+        size_t added = address_diff(old_start, page);
+        int lock_retval = memlock_charge(vmspace, added);
+
+        if(lock_retval < 0) {
+            stack->start = old_start;
+
+            if(region_counted(stack)) {
+                commit_uncharge(pages);
+            }
+
+            return nullptr;
+        }
+    }
 
     return stack;
 }
@@ -634,7 +838,7 @@ static void unmap_all_locked(vmspace_t* restrict vmspace, bool shootdown, bool d
         vmspace->regions = region->next;
 
         release_pages(vmspace, region, batch, &count, shootdown);
-        free_region(region, deferred);
+        free_region(vmspace, region, deferred);
     }
 
     free_batch(batch, &count, shootdown);
@@ -669,7 +873,7 @@ static int unmap_locked(vmspace_t* restrict vmspace, virt_addr_t start, virt_add
         *prev = region->next;
 
         release_pages(vmspace, region, batch, &count, true);
-        free_region(region, false);
+        free_region(vmspace, region, false);
     }
 
     free_batch(batch, &count, true);
@@ -725,6 +929,7 @@ static vm_region_t* alloc_region(virt_addr_t start, virt_addr_t end, unsigned vp
     region->may_write = true;
     region->device = false;
     region->noreserve = flags & VMS_NORESERVE;
+    region->locked = false;
 
     if(backing && backing->file) {
         region->file = file_dupe(backing->file);
@@ -780,6 +985,7 @@ vmspace_t* vms_create(void)
 
     vmspace->regions = nullptr;
     vmspace->locked_bytes = 0;
+    vmspace->lock_future = false;
     mutex_init(&vmspace->lock);
 
     return vmspace;
@@ -812,15 +1018,15 @@ int vms_map(vmspace_t* restrict vmspace, virt_addr_t start, virt_addr_t end, uns
 
     if(!range_free(vmspace, start, end)) {
         mutex_release(&vmspace->lock);
-        free_region(region, false);
+        free_region(vmspace, region, false);
         return -EEXIST;
     }
 
-    insert_region(vmspace, region);
+    int lock_retval = insert_region_with_lock_future(vmspace, region);
 
     mutex_release(&vmspace->lock);
 
-    return 0;
+    return lock_retval;
 }
 
 int vms_map_stack(vmspace_t* restrict vmspace, virt_addr_t floor, virt_addr_t start, virt_addr_t end, unsigned vprot)
@@ -862,15 +1068,15 @@ int vms_map_replace(vmspace_t* restrict vmspace, virt_addr_t start, virt_addr_t 
 
     if(retval < 0) {
         mutex_release(&vmspace->lock);
-        free_region(region, false);
+        free_region(vmspace, region, false);
         return retval;
     }
 
-    insert_region(vmspace, region);
+    int lock_retval = insert_region_with_lock_future(vmspace, region);
 
     mutex_release(&vmspace->lock);
 
-    return 0;
+    return lock_retval;
 }
 
 int vms_map_any(vmspace_t* restrict vmspace, size_t size, unsigned vprot, unsigned flags, const vm_backing_t* restrict backing,
@@ -890,12 +1096,18 @@ int vms_map_any(vmspace_t* restrict vmspace, size_t size, unsigned vprot, unsign
 
     if(!find_highest_gap(vmspace, size, &region->start)) {
         mutex_release(&vmspace->lock);
-        free_region(region, false);
+        free_region(vmspace, region, false);
         return -ENOMEM;
     }
 
     region->end = address_add(region->start, size);
-    insert_region(vmspace, region);
+
+    int lock_retval = insert_region_with_lock_future(vmspace, region);
+
+    if(lock_retval < 0) {
+        mutex_release(&vmspace->lock);
+        return lock_retval;
+    }
 
     *out = region->start;
 
@@ -988,6 +1200,7 @@ static int move_locked(vmspace_t* restrict vmspace, virt_addr_t start, size_t ol
     }
 
     const vm_region_t* source = find_region(vmspace, start);
+    bool was_locked = source->locked;
     vm_backing_t backing = {};
     backing.file = source->file;
     backing.file_offset = source->file_offset;
@@ -1013,7 +1226,7 @@ static int move_locked(vmspace_t* restrict vmspace, virt_addr_t start, size_t ol
     }
 
     if(!find_highest_gap(vmspace, new_size, &region->start)) {
-        free_region(region, false);
+        free_region(vmspace, region, false);
         return -ENOMEM;
     }
 
@@ -1032,6 +1245,15 @@ static int move_locked(vmspace_t* restrict vmspace, virt_addr_t start, size_t ol
     }
 
     unmap_locked(vmspace, start, old_end);
+
+    if(was_locked) {
+        retval = memlock_region(vmspace, region);
+
+        if(retval < 0) {
+            unmap_locked(vmspace, target, region->end);
+            return retval;
+        }
+    }
 
     *out = target;
 
@@ -1334,6 +1556,7 @@ int vms_clone(vmspace_t* restrict vmspace, vmspace_t* restrict source)
 
         region->grows_down = it->grows_down;
         region->grow_floor = it->grow_floor;
+        region->locked = it->locked;
         region->next = nullptr;
         *tail = region;
         tail = &region->next;
@@ -1375,6 +1598,11 @@ int vms_clone(vmspace_t* restrict vmspace, vmspace_t* restrict source)
         tlb_shootdown();
     }
 
+    if(retval == 0) {
+        vmspace->lock_future = source->lock_future;
+        atomic_store_n(&vmspace->locked_bytes, atomic_load_n(&source->locked_bytes, ATOMIC_RELAXED), ATOMIC_RELAXED);
+    }
+
     mutex_release(&source->lock);
 
     if(retval < 0) {
@@ -1382,6 +1610,106 @@ int vms_clone(vmspace_t* restrict vmspace, vmspace_t* restrict source)
     }
 
     return retval;
+}
+
+int vms_memlock_range(vmspace_t* restrict vmspace, virt_addr_t start, virt_addr_t end)
+{
+    if(!range_valid(vmspace, start, end)) {
+        return -EINVAL;
+    }
+
+    mutex_acquire(&vmspace->lock);
+
+    if(!range_covered(vmspace, start, end)) {
+        mutex_release(&vmspace->lock);
+        return -ENOMEM;
+    }
+
+    int retval = memlock_range_locked(vmspace, start, end);
+
+    mutex_release(&vmspace->lock);
+
+    return retval;
+}
+
+int vms_memunlock_range(vmspace_t* restrict vmspace, virt_addr_t start, virt_addr_t end)
+{
+    if(!range_valid(vmspace, start, end)) {
+        return -EINVAL;
+    }
+
+    mutex_acquire(&vmspace->lock);
+
+    if(!range_covered(vmspace, start, end)) {
+        mutex_release(&vmspace->lock);
+        return -ENOMEM;
+    }
+
+    memunlock_range_locked(vmspace, start, end);
+
+    mutex_release(&vmspace->lock);
+
+    return 0;
+}
+
+int vms_memlockall(vmspace_t* restrict vmspace, bool current, bool future)
+{
+    mutex_acquire(&vmspace->lock);
+
+    if(future) {
+        vmspace->lock_future = true;
+    }
+
+    if(current) {
+        size_t needed = 0;
+
+        for(vm_region_t* it = vmspace->regions; it; it = it->next) {
+            if(!it->locked) {
+                needed += region_bytes(it);
+            }
+        }
+
+        if(memlock_honor_limit()) {
+            thread_t* thread = this_thread();
+            process_t* process = thread->process;
+            rlimit_t limit = process_get_rlimit(process, RLIMIT_MEMLOCK);
+            size_t locked = atomic_load_n(&vmspace->locked_bytes, ATOMIC_RELAXED);
+            bool overflow = locked > SIZE_MAX - needed;
+
+            if(overflow || locked + needed > limit.rlim_cur) {
+                mutex_release(&vmspace->lock);
+                return -ENOMEM;
+            }
+        }
+
+        for(vm_region_t* it = vmspace->regions; it; it = it->next) {
+            int retval = memlock_region(vmspace, it);
+
+            if(retval < 0) {
+                mutex_release(&vmspace->lock);
+                return retval;
+            }
+        }
+    }
+
+    mutex_release(&vmspace->lock);
+
+    return 0;
+}
+
+int vms_munlockall(vmspace_t* restrict vmspace)
+{
+    mutex_acquire(&vmspace->lock);
+
+    vmspace->lock_future = false;
+
+    for(vm_region_t* it = vmspace->regions; it; it = it->next) {
+        memunlock_region(vmspace, it);
+    }
+
+    mutex_release(&vmspace->lock);
+
+    return 0;
 }
 
 int vms_fault(vmspace_t* restrict vmspace, virt_addr_t virt, unsigned access)

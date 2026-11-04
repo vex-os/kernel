@@ -172,8 +172,10 @@ through the user mapping, and only while that address space is loaded.
   another one is marked `UNDONE` in `access_begin_locked()`.
 - `vms_protect()` cannot add write where `may_write` is false, and it
   removes write from a shared page.
-- `locked_bytes` counts `mlock` requests for `RLIMIT_MEMLOCK`. It pins
-  nothing.
+- `locked_bytes` counts locked regions against `RLIMIT_MEMLOCK`. Each
+  `vm_region_t` has a `locked` bit. `mlock`, `munlock`, and `mlockall` split
+  regions at range edges. `MCL_FUTURE` charges new mappings. Nothing is pinned
+  yet.
 
 ## Source
 
